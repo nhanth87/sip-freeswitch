@@ -110,7 +110,7 @@ public final class ProxySbb implements Sbb, SleeEventHandler {
             metrics.onInvite();
         }
         LOG.debug("[ProxySbb] INVITE callId={} peer={} domain={}", e.callId(), peer, extractDomain(e.toUri()));
-        send(new SendInvite(e.callId(), freeswitchTrunkUri, e.fromUri(), e.sdpBody()));
+        send(new SendInvite(e.callId(), freeswitchTrunkUri, e.fromUri(), e.sdpBody(), e.imsHeaders()));
     }
 
     void onBye(SipByeEvent e) {
