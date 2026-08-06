@@ -1,0 +1,19 @@
+# FreeSWITCH lab — dialplan/media only (not 10k CPS plane).
+# Host maps 5062 → container 5060 so sip-servlet can keep :5060.
+
+services:
+  freeswitch:
+    image: safarov/freeswitch:latest
+    container_name: digicom-freeswitch-lab
+    restart: unless-stopped
+    ports:
+      - "5062:5060/udp"
+      - "5062:5060/tcp"
+      - "8021:8021"
+      - "16384-16484:16384-16484/udp"
+    volumes:
+      - freeswitch-data:/etc/freeswitch
+    # Lab only — lock down before any shared network exposure.
+
+volumes:
+  freeswitch-data:

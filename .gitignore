@@ -1,0 +1,14 @@
+target/
+**/target/
+.tmp/
+.idea/
+*.iml
+.vscode/
+*.log
+.DS_Store
+CARGO_TARGET_DIR/
+**/node_modules/
+dist/*.jar
+dist/sip-freeswitch/bin/
+*.wasm.bak
+.quarkus/
