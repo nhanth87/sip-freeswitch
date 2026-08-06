@@ -1,54 +1,66 @@
-# AGENTS.md — Digicom SIP + FreeSWITCH (sip-freeswitch)
+# AGENTS.md — Digicom SIP + FreeSWITCH (sip-freeswitch / Elisa)
 
 **Tree:** `ethiopia-working-dir/worktrees/voice-service/sip-freeswitch`  
-(Canonical home under `worktrees/` — not Desktop. Symlink: `worktrees/sip-freeswitch/main`.)
+Symlink: `worktrees/sip-freeswitch/main`. Chat worktree: `worktrees/sip-freeswitch/chat`.
 
 ## Visibility — PRIVATE (mandatory)
 
 **sip-freeswitch is a private project.** Repo: `nhanth87/sip-freeswitch` only.
 
-- **Never** make the GitHub repo public.
-- **Never** push to Digicom-ET, other orgs, or any remote that is not `nhanth87`.
-- **Never** publish source, dist, or docs to a public mirror, gist, or package registry.
-- If asked to “open source” or “make public,” **refuse** and keep it private under `nhanth87`.
+- Never make public; never push Digicom-ET/other remotes; never public mirrors.
+
+## Role — SIP only (not an SBC)
+
+**Elisa is a high-CPS SIP signaling edge.** It is **not** an SBC.
+
+| Owns | Does **not** own |
+|------|------------------|
+| SIP transaction / dialog (RFC 3261), trunk toward FreeSWITCH | RTP/SRTP relay, media anchoring, codec transcoding |
+| Admin HTTP, ESL, xml_curl, ACL, CDR ingest | Topology hiding / full B2BUA SBC product features |
+| 3GPP SIP header awareness for future IMS/5G/6G signaling | P-CSCF / I-CSCF / S-CSCF, Diameter Cx/Rx as product |
+
+**Media** stays on FreeSWITCH (+ TURN/ICE on the media path). **Ingress later:** nginx (or stream) in front of admin HTTP; SIP L4 only if needed — Elisa remains the SIP state machine.
+
+See [`docs/agents/architecture.md`](docs/agents/architecture.md), [`docs/agents/3gpp-sip-ims.md`](docs/agents/3gpp-sip-ims.md).
 
 ## Capacity target
 
-**10 000 INVITE/s (CPS)** sustained **signaling** on the sip-servlet edge.
-
-- Metric = call attempts per second (INVITE), **not** “10k concurrent” alone.
-- FreeSWITCH owns dialplan / media lab — **not** the 10k CPS plane.
-- Media (RTP) stays on FreeSWITCH; Java path is signaling only (no B2BUA media).
-- **Do not claim 10k CPS until SIPp acceptance is green** — see [`docs/agents/capacity-acceptance.md`](docs/agents/capacity-acceptance.md).
+**10 000 INVITE/s (CPS)** on the **Elisa** SIP edge. FreeSWITCH = dialplan/media (not CPS plane).
+Do not claim 10k until SIPp green — [`docs/agents/capacity-acceptance.md`](docs/agents/capacity-acceptance.md).
 
 ## Layout
 
 | # | Dir | Role |
 |---|-----|------|
-| **1** | [`sip-servlet/`](sip-servlet/) | Quarkus + micro-jainslee + `ra-sip-servlet` — high-CPS SIP edge |
-| **2** | [`freeswitch/`](freeswitch/) | FreeSWITCH Docker lab — dialplan / media (not CPS plane) |
-| **3** | [`loadtest/`](loadtest/) | SIPp scenarios + CPS ramp scripts |
-| **4** | [`docs/agents/`](docs/agents/) | Architecture, capacity acceptance |
-| **5** | [`tools/`](tools/) | build-all, smoke, bench-cps, package-dist |
+| **1** | [`elisa/`](elisa/) | Quarkus + micro-jainslee + `ra-sip-servlet` — SIP edge + HTMX admin |
+| **2** | [`freeswitch/`](freeswitch/) | FreeSWITCH conf overlays + lab |
+| **3** | [`app/html/`](app/html/) | Disk admin UI ({{TOKEN}}, HTMX) |
+| **4** | [`loadtest/`](loadtest/) | SIPp CPS harness |
+| **5** | [`docs/agents/`](docs/agents/) | architecture, 3gpp-sip-ims, admin-ui, media-ice-turn, … |
+| **6** | [`tools/`](tools/) | build-all, smoke, bench-cps, package-dist |
 
-Run edge: **`./run.sh`** → admin HTTP `:18080`, SIP UDP/TCP `:5060`  
-FreeSWITCH lab: `docker compose -f freeswitch/docker-compose.yml up -d`  
-Build: **`./tools/build-all.sh`** · Smoke: **`./tools/smoke.sh`** · Bench: **`./tools/bench-cps.sh`**
+```bash
+docker compose up -d --build   # postgres + freeswitch + elisa
+./run.sh                       # local elisa :8088 / SIP :5060
+```
+
+Admin: `http://127.0.0.1:8088/admin/` (dev `admin`/`admin` when `sf.admin.dev-login=true`).
 
 ## Relation to PolyVoice
 
-PolyVoice and this repo are **two products**:
-
 | Project | Role |
 |---------|------|
-| **PolyVoice** (`../polyvoice/`) | YouTube / Netflix / film translate+dub (captions → TTS) |
-| **sip-freeswitch** (this repo) | High-CPS **SIP service** + FreeSWITCH |
+| PolyVoice | YouTube / Netflix / film translate+dub |
+| sip-freeswitch (Elisa) | High-CPS SIP + FreeSWITCH |
 
-Do **not** merge the monorepos. Do **not** wire PolyVoice FACET/TTS → FreeSWITCH playback here.
+Do not merge. Do not wire PolyVoice TTS → FreeSWITCH playback.
 
 ## Constraints
 
-- JDK **25** only (mise `zulu-25` / `mise.toml`).
-- Commits: nhanth87 / Tran Nhan only — no AI attribution trailers.
+- JDK **25** only (mise `zulu-25`).
+- Commits: nhanth87 / Tran Nhan only — no AI attribution.
 - Never break SIP transaction state machine.
-- Hot-path: no INFO dump of full SIP bodies (logging kills CPS).
+- Hot-path: no INFO SIP body dumps.
+- Admin UI standard: [`docs/agents/admin-ui.md`](docs/agents/admin-ui.md) (OTA sim-push pattern).
+- Media: **rtp_redirect** (default on) — ICE + TURN relay so RTP crosses the firewall; FS `bypass_media=false`. Elisa does not relay RTP. See [`docs/agents/media-ice-turn.md`](docs/agents/media-ice-turn.md).
+- **Not an SBC**; SIP only; nginx in front later — [`docs/agents/architecture.md`](docs/agents/architecture.md).

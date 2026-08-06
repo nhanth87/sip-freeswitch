@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <script>(function(){try{document.documentElement.dataset.theme=localStorage.getItem('sf-theme')||'dark'}catch(_){}})()</script>
+  <title>Elisa SIP ACL</title>
+  <link rel="stylesheet" href="/admin/static/admin.css"/>
+  <script src="/admin/static/htmx.min.js"></script>
+  <script defer src="/admin/static/alpine.min.js"></script>
+  <script defer src="/admin/static/sf-shell.js"></script>
+</head>
+<body x-data>
+<header><b class="signal">ELISA</b> {{NAV_LINKS}} {{AUTH_NAV}}</header>
+<main>
+  <h1>SIP ingress ACL</h1>
+  <p class="hint">
+    Chỉ IP/CIDR <b>allow</b> (approved) mới được gửi SIP vào Elisa.
+    Peer không nằm trong allowlist → <code>403 Forbidden</code>.
+    Deny thắng allow nếu trùng. Seed lab: loopback + RFC1918 private ranges.
+  </p>
+  <form class="form-card" method="post" action="/admin/acl">
+    <label>CIDR / IP
+      <input name="cidr" required placeholder="203.0.113.10/32 or 198.51.100.0/24"/>
+    </label>
+    <label>Action
+      <select name="action">
+        <option value="allow" selected>allow (approve)</option>
+        <option value="deny">deny (block)</option>
+      </select>
+    </label>
+    <button type="submit">Add rule</button>
+  </form>
+  <p>
+    <button type="button" @click="Alpine.store('sf').postJson('/admin/acl/reload','')">Reload ACL into edge</button>
+  </p>
+  <section hx-get="/admin/partial/acl-rows" hx-trigger="load, every 10s">Loading…</section>
+</main>
+</body>
+</html>

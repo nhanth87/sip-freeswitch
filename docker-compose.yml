@@ -1,0 +1,68 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: elisa
+      POSTGRES_USER: elisa
+      POSTGRES_PASSWORD: elisa
+    volumes: [sf-postgres:/var/lib/postgresql/data]
+    networks: [sf-net]
+
+  # TURN/STUN for media — UAs must use relay when sf.media.require-turn=true
+  coturn:
+    image: coturn/coturn:4.6.2
+    command:
+      - -n
+      - --log-file=stdout
+      - --listening-port=3478
+      - --fingerprint
+      - --lt-cred-mech
+      - --user=elisa:elisaturn
+      - --realm=sip-freeswitch.lab
+      - --no-cli
+      - --no-tls
+      - --no-dtls
+      - --listening-ip=0.0.0.0
+      - --relay-ip=0.0.0.0
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+    networks: [sf-net]
+
+  freeswitch:
+    image: safarov/freeswitch:latest
+    depends_on: [coturn]
+    volumes:
+      - ./freeswitch/conf/autoload_configs/event_socket.conf.xml:/etc/freeswitch/autoload_configs/event_socket.conf.xml:ro
+      - ./freeswitch/conf/autoload_configs/xml_curl.conf.xml:/etc/freeswitch/autoload_configs/xml_curl.conf.xml:ro
+      - ./freeswitch/conf/sip_profiles/external.xml:/etc/freeswitch/sip_profiles/external.xml:ro
+    ports: ["5062:5060/udp", "5062:5060/tcp", "8021:8021", "16384-16484:16384-16484/udp"]
+    networks: [sf-net]
+
+  elisa:
+    build: ./elisa
+    depends_on: [postgres, freeswitch, coturn]
+    environment:
+      SF_JDBC_URL: jdbc:postgresql://postgres:5432/elisa
+      SF_DB_USER: elisa
+      SF_DB_PASSWORD: elisa
+      SF_ESL_HOST: freeswitch
+      SF_TRUNK_FREESWITCH_URI: sip:1000@freeswitch:5060
+      SF_HTML_DIR: /html
+      SF_MEDIA_RTP_REDIRECT: "true"
+      SF_MEDIA_REQUIRE_TURN: "true"
+      SF_MEDIA_ICE_REQUIRED: "true"
+      SF_MEDIA_TURN_URI: turn:coturn:3478
+      SF_MEDIA_TURN_USERNAME: elisa
+      SF_MEDIA_TURN_CREDENTIAL: elisaturn
+      SF_MEDIA_STUN_URI: stun:coturn:3478
+      SIP_RA_ICE_ENABLED: "true"
+      SIP_RA_STUN_SERVER: coturn
+      SIP_RA_STUN_PORT: "3478"
+    volumes:
+      - ./app/html:/html:ro
+    ports: ["8088:8088", "5060:5060/udp", "5060:5060/tcp"]
+    networks: [sf-net]
+
+networks: {sf-net: {}}
+volumes: {sf-postgres: {}}

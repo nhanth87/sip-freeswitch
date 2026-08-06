@@ -1,0 +1,1 @@
+<configuration name="xml_curl.conf" description="XML CURL"><bindings><binding name="elisa"><param name="gateway-url" value="http://elisa:8088/fs/xml"/><param name="bindings" value="directory|dialplan"/></binding></bindings></configuration>

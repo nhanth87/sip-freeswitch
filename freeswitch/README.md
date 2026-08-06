@@ -1,30 +1,14 @@
-# FreeSWITCH lab (dialplan / media)
+# FreeSWITCH lab overlays
 
-**Not the 10k CPS plane.** FreeSWITCH owns dialplan + RTP. sip-servlet edge trunks here.
+Bind-mounted from root `docker-compose.yml`:
 
-## Compose
+- `conf/autoload_configs/event_socket.conf.xml` — ESL (password ClueCon)
+- `conf/autoload_configs/xml_curl.conf.xml` — fetch from elisa:8088/fs/xml
+- `conf/sip_profiles/external.xml` — external Sofia profile
 
 ```bash
-docker compose -f freeswitch/docker-compose.yml up -d
+# from monorepo root
+docker compose up -d freeswitch
 ```
 
-| Port | Role |
-|------|------|
-| `5062/udp+tcp` | FreeSWITCH SIP (host) — avoids clash with edge `:5060` |
-| `8021` | ESL (lab) |
-| `16384-16484/udp` | RTP range (lab-sized) |
-
-## Trunk peer
-
-Edge default (`application.properties`):
-
-```
-sip.trunk.freeswitch-uri=sip:1000@127.0.0.1:5062
-sip.trunk.domain=freeswitch.lab
-```
-
-Point FreeSWITCH Sofia external profile / ACL at the host IP running sip-servlet `:5060` when bridging real calls.
-
-## Capacity note
-
-Scale media with FreeSWITCH (or a farm). Claim **10 000 INVITE/s** only against the Java edge via SIPp — see `docs/agents/capacity-acceptance.md`.
+Not the 10k CPS plane — Elisa owns signaling rate.

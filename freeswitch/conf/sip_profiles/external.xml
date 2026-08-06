@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- External Sofia: ICE on; accept client TURN relay candidates; STUN for ext-rtp -->
+<include>
+  <profile name="external">
+    <settings>
+      <param name="sip-ip" value="0.0.0.0"/>
+      <param name="rtp-ip" value="$${local_ip_v4}"/>
+      <!-- Public/srflx via STUN when behind NAT; override SF_EXT_RTP_IP in compose if needed -->
+      <param name="ext-rtp-ip" value="stun:stun.l.google.com"/>
+      <param name="ext-sip-ip" value="stun:stun.l.google.com"/>
+      <param name="sip-port" value="5060"/>
+      <param name="context" value="public"/>
+      <!-- rtp_redirect: never direct UE↔UE media; RTP via FS / TURN through firewall -->
+      <param name="inbound-bypass-media" value="false"/>
+      <param name="inbound-proxy-media" value="false"/>
+      <!-- Full ICE agent — UA must supply TURN relay when Elisa rtp_redirect is on -->
+      <param name="inbound-late-negotiation" value="false"/>
+      <!-- Accept WAN + private + TURN relay addresses offered by peer -->
+      <param name="apply-candidate-acl" value="wan.auto"/>
+      <param name="apply-nat-acl" value="nat.auto"/>
+      <param name="aggressive-nat-detection" value="true"/>
+    </settings>
+  </profile>
+</include>

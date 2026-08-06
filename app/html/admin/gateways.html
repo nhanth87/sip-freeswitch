@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <script>(function(){try{document.documentElement.dataset.theme=localStorage.getItem('sf-theme')||'dark'}catch(_){}})()</script>
+  <title>Elisa Gateways</title>
+  <link rel="stylesheet" href="/admin/static/admin.css"/>
+  <script src="/admin/static/htmx.min.js"></script>
+  <script defer src="/admin/static/alpine.min.js"></script>
+  <script defer src="/admin/static/sf-shell.js"></script>
+</head>
+<body x-data>
+<header><b class="signal">ELISA</b> {{NAV_LINKS}} {{AUTH_NAV}}</header>
+<main>
+  <h1>Gateways / Trunks</h1>
+  <form class="form-card" method="post" action="/admin/gateways">
+    <label>Name <input name="name" required/></label>
+    <label>Profile <input name="profile" value="external"/></label>
+    <button type="submit">Add gateway</button>
+  </form>
+  <section hx-get="/admin/partial/gateway-rows" hx-trigger="load, every 10s">Loading…</section>
+</main>
+</body>
+</html>
