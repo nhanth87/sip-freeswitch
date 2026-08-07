@@ -118,7 +118,9 @@ public final class ProxySbb implements Sbb, SleeEventHandler {
             metrics.onDialogEnd();
         }
         LOG.debug("[ProxySbb] BYE callId={}", e.callId());
+        // Far leg first (needs dialog.remotePeer), then 200 OK to UA (RFC 3261 §15.1.2).
         send(new SendBye(e.callId()));
+        send(new SendResponse(e.callId(), 200, "OK"));
     }
 
     void onAck(SipAckEvent e) {
