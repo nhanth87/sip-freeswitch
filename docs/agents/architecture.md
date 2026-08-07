@@ -26,6 +26,9 @@ flowchart LR
 | **freeswitch** | Dialplan, media, Sofia |
 | **coturn / ICE** | **rtp_redirect** media path through firewall (TURN relay) — not Elisa RTP |
 | **postgres** | Config, tenants, extensions, CDR |
+| **Infinispan** | Dialog/session checkpoints (C1); PG remains config/CDR SoT |
+
+Cluster VIP + Sofia affinity: [`cluster-c2-vip-affinity.md`](cluster-c2-vip-affinity.md).
 
 ## Explicit non-goals (SBC)
 

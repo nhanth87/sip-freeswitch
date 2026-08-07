@@ -1,1 +1,59 @@
-<!doctype html><html><head><script>(function(){document.documentElement.dataset.theme=localStorage.getItem('sf-theme')||'dark'})()</script><title>Elisa IVR</title><link rel="stylesheet" href="/admin/static/admin.css"><script src="/admin/static/htmx.min.js"></script><script defer src="/admin/static/alpine.min.js"></script><script defer src="/admin/static/sf-shell.js"></script></head><body x-data><header><b class="signal">ELISA</b> {{NAV_LINKS}} {{AUTH_NAV}}</header><main><h1>IVR</h1><section>IVR applications are configured through config documents.</section></main></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>ELISA IVR</title>
+  <script>(function(){try{var t=localStorage.getItem('sf-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);else document.documentElement.setAttribute('data-theme','dark')}catch(e){document.documentElement.setAttribute('data-theme','dark')}})()</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/admin/static/admin.css"/>
+  <script src="/admin/static/htmx.min.js"></script>
+  <script defer src="/admin/static/sf-shell.js"></script>
+  <script defer src="/admin/static/alpine.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
+</head>
+<body class="sf-app" x-data="sfShell()">
+<div class="sf-layout" :class="{'rail-collapsed': railCollapsed, 'rail-open': mobileOpen}">
+  {{NAV_RAIL}}
+  <div class="sf-content">
+    <div class="sf-topbar">
+      <div style="display:flex;gap:.75rem;align-items:center">
+        <button type="button" class="btn btn-ghost" @click="toggleMobile()" aria-label="Menu">☰</button>
+        <span class="hx-live-badge">HTMX</span>
+      </div>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">{{AUTH_NAV}}</div>
+    </div>
+    <main class="sf-main">
+
+<p class="eyebrow">Management</p>
+<div class="ops-section-indent" x-data="{showXml:false}">
+  <h1>IVR menus</h1>
+  <p class="hint">Normalized menus + digit entries. xml_curl: <code class="mono">/admin/ivr/xml/{tenant}/{name}</code>. Optional Monaco override.</p>
+  <form class="panel" method="post" action="/admin/ivr/menus" style="margin:1rem 0;display:grid;gap:.5rem;max-width:40rem">
+    <label>Tenant id <input name="tenantId" class="mono" required/></label>
+    <label>Menu name <input name="name" value="main" required/></label>
+    <label>Greeting prompt / file <input name="greeting" placeholder="ivr/welcome.wav"/></label>
+    <label>Timeout ms <input name="timeoutMs" type="number" value="5000"/></label>
+    <label><input type="checkbox" @change="showXml=$event.target.checked"/> Edit XML override (Monaco)</label>
+    <div x-show="showXml">
+      <label>xml_override <textarea id="ivr-xml" name="xmlOverride" class="mono" rows="8" placeholder="<!-- optional full FreeSWITCH XML -->"></textarea></label>
+    </div>
+    <button class="btn btn-primary" type="submit">Create menu</button>
+  </form>
+  <form class="panel" method="post" action="/admin/ivr/entries" style="margin:1rem 0;display:grid;gap:.5rem;max-width:28rem">
+    <label>Menu id <input name="menuId" type="number" required/></label>
+    <label>Digit <input name="digit" class="mono" required placeholder="1"/></label>
+    <label>Action <input name="action" value="transfer"/></label>
+    <label>Destination <input name="destination" class="mono" placeholder="1000"/></label>
+    <button class="btn btn-line" type="submit">Add digit entry</button>
+  </form>
+  <div class="table-wrap" hx-get="/admin/partial/ivr-rows" hx-trigger="load" hx-swap="innerHTML">Loading…</div>
+</div>
+
+    </main>
+  </div>
+</div>
+</body>
+</html>

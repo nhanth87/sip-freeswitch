@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>ELISA FS Control</title>
+  <script>(function(){try{var t=localStorage.getItem('sf-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);else document.documentElement.setAttribute('data-theme','dark')}catch(e){document.documentElement.setAttribute('data-theme','dark')}})()</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/admin/static/admin.css"/>
+  <script src="/admin/static/htmx.min.js"></script>
+  <script defer src="/admin/static/sf-shell.js"></script>
+  <script defer src="/admin/static/alpine.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
+</head>
+<body class="sf-app" x-data="sfShell()">
+<div class="sf-layout" :class="{'rail-collapsed': railCollapsed, 'rail-open': mobileOpen}">
+  {{NAV_RAIL}}
+  <div class="sf-content">
+    <div class="sf-topbar">
+      <div style="display:flex;gap:.75rem;align-items:center">
+        <button type="button" class="btn btn-ghost" @click="toggleMobile()" aria-label="Menu">☰</button>
+        <span class="hx-live-badge">FS Control</span>
+      </div>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">{{AUTH_NAV}}</div>
+    </div>
+    <main class="sf-main" x-data="fsControl()">
+      <p class="eyebrow">Management</p>
+      <div class="ops-section-indent">
+        <h1>FreeSWITCH control</h1>
+        <p class="hint">Jail: <code class="mono">{{CONF_ROOT}}</code> (exists={{CONF_OK}}). Soft reload + hard restart (G13d).</p>
+
+        <div class="panel" style="margin-top:1rem"
+             hx-get="/admin/fs-control/detail"
+             hx-trigger="load, every 10s"
+             hx-swap="innerHTML">Loading FS detail…</div>
+
+        <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin:1rem 0" x-data="{busy:false}">
+          <button type="button" class="btn btn-primary" :disabled="busy"
+                  @click="busy=true; const r=await $store.sf.postJson('/admin/fs-control/soft-reload',''); $store.sf.toast(r.ok?'Soft reload done':(r.data&&r.data.message)||'Failed', r.ok?'ok':'error'); busy=false">
+            Soft reload (reloadxml)
+          </button>
+          <button type="button" class="btn btn-danger" :disabled="busy"
+                  @click="if(!confirm('Hard restart FreeSWITCH container? Active calls will drop.')) return; busy=true; const r=await $store.sf.postJson('/admin/fs-control/hard-restart',''); $store.sf.toast(r.ok?'Hard restart done':(r.data&&r.data.message)||'Failed', r.ok?'ok':'error'); busy=false">
+            Hard restart
+          </button>
+        </div>
+
+        <div class="panel" style="margin-bottom:1rem">
+          <label style="margin:0">New directory (relative under conf)
+            <div style="display:flex;gap:.5rem;margin-top:.35rem">
+              <input x-model="newDir" class="mono" placeholder="sip_profiles/custom"/>
+              <button type="button" class="btn btn-line" @click="mkdir()">Create</button>
+            </div>
+          </label>
+        </div>
+
+        <div class="fs-editor-grid">
+          <div id="fs-tree" class="fs-tree"
+               @click="onTreeClick($event)"
+               hx-get="/admin/fs-control/tree"
+               hx-trigger="load"
+               hx-swap="innerHTML">Loading tree…</div>
+          <div class="fs-editor-pane">
+            <div class="fs-editor-toolbar">
+              <span class="mono" x-text="path || 'Select a file'"></span>
+              <button type="button" class="btn btn-primary" :disabled="!path" @click="saveFile()">Save</button>
+            </div>
+            <div id="fs-monaco"></div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+<script>
+function fsControl() {
+  return {
+    path: '',
+    newDir: '',
+    editor: null,
+    init() {
+      const self = this;
+      require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs' } });
+      require(['vs/editor/editor.main'], function () {
+        self.editor = monaco.editor.create(document.getElementById('fs-monaco'), {
+          value: '// select a file under freeswitch/conf\n',
+          language: 'xml',
+          theme: document.documentElement.getAttribute('data-theme') === 'light' ? 'vs' : 'vs-dark',
+          automaticLayout: true,
+          minimap: { enabled: false },
+          fontFamily: 'JetBrains Mono, ui-monospace, monospace',
+          fontSize: 13
+        });
+      });
+    },
+    onTreeClick(ev) {
+      const dir = ev.target.closest('[data-fs-dir]');
+      if (dir) {
+        const p = dir.getAttribute('data-fs-dir') || '';
+        if (window.htmx) {
+          htmx.ajax('GET', '/admin/fs-control/tree?path=' + encodeURIComponent(p), {
+            target: '#fs-tree', swap: 'innerHTML'
+          });
+        }
+        return;
+      }
+      const file = ev.target.closest('[data-fs-file]');
+      if (file) this.openFile(file.getAttribute('data-fs-file'));
+    },
+    async openFile(path) {
+      const url = window.SfAdmin.withKeyQuery('/admin/fs-control/file?path=' + encodeURIComponent(path));
+      const r = await fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } });
+      const data = await r.json();
+      if (!data.ok) {
+        window.SfAdmin.toast(data.message || 'Open failed', 'error');
+        return;
+      }
+      this.path = data.path;
+      if (this.editor) {
+        const lang = path.endsWith('.json') ? 'json' : (path.endsWith('.md') ? 'markdown' : 'xml');
+        monaco.editor.setModelLanguage(this.editor.getModel(), lang);
+        this.editor.setValue(data.content || '');
+      }
+    },
+    async saveFile() {
+      if (!this.path || !this.editor) return;
+      if (!confirm('Save ' + this.path + '?')) return;
+      const r = await window.SfAdmin.postJson('/admin/fs-control/file', JSON.stringify({
+        path: this.path,
+        content: this.editor.getValue()
+      }));
+      window.SfAdmin.toast(r.ok ? 'Saved' : ((r.data && r.data.message) || 'Save failed'), r.ok ? 'ok' : 'error');
+    },
+    async mkdir() {
+      if (!this.newDir) return;
+      const r = await window.SfAdmin.postJson('/admin/fs-control/mkdir', JSON.stringify({ path: this.newDir }));
+      window.SfAdmin.toast(r.ok ? 'Directory created' : ((r.data && r.data.message) || 'Failed'), r.ok ? 'ok' : 'error');
+      if (r.ok && window.htmx) htmx.ajax('GET', '/admin/fs-control/tree', { target: '#fs-tree', swap: 'innerHTML' });
+    }
+  };
+}
+</script>
+</body>
+</html>

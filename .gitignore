@@ -9,6 +9,11 @@ target/
 CARGO_TARGET_DIR/
 **/node_modules/
 dist/*.jar
-dist/sip-freeswitch/bin/
+dist/**/*.jar
+dist/**/lib/
+dist/**/quarkus/
+dist/**/logs/
+dist/**/bin/
+dist/**/*.hprof
 *.wasm.bak
 .quarkus/

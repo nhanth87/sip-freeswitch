@@ -344,4 +344,20 @@ public final class FreeSwitchResourceAdaptor {
         return new EslSession(config.host(), config.port(), config.password(),
                 config.connectTimeoutMs(), config.readTimeoutMs());
     }
+
+    /**
+     * Hot-swap ESL target (paired failover). Restarts event socket with new host/port.
+     */
+    public void reconfigure(FreeSwitchRaConfig next) {
+        if (next == null) {
+            return;
+        }
+        synchronized (apiLock) {
+            this.config = next;
+            if (active.get() && config.autoSubscribe()) {
+                startEventSocket(config.subscribeEvents());
+            }
+            LOG.info("[ra-freeswitch] reconfigured ESL {}:{}", config.host(), config.port());
+        }
+    }
 }

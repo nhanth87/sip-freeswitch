@@ -14,6 +14,8 @@ import com.microjainslee.telemetry.TelemetryDispatchObserver;
 import com.microjainslee.telemetry.TelemetryPort;
 import com.microjainslee.telemetry.TelemetryRaObserver;
 import et.elisa.acl.SipIngressAclService;
+import et.elisa.cluster.DialogCheckpointStore;
+import et.elisa.cluster.FsPairRegistry;
 import et.elisa.esl.FreeSwitchRaBridge;
 import et.elisa.media.MediaIceTurnPolicy;
 import et.elisa.metrics.SipCpsMetrics;
@@ -64,6 +66,12 @@ final class ElisaBootstrap {
 
     @Inject
     FreeSwitchRaBridge freeSwitchRaBridge;
+
+    @Inject
+    FsPairRegistry fsPairRegistry;
+
+    @Inject
+    DialogCheckpointStore dialogCheckpoints;
 
     @ConfigProperty(name = "sip.ra.host", defaultValue = "0.0.0.0")
     String sipHost;
@@ -122,8 +130,14 @@ final class ElisaBootstrap {
         wireFreeSwitchRa();
         wirePrometheusRa();
         mapEventToSbb();
-        LOG.info("=== sip-freeswitch Ready — SIP UDP:{} TCP:{} trunk={} esl={}:{} ===",
-                udpPort, tcpPort, freeswitchTrunkUri, eslHost, eslPort);
+        FsPairRegistry.EslTarget primary = fsPairRegistry.primary().orElse(null);
+        LOG.info("=== sip-freeswitch Ready — SIP UDP:{} TCP:{} trunk={} esl={}:{} node={} fsNode={} checkpoints={} ===",
+                udpPort, tcpPort, freeswitchTrunkUri,
+                primary != null ? primary.host() : eslHost,
+                primary != null ? primary.port() : eslPort,
+                fsPairRegistry.nodeId(),
+                primary != null ? primary.fsNodeId() : "fallback",
+                dialogCheckpoints.enabled());
     }
 
     @PreDestroy
@@ -183,17 +197,18 @@ final class ElisaBootstrap {
     }
 
     private void wireFreeSwitchRa() {
-        FreeSwitchRaConfig cfg = new FreeSwitchRaConfig();
-        cfg.setHost(eslHost);
-        cfg.setPort(eslPort);
-        cfg.setPassword(eslPassword);
-        cfg.setAutoSubscribe(true);
+        FsPairRegistry.EslTarget target = fsPairRegistry.primary()
+                .orElseGet(() -> new FsPairRegistry.EslTarget("fallback", eslHost, eslPort, eslPassword, 0));
+        FreeSwitchRaConfig cfg = fsPairRegistry.toConfig(target);
         FreeSwitchResourceAdaptor ra = new FreeSwitchResourceAdaptor();
         freeSwitchEndpoint = new FreeSwitchRaEndpoint(ra);
         freeSwitchEndpoint.setConfig(cfg);
         container.registerRa(freeSwitchEndpoint, freeSwitchEndpoint);
         freeSwitchRaBridge.bind(ra);
-        LOG.info("FreeSWITCH RA registered ESL {}:{} name={}", eslHost, eslPort, freeSwitchEndpoint.getRaName());
+        freeSwitchRaBridge.setActiveFsNodeId(target.fsNodeId());
+        LOG.info("FreeSWITCH RA registered ESL {}:{} fsNode={} name={} (pair size={})",
+                target.host(), target.port(), target.fsNodeId(), freeSwitchEndpoint.getRaName(),
+                fsPairRegistry.targetsForThisNode().size());
     }
 
     private static String turnHost(String turnUri) {
@@ -260,12 +275,21 @@ final class ElisaBootstrap {
         SipCpsMetrics metrics = cpsMetrics;
         SipIngressAclService acl = sipAcl;
         MediaIceTurnPolicy media = mediaPolicy;
+        DialogCheckpointStore cps = dialogCheckpoints;
+        String nodeId = fsPairRegistry.nodeId();
+        String fsNode = freeSwitchRaBridge.activeFsNodeId() != null
+                ? freeSwitchRaBridge.activeFsNodeId()
+                : fsPairRegistry.primary().map(FsPairRegistry.EslTarget::fsNodeId).orElse("fallback");
         boolean preferRelay = media.requireTurn();
-        container.registerSbbType(ProxySbb.class, () -> new ProxySbb(trunk, domain, metrics, acl, media));
+        container.registerSbbType(ProxySbb.class,
+                () -> new ProxySbb(trunk, domain, metrics, acl, media, cps, nodeId,
+                        freeSwitchRaBridge.activeFsNodeId() != null
+                                ? freeSwitchRaBridge.activeFsNodeId() : fsNode));
         container.registerSbbType(RegistrationSbb.class, () -> new RegistrationSbb(acl));
         container.registerSbbType(IceNegotiationSbb.class, () -> new IceNegotiationSbb(preferRelay));
         container.registerSbbType(FreeSwitchMonitorSbb.class, FreeSwitchMonitorSbb::new);
-        LOG.info("Registered SBB types: ProxySbb, RegistrationSbb, IceNegotiationSbb, FreeSwitchMonitorSbb preferRelay={}", preferRelay);
+        LOG.info("Registered SBB types: ProxySbb, RegistrationSbb, IceNegotiationSbb, FreeSwitchMonitorSbb preferRelay={} node={}",
+                preferRelay, nodeId);
     }
 
     private void mapEventToSbb() {

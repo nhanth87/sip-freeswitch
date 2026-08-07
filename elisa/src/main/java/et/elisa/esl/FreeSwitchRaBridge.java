@@ -1,16 +1,18 @@
 package et.elisa.esl;
 
+import et.elisa.cluster.FsPairRegistry;
+import et.elisa.ra.freeswitch.FreeSwitchRaConfig;
 import et.elisa.ra.freeswitch.FreeSwitchResourceAdaptor;
 import jakarta.enterprise.context.ApplicationScoped;
 
 /**
  * CDI holder for the active {@link FreeSwitchResourceAdaptor} after bootstrap.
- * Admin {@link EslClient} bridges here until all call sites use {@code @InjectRa}.
  */
 @ApplicationScoped
 public class FreeSwitchRaBridge {
 
     private volatile FreeSwitchResourceAdaptor adaptor;
+    private volatile String activeFsNodeId;
 
     public void bind(FreeSwitchResourceAdaptor adaptor) {
         this.adaptor = adaptor;
@@ -18,6 +20,14 @@ public class FreeSwitchRaBridge {
 
     public FreeSwitchResourceAdaptor adaptor() {
         return adaptor;
+    }
+
+    public String activeFsNodeId() {
+        return activeFsNodeId;
+    }
+
+    public void setActiveFsNodeId(String fsNodeId) {
+        this.activeFsNodeId = fsNodeId;
     }
 
     public boolean live() {
@@ -31,5 +41,19 @@ public class FreeSwitchRaBridge {
             return "-ERR ESL unavailable: freeswitch-ra not bound";
         }
         return a.apiSync(command);
+    }
+
+    public void rebind(FsPairRegistry.EslTarget target) {
+        FreeSwitchResourceAdaptor a = adaptor;
+        if (a == null || target == null) {
+            return;
+        }
+        FreeSwitchRaConfig cfg = new FreeSwitchRaConfig();
+        cfg.setHost(target.host());
+        cfg.setPort(target.port());
+        cfg.setPassword(target.password());
+        cfg.setAutoSubscribe(true);
+        a.reconfigure(cfg);
+        activeFsNodeId = target.fsNodeId();
     }
 }

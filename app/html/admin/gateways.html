@@ -1,24 +1,41 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <script>(function(){try{document.documentElement.dataset.theme=localStorage.getItem('sf-theme')||'dark'}catch(_){}})()</script>
-  <title>Elisa Gateways</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>ELISA Gateways</title>
+  <script>(function(){try{var t=localStorage.getItem('sf-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);else document.documentElement.setAttribute('data-theme','dark')}catch(e){document.documentElement.setAttribute('data-theme','dark')}})()</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="/admin/static/admin.css"/>
   <script src="/admin/static/htmx.min.js"></script>
-  <script defer src="/admin/static/alpine.min.js"></script>
   <script defer src="/admin/static/sf-shell.js"></script>
+  <script defer src="/admin/static/alpine.min.js"></script>
+  
 </head>
-<body x-data>
-<header><b class="signal">ELISA</b> {{NAV_LINKS}} {{AUTH_NAV}}</header>
-<main>
-  <h1>Gateways / Trunks</h1>
-  <form class="form-card" method="post" action="/admin/gateways">
-    <label>Name <input name="name" required/></label>
-    <label>Profile <input name="profile" value="external"/></label>
-    <button type="submit">Add gateway</button>
-  </form>
-  <section hx-get="/admin/partial/gateway-rows" hx-trigger="load, every 10s">Loading…</section>
-</main>
+<body class="sf-app" x-data="sfShell()">
+<div class="sf-layout" :class="{{'rail-collapsed': railCollapsed, 'rail-open': mobileOpen}}">
+  {{NAV_RAIL}}
+  <div class="sf-content">
+    <div class="sf-topbar">
+      <div style="display:flex;gap:.75rem;align-items:center">
+        <button type="button" class="btn btn-ghost" @click="toggleMobile()" aria-label="Menu">☰</button>
+        <span class="hx-live-badge">HTMX</span>
+      </div>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">{{AUTH_NAV}}</div>
+    </div>
+    <main class="sf-main">
+
+<p class="eyebrow">Management</p><div class="ops-section-indent"><h1>Gateways</h1>
+<form class="panel" method="post" action="/admin/gateways" style="margin:1rem 0;display:grid;gap:.5rem;max-width:28rem">
+  <label>Name <input name="name" required/></label>
+  <label>Profile <input name="profile" value="external"/></label>
+  <button class="btn btn-primary" type="submit">Add gateway</button>
+</form>
+<div class="table-wrap" hx-get="/admin/partial/gateway-rows" hx-trigger="load" hx-swap="innerHTML">Loading…</div></div>
+    </main>
+  </div>
+</div>
 </body>
 </html>

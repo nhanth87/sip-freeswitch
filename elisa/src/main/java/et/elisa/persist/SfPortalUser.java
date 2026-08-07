@@ -15,8 +15,16 @@ public class SfPortalUser extends PanacheEntityBase {
     public String role;
     @Column(name = "tenant_id")
     public String tenantId;
+    @Column(name = "display_name")
+    public String displayName;
+    @Column(name = "http_api_key")
+    public String httpApiKey;
+    @Column(name = "http_api_key_fp")
+    public String httpApiKeyFp;
     @Column(nullable = false)
     public boolean enabled = true;
     @Column(name = "created_at")
     public Instant createdAt;
+    @Column(name = "updated_at")
+    public Instant updatedAt;
 }

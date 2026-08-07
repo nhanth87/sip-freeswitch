@@ -40,9 +40,14 @@ public class FsXmlCurlResource {
                 continue;
             }
             users.append("<user id=\"").append(esc(e.extension)).append("\">")
-                    .append("<params><param name=\"password\" value=\"")
-                    .append(esc(e.passwordHash == null ? e.extension : e.passwordHash))
-                    .append("\"/></params></user>");
+                    .append("<params>");
+            String secret = e.passwordHash == null ? e.extension : e.passwordHash;
+            if (et.elisa.security.SipDigestHasher.looksLikeA1Hash(secret)) {
+                users.append("<param name=\"a1-hash\" value=\"").append(esc(secret)).append("\"/>");
+            } else {
+                users.append("<param name=\"password\" value=\"").append(esc(secret)).append("\"/>");
+            }
+            users.append("</params></user>");
         }
         if (users.isEmpty()) {
             return notFound("directory");

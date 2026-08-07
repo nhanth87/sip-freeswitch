@@ -20,14 +20,18 @@ import com.microjainslee.ra.sipservlet.events.SipInviteEvent;
 import com.microjainslee.ra.sipservlet.events.SipOptionsEvent;
 import com.microjainslee.ra.sipservlet.events.SipResponseEvent;
 import et.elisa.acl.SipIngressAclService;
+import et.elisa.cluster.DialogCheckpoint;
+import et.elisa.cluster.DialogCheckpointStore;
 import et.elisa.media.MediaIceTurnPolicy;
 import et.elisa.metrics.SipCpsMetrics;
+import java.time.Instant;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 /**
  * SIP proxy toward FreeSWITCH trunk. Ingress ACL: unapproved peer → 403.
  * Hot-path: counters + DEBUG only (no INFO SIP dumps).
+ * C1: dialog checkpoints into Infinispan for cluster metadata.
  */
 public final class ProxySbb implements Sbb, SleeEventHandler {
 
@@ -38,21 +42,28 @@ public final class ProxySbb implements Sbb, SleeEventHandler {
     private final SipCpsMetrics metrics;
     private final SipIngressAclService acl;
     private final MediaIceTurnPolicy mediaPolicy;
+    private final DialogCheckpointStore checkpoints;
+    private final String elisaNodeId;
+    private final String fsNodeId;
 
     @InjectRa(name = "sip-servlet-ra")
     private volatile RaCommandPort sipRa;
 
     public ProxySbb() {
-        this("sip:1000@127.0.0.1:5062", "freeswitch.lab", null, null, null);
+        this("sip:1000@127.0.0.1:5062", "freeswitch.lab", null, null, null, null, "elisa-1", "fallback");
     }
 
     public ProxySbb(String freeswitchTrunkUri, String trunkDomain, SipCpsMetrics metrics,
-                    SipIngressAclService acl, MediaIceTurnPolicy mediaPolicy) {
+                    SipIngressAclService acl, MediaIceTurnPolicy mediaPolicy,
+                    DialogCheckpointStore checkpoints, String elisaNodeId, String fsNodeId) {
         this.freeswitchTrunkUri = freeswitchTrunkUri;
         this.trunkDomain = trunkDomain;
         this.metrics = metrics;
         this.acl = acl;
         this.mediaPolicy = mediaPolicy;
+        this.checkpoints = checkpoints;
+        this.elisaNodeId = elisaNodeId == null ? "elisa-1" : elisaNodeId;
+        this.fsNodeId = fsNodeId == null ? "fallback" : fsNodeId;
     }
 
     @Override
@@ -109,6 +120,7 @@ public final class ProxySbb implements Sbb, SleeEventHandler {
         if (metrics != null) {
             metrics.onInvite();
         }
+        checkpointPut(e.callId(), peer, e.fromUri(), e.toUri());
         LOG.debug("[ProxySbb] INVITE callId={} peer={} domain={}", e.callId(), peer, extractDomain(e.toUri()));
         send(new SendInvite(e.callId(), freeswitchTrunkUri, e.fromUri(), e.sdpBody(), e.imsHeaders()));
     }
@@ -117,6 +129,7 @@ public final class ProxySbb implements Sbb, SleeEventHandler {
         if (metrics != null) {
             metrics.onDialogEnd();
         }
+        checkpointRemove(e.callId());
         LOG.debug("[ProxySbb] BYE callId={}", e.callId());
         // Far leg first (needs dialog.remotePeer), then 200 OK to UA (RFC 3261 §15.1.2).
         send(new SendBye(e.callId()));
@@ -133,6 +146,7 @@ public final class ProxySbb implements Sbb, SleeEventHandler {
             metrics.onDialogEnd();
             metrics.onReject();
         }
+        checkpointRemove(e.callId());
         send(new SendCancel(e.callId()));
     }
 
@@ -158,8 +172,26 @@ public final class ProxySbb implements Sbb, SleeEventHandler {
                 metrics.onReject();
                 metrics.onDialogEnd();
             }
+            if (e.statusCode() >= 400) {
+                checkpointRemove(e.callId());
+            }
             send(new SendResponse(e.callId(), e.statusCode(), e.reasonPhrase()));
         }
+    }
+
+    private void checkpointPut(String callId, String peer, String fromUri, String toUri) {
+        if (checkpoints == null || !checkpoints.enabled()) {
+            return;
+        }
+        checkpoints.put(new DialogCheckpoint(
+                callId, peer, fromUri, toUri, freeswitchTrunkUri, fsNodeId, elisaNodeId, Instant.now()));
+    }
+
+    private void checkpointRemove(String callId) {
+        if (checkpoints == null) {
+            return;
+        }
+        checkpoints.remove(callId);
     }
 
     private void send(SipOutboundCommand cmd) {

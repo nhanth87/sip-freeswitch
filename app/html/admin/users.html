@@ -1,1 +1,49 @@
-<!doctype html><html><head><script>(function(){document.documentElement.dataset.theme=localStorage.getItem('sf-theme')||'dark'})()</script><title>Elisa Users</title><link rel="stylesheet" href="/admin/static/admin.css"><script src="/admin/static/htmx.min.js"></script><script defer src="/admin/static/alpine.min.js"></script><script defer src="/admin/static/sf-shell.js"></script></head><body x-data><header><b class="signal">ELISA</b> {{NAV_LINKS}} {{AUTH_NAV}}</header><main><h1>Users</h1><section>Roles: ADMIN, OPS, TENANT.</section></main></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>ELISA Users</title>
+  <script>(function(){try{var t=localStorage.getItem('sf-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);else document.documentElement.setAttribute('data-theme','dark')}catch(e){document.documentElement.setAttribute('data-theme','dark')}})()</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/admin/static/admin.css"/>
+  <script src="/admin/static/htmx.min.js"></script>
+  <script defer src="/admin/static/sf-shell.js"></script>
+  <script defer src="/admin/static/alpine.min.js"></script>
+  
+</head>
+<body class="sf-app" x-data="sfShell()">
+<div class="sf-layout" :class="{'rail-collapsed': railCollapsed, 'rail-open': mobileOpen}">
+  {{NAV_RAIL}}
+  <div class="sf-content">
+    <div class="sf-topbar">
+      <div style="display:flex;gap:.75rem;align-items:center">
+        <button type="button" class="btn btn-ghost" @click="toggleMobile()" aria-label="Menu">☰</button>
+        <span class="hx-live-badge">HTMX</span>
+      </div>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">{{AUTH_NAV}}</div>
+    </div>
+    <main class="sf-main">
+
+<p class="eyebrow">Admin</p>
+<div class="ops-section-indent">
+  <h1>Portal users</h1>
+  <p class="hint">ADMIN only. Create TENANT or OPS (reseller). ADMIN is bootstrap-only.</p>
+  <form class="panel" method="post" action="/admin/users" style="margin:1rem 0;display:grid;gap:.5rem;max-width:28rem">
+    <label>Username <input name="username" required/></label>
+    <label>Password <input name="password" type="password" required/></label>
+    <label>Role <select name="role"><option>TENANT</option><option>OPS</option></select></label>
+    <label>Tenant id (TENANT role) <input name="tenantId" class="mono"/></label>
+    <label>Display name <input name="displayName"/></label>
+    <button class="btn btn-primary" type="submit">Create user</button>
+  </form>
+  <div class="table-wrap" hx-get="/admin/partial/user-rows" hx-trigger="load" hx-swap="innerHTML">Loading…</div>
+</div>
+
+    </main>
+  </div>
+</div>
+</body>
+</html>

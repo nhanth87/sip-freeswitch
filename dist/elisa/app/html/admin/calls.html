@@ -1,1 +1,77 @@
-<!doctype html><html><head><script>(function(){document.documentElement.dataset.theme=localStorage.getItem('sf-theme')||'dark'})()</script><title>Elisa Calls</title><link rel="stylesheet" href="/admin/static/admin.css"><script src="/admin/static/htmx.min.js"></script><script defer src="/admin/static/alpine.min.js"></script><script defer src="/admin/static/sf-shell.js"></script></head><body x-data><header><b class="signal">ELISA</b> {{NAV_LINKS}} {{AUTH_NAV}}</header><main><h1>Active Calls</h1><section hx-get="/admin/partial/calls-rows" hx-trigger="load, every 5s">Loading…</section></main></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>ELISA Calls</title>
+  <script>(function(){try{var t=localStorage.getItem('sf-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);else document.documentElement.setAttribute('data-theme','dark')}catch(e){document.documentElement.setAttribute('data-theme','dark')}})()</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/admin/static/admin.css"/>
+  <script src="/admin/static/htmx.min.js"></script>
+  <script defer src="/admin/static/sf-shell.js"></script>
+  <script defer src="/admin/static/alpine.min.js"></script>
+</head>
+<body class="sf-app" x-data="sfShell()" data-hangup="{{HANGUP_UI}}">
+<div class="sf-layout" :class="{'rail-collapsed': railCollapsed, 'rail-open': mobileOpen}">
+  {{NAV_RAIL}}
+  <div class="sf-content">
+    <div class="sf-topbar">
+      <div style="display:flex;gap:.75rem;align-items:center">
+        <button type="button" class="btn btn-ghost" @click="toggleMobile()" aria-label="Menu">☰</button>
+        <span class="hx-live-badge">HTMX · 10s</span>
+      </div>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">{{AUTH_NAV}}</div>
+    </div>
+    <main class="sf-main">
+      <p class="eyebrow">Live</p>
+      <div class="ops-section-indent">
+        <div style="display:flex;flex-wrap:wrap;align-items:end;justify-content:space-between;gap:.75rem;margin-bottom:1rem">
+          <div>
+            <h1>Active calls</h1>
+            <p class="hint">Parsed FreeSWITCH channels. Hangup is ADMIN only.</p>
+          </div>
+          <span id="calls-ind" class="htmx-indicator mono hint">syncing…</span>
+        </div>
+        <div id="calls-table"
+             class="table-wrap"
+             hx-get="/admin/partial/calls-rows"
+             hx-trigger="load, every 10s"
+             hx-swap="innerHTML"
+             hx-indicator="#calls-ind"
+             hx-on::after-swap="window.SfCalls && SfCalls.decorateHangup(event.target)">
+          <p class="hint">loading…</p>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+<script>
+window.SfCalls = {
+  decorateHangup: function (root) {
+    if (document.body.getAttribute('data-hangup') !== '1') return;
+    (root || document).querySelectorAll('.hangup-cell[data-uuid]').forEach(function (cell) {
+      if (cell.dataset.ready) return;
+      cell.dataset.ready = '1';
+      var uuid = cell.getAttribute('data-uuid');
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-danger';
+      btn.textContent = 'Hangup';
+      btn.addEventListener('click', async function () {
+        if (!confirm('Hangup channel ' + uuid + '?')) return;
+        var r = await window.SfAdmin.postJson('/admin/calls/hangup', JSON.stringify({uuid: uuid}));
+        window.SfAdmin.toast(r.ok ? 'Hangup sent' : ((r.data && r.data.message) || 'Hangup failed'), r.ok ? 'ok' : 'error');
+        if (window.htmx) htmx.trigger('#calls-table', 'load');
+      });
+      cell.appendChild(btn);
+    });
+  }
+};
+document.addEventListener('DOMContentLoaded', function () {
+  window.SfCalls.decorateHangup(document.getElementById('calls-table'));
+});
+</script>
+</body>
+</html>

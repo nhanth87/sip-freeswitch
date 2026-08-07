@@ -1,1 +1,21 @@
-<div class="mono"><b class="signal">INVITE</b> {{INVITES}} · rejects {{REJECTS}} · active dialogs {{DIALOGS}}</div>
+<div class="metrics">
+  <div class="metric-card">
+    <div class="label">INVITE</div>
+    <div class="value signal">{{INVITES}}</div>
+  </div>
+  <div class="metric-card">
+    <div class="label">Rejects</div>
+    <div class="value">{{REJECTS}}</div>
+  </div>
+  <div class="metric-card">
+    <div class="label">Active dialogs</div>
+    <div class="value line">{{DIALOGS}}</div>
+  </div>
+  <div class="metric-card">
+    <div class="label">FreeSWITCH ESL</div>
+    <div class="value" style="font-size:1rem;margin-top:.5rem">
+      <span class="badge {{ESL_BADGE_CLASS}}">{{ESL_LABEL}}</span>
+      <span class="badge badge-line" style="margin-left:.35rem">ch {{CHANNELS}}</span>
+    </div>
+  </div>
+</div>

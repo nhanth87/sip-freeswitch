@@ -1,1 +1,30 @@
-<!doctype html><html><head><meta charset="utf-8"><script>(function(){try{document.documentElement.dataset.theme=localStorage.getItem('sf-theme')||'dark'}catch(_){}})()</script><title>Elisa Login</title><link rel="stylesheet" href="/admin/static/admin.css"><script src="/admin/static/htmx.min.js"></script><script defer src="/admin/static/alpine.min.js"></script><script defer src="/admin/static/sf-shell.js"></script></head><body x-data><main><h1 class="signal">ELISA administration</h1><section><form method="post" action="/admin/login"><label>User <input name="username" required></label><label>Password <input name="password" type="password" required></label><button>Sign in</button></form><p>Lab login: admin / admin when enabled.</p></section></main></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>ELISA Login</title>
+  <script>(function(){try{var t=localStorage.getItem('sf-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);else document.documentElement.setAttribute('data-theme','dark')}catch(e){document.documentElement.setAttribute('data-theme','dark')}})()</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/admin/static/admin.css"/>
+  <script defer src="/admin/static/sf-shell.js"></script>
+  <script defer src="/admin/static/alpine.min.js"></script>
+</head>
+<body class="sf-login" x-data>
+  <div class="login-card">
+    <h1 class="signal">ELISA</h1>
+    <p class="hint">SIP edge administration</p>
+    <form method="post" action="/admin/login" style="margin-top:1.25rem">
+      <label>User <input name="username" autocomplete="username" required/></label>
+      <label>Password <input name="password" type="password" autocomplete="current-password" required/></label>
+      <button class="btn btn-primary" type="submit" style="width:100%;margin-top:.5rem">Sign in</button>
+    </form>
+    <p class="hint" style="margin-top:1rem">Lab: admin / admin when <code class="mono">sf.admin.dev-login</code> is on.</p>
+    <button type="button" class="theme-toggle" style="margin-top:1rem" @click="$store.sf.toggleTheme()">
+      <span class="theme-toggle-label">Theme</span>
+    </button>
+  </div>
+</body>
+</html>
