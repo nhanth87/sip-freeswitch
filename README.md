@@ -1,6 +1,6 @@
 # sip-freeswitch / Elisa
 
-Private Digicom SIP edge (**Elisa**) + FreeSWITCH + PostgreSQL. Target **10 000 INVITE/s**.
+Private nhanth87 SIP edge (**Elisa**) + FreeSWITCH + PostgreSQL. Target **10 000 INVITE/s**.
 
 > **PRIVATE** — `nhanth87/sip-freeswitch` only.
 

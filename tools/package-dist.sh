@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Assemble Elisa Quarkus fast-jar runtime into worktree dist/ (OTA / ussdgw parity).
+# nhanth87 Elisa — assemble Quarkus fast-jar runtime into worktree dist/ (OTA / ussdgw parity).
 # Usage: ./tools/package-dist.sh
 #
 # Layout (never uber-jar):

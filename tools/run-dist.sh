@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Elisa (sip-freeswitch) — dist starter (Quarkus fast-jar layout, OTA/ussdgw parity).
+# nhanth87 Elisa (sip-freeswitch) — dist starter (Quarkus fast-jar layout, OTA/ussdgw parity).
 # Never java -jar elisa-app.jar alone; never ship uber-jar. JDK 25 only.
 #
 # Layout (this dir = APP_HOME):

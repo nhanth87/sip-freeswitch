@@ -1,4 +1,4 @@
-# AGENTS.md — Digicom SIP + FreeSWITCH (sip-freeswitch / Elisa)
+# AGENTS.md — nhanth87 SIP + FreeSWITCH (sip-freeswitch / Elisa)
 
 **Tree:** `ethiopia-working-dir/worktrees/voice-service/sip-freeswitch`  
 Symlink: `worktrees/sip-freeswitch/main`. Chat worktree: `worktrees/sip-freeswitch/chat`.
@@ -88,14 +88,14 @@ docker compose up -d --build   # postgres + freeswitch + elisa
 
 Admin: `http://127.0.0.1:8088/admin/` (dev `admin`/`admin` when `sf.admin.dev-login=true`).
 
-## Relation to PolyVoice
+## Relation to ChipChipVoice
 
 | Project | Role |
 |---------|------|
-| PolyVoice | YouTube / Netflix / film translate+dub |
+| ChipChipVoice (`../chipchipvoice/`) | YouTube / Netflix / film translate+dub — **no SS7 / no SIP** |
 | sip-freeswitch (Elisa) | High-CPS SIP + FreeSWITCH |
 
-Do not merge. Do not wire PolyVoice TTS → FreeSWITCH playback.
+Do not merge. Do not wire ChipChipVoice TTS → FreeSWITCH playback.
 
 ## Constraints
 
