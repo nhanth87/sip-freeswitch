@@ -4,7 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import et.elisa.persist.SfCdr;
 import et.elisa.persist.SfExtension;
 import et.elisa.persist.SfTenant;
+import et.elisa.session.CallSessionService;
+import et.elisa.cluster.CallSession;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -12,6 +15,8 @@ import java.time.format.DateTimeParseException;
 
 @ApplicationScoped
 public class CdrIngestService {
+
+    @Inject CallSessionService callSessions;
 
     @Transactional
     public SfCdr ingest(JsonNode cdr) {
@@ -50,6 +55,19 @@ public class CdrIngestService {
         row.tenantId = blankToNull(tenantId);
         row.trunkTenantId = blankToNull(trunkTenant);
         row.accountSid = row.tenantId;
+
+        // P5: enrich from dual-write call session
+        if (row.callUuid != null && !row.callUuid.isBlank() && callSessions != null) {
+            callSessions.findByFsUuid(row.callUuid).ifPresent(s -> applySession(row, s));
+        }
+        if ((row.sipCallId == null || row.sipCallId.isBlank())) {
+            row.sipCallId = text(cdr, "variable_sip_call_id",
+                    text(cdr, "variable_elisa_sip_call_id", null));
+        }
+        if ((row.msisdn == null || row.msisdn.isBlank())) {
+            row.msisdn = text(cdr, "variable_msisdn", null);
+        }
+
         if (row.tenantId != null) {
             SfTenant t = SfTenant.findById(row.tenantId);
             if (t != null) {
@@ -66,6 +84,19 @@ public class CdrIngestService {
         }
         row.persist();
         return row;
+    }
+
+    private static void applySession(SfCdr row, CallSession s) {
+        if (s.sipCallId() != null) {
+            row.sipCallId = s.sipCallId();
+        }
+        if (s.msisdn() != null) {
+            row.msisdn = s.msisdn();
+        }
+        if ((row.tenantId == null || row.tenantId.isBlank()) && s.tenantId() != null) {
+            row.tenantId = s.tenantId();
+            row.accountSid = s.tenantId();
+        }
     }
 
     private static String lookupExtensionTenant(String number) {

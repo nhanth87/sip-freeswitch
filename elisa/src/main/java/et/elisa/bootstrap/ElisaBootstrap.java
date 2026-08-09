@@ -24,6 +24,7 @@ import com.microjainslee.telemetry.TelemetryRaObserver;
 import et.elisa.acl.SipIngressAclService;
 import et.elisa.cluster.DialogCheckpointStore;
 import et.elisa.cluster.FsPairRegistry;
+import et.elisa.cmp.DialogCmpPersistence;
 import et.elisa.esl.FreeSwitchRaBridge;
 import et.elisa.ims.config.ImsRoleFlags;
 import et.elisa.ims.cx.CxClient;
@@ -50,6 +51,12 @@ import et.elisa.sbbs.FreeSwitchMonitorSbb;
 import et.elisa.sbbs.IceNegotiationSbb;
 import et.elisa.sbbs.ProxySbb;
 import et.elisa.sbbs.RegistrationSbb;
+import et.elisa.profile.ElisaProfileService;
+import et.elisa.session.CallSessionService;
+import et.elisa.session.CallSessionSbb;
+import et.elisa.recovery.SbbRecoveryManagerImpl;
+import com.microjainslee.core.recovery.SessionRecoveryService;
+import com.microjainslee.core.recovery.SessionRecoveryServiceImpl;
 import io.micrometer.prometheusmetrics.PrometheusConfig;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import io.quarkus.runtime.StartupEvent;
@@ -73,6 +80,7 @@ final class ElisaBootstrap {
     @Inject FreeSwitchRaBridge freeSwitchRaBridge;
     @Inject FsPairRegistry fsPairRegistry;
     @Inject DialogCheckpointStore dialogCheckpoints;
+    @Inject DialogCmpPersistence dialogCmp;
     @Inject ImsRoleFlags imsRoles;
     @Inject CxClient cxClient;
     @Inject CxServer cxServer;
@@ -81,6 +89,9 @@ final class ElisaBootstrap {
     @Inject IscAsRouter iscAsRouter;
     @Inject IscThirdPartyRegister thirdParty;
     @Inject DiameterRaBridge diameterRaBridge;
+    @Inject CallSessionService callSessionService;
+    @Inject ElisaProfileService elisaProfiles;
+    @Inject SbbRecoveryManagerImpl sbbRecovery;
 
     @ConfigProperty(name = "sip.ra.host", defaultValue = "0.0.0.0") String sipHost;
     @ConfigProperty(name = "sip.ra.udp-port", defaultValue = "5060") int udpPort;
@@ -115,6 +126,7 @@ final class ElisaBootstrap {
         if (container.getState() != MicroSleeContainer.State.STARTED) {
             container.start();
         }
+        elisaProfiles.provisionTables();
         wireTelemetry();
         registerSbbTypes();
         bindInitialEventSelector();
@@ -123,6 +135,7 @@ final class ElisaBootstrap {
         wireDiameterRa();
         wirePrometheusRa();
         mapEventToSbb();
+        wireSbbRecovery();
         FsPairRegistry.EslTarget primary = fsPairRegistry.primary().orElse(null);
         LOG.info("=== Elisa Ready — SIP {}:{} IMS[{}] esl={}:{} node={} cxPeerReady={} ===",
                 udpPort, tcpPort, imsRoles.summary(),
@@ -184,7 +197,37 @@ final class ElisaBootstrap {
         sipEndpoint = new SipServletRaEndpoint(ra);
         sipEndpoint.setConfig(config);
         container.registerRa(sipEndpoint, sipEndpoint);
+        sbbRecovery.bindSipRa(ra);
         LOG.info("SIP RA UDP:{} TCP:{} ice={}", udpPort, tcpPort, iceEnabled);
+    }
+
+    /**
+     * Wire SbbRecoveryManager: EntityRemovalBus (async) + Gap-SR-1 SessionRecoveryService
+     * so MISSING_ENTITY rehydrates via CMP restore when JVM snapshots are absent.
+     */
+    private void wireSbbRecovery() {
+        SessionRecoveryService recovery = new SessionRecoveryServiceImpl(snapshot -> {
+            if (snapshot == null || snapshot.entityId() == null) {
+                return false;
+            }
+            String callId = snapshot.convergenceKey();
+            if (callId == null || callId.isBlank()) {
+                Object cid = snapshot.cmpFields().get("sipCallId");
+                callId = cid != null ? cid.toString() : null;
+            }
+            if (callId == null || callId.isBlank()) {
+                String id = snapshot.entityId();
+                int slash = id.lastIndexOf('/');
+                callId = slash >= 0 ? id.substring(slash + 1) : id;
+            }
+            return sbbRecovery.respawnLocal(
+                    et.elisa.recovery.RecoveryKey.sipCallId(callId),
+                    et.elisa.recovery.RecoveryCause.MISSING_ENTITY);
+        });
+        sbbRecovery.bindSessionRecovery(recovery);
+        container.getEventRouter().bindSessionRecoveryService(recovery);
+        sbbRecovery.attachToContainer();
+        LOG.info("SbbRecoveryManager wired (EntityRemovalBus + SessionRecovery Gap-SR-1)");
     }
 
     private void wireFreeSwitchRa() {
@@ -255,12 +298,18 @@ final class ElisaBootstrap {
         container.registerSbbType(RegistrationSbb.class, () -> new RegistrationSbb(acl));
         container.registerSbbType(IceNegotiationSbb.class, () -> new IceNegotiationSbb(preferRelay));
         container.registerSbbType(FreeSwitchMonitorSbb.class, FreeSwitchMonitorSbb::new);
+        container.registerSbbType(CallSessionSbb.class,
+                () -> new CallSessionSbb.$Concrete(callSessionService,
+                        freeSwitchRaBridge.activeFsNodeId() != null
+                                ? freeSwitchRaBridge.activeFsNodeId() : "fallback"));
 
         if (imsRoles.scscf()) {
             container.registerSbbType(ScscfRegisterSbb.class,
-                    () -> new ScscfRegisterSbb(imsRoles, cxClient, hssLite, bindingStore, thirdParty));
+                    () -> new ScscfRegisterSbb(imsRoles, cxClient, hssLite, bindingStore, thirdParty, elisaProfiles));
+            DialogCmpPersistence cmp = dialogCmp;
             container.registerSbbType(ScscfInviteSbb.class,
-                    () -> new ScscfInviteSbb(imsRoles, iscAsRouter, bindingStore, cps, metrics, hssLite, nodeId,
+                    () -> new ScscfInviteSbb.$Concrete(imsRoles, iscAsRouter, bindingStore, cmp, metrics, hssLite,
+                            nodeId,
                             freeSwitchRaBridge.activeFsNodeId() != null
                                     ? freeSwitchRaBridge.activeFsNodeId() : "fallback"));
         }
@@ -296,9 +345,9 @@ final class ElisaBootstrap {
         container.mapEventToSbb(IceCandidateEvent.class, "IceNegotiationSbb");
         container.mapEventToSbb(IceCompletedEvent.class, "IceNegotiationSbb");
         container.mapEventToSbb(IceFailedEvent.class, "IceNegotiationSbb");
-        container.mapEventToSbb(FsHeartbeatEvent.class, "FreeSwitchMonitorSbb");
-        container.mapEventToSbb(FsChannelEvent.class, "FreeSwitchMonitorSbb");
-        container.mapEventToSbb(FsApiResponseEvent.class, "FreeSwitchMonitorSbb");
+        container.mapEventToSbb(FsHeartbeatEvent.class, "CallSessionSbb");
+        container.mapEventToSbb(FsChannelEvent.class, "CallSessionSbb");
+        container.mapEventToSbb(FsApiResponseEvent.class, "CallSessionSbb");
         if (cxEnabled && (imsRoles.hss() || imsRoles.icscf() || imsRoles.scscf())) {
             container.mapEventToSbb(DiameterRequestEvent.class, "DiameterCxSbb");
             container.mapEventToSbb(DiameterAnswerEvent.class, "DiameterCxSbb");

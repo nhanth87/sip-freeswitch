@@ -36,6 +36,41 @@ public class HssLiteService {
         return Optional.ofNullable(ImsSubscriber.find("impu", impu).firstResult());
     }
 
+    public Optional<ImsSubscriber> findByMsisdn(String msisdn) {
+        if (msisdn == null || msisdn.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(ImsSubscriber.find("msisdn", msisdn.trim()).firstResult());
+    }
+
+    /** Resolve profile from SIP URI, bare user, or MSISDN. */
+    public Optional<ImsSubscriber> resolveIdentity(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return Optional.empty();
+        }
+        String s = raw.trim();
+        Optional<ImsSubscriber> byMsisdn = findByMsisdn(s);
+        if (byMsisdn.isPresent()) {
+            return byMsisdn;
+        }
+        Optional<ImsSubscriber> byImpu = findByImpu(s);
+        if (byImpu.isPresent()) {
+            return byImpu;
+        }
+        String noSip = s.replaceFirst("(?i)^sip:", "");
+        byImpu = findByImpu("sip:" + noSip);
+        if (byImpu.isPresent()) {
+            return byImpu;
+        }
+        int at = noSip.indexOf('@');
+        String user = at > 0 ? noSip.substring(0, at) : noSip;
+        byMsisdn = findByMsisdn(user);
+        if (byMsisdn.isPresent()) {
+            return byMsisdn;
+        }
+        return findByImpi(noSip).or(() -> findByImpi(user));
+    }
+
     @Transactional
     public Map<Integer, String> handleMar(String impi, String impu, String callId) {
         ImsSubscriber sub = findByImpi(impi).orElse(null);

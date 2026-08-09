@@ -102,3 +102,7 @@ sequenceDiagram
 - SBC / RTP relay / FreePBX as signaling
 - PCRF Rx/N5, MGCF/BGCF in early phases
 - VoLTE certification claims without interconnect tests
+
+## Related
+
+- User profile + FS call correlate: [`user-profile.md`](user-profile.md) · JAIN SLEE 1.1 ProfileFacility: [`jainslee-profile.md`](jainslee-profile.md)

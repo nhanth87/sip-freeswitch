@@ -9,10 +9,18 @@ public class AdminNavRenderer {
 
     private record Link(String label, String href, String ico) {}
 
+    /** Live ops: MSISDN profiles + call-id/fs-uuid sessions sit here for discoverability. */
     private static final Link[] LIVE = {
             new Link("Dashboard", "/admin", "·"),
             new Link("Calls", "/admin/calls", "·"),
+            new Link("Call sessions", "/admin/sessions", "·"),
+            new Link("User profiles", "/admin/profiles", "·"),
             new Link("CDR", "/admin/cdr", "·")
+    };
+    /** Tenant-scoped: profile/session pages (ProfileAdminRoutes), filtered by tenantId. */
+    private static final Link[] TENANT_LIVE = {
+            new Link("Call sessions", "/admin/sessions", "·"),
+            new Link("User profiles", "/admin/profiles", "·")
     };
     private static final Link[] MANAGEMENT = {
             new Link("Sofia", "/admin/sofia", "·"),
@@ -81,6 +89,7 @@ public class AdminNavRenderer {
         sb.append("<nav class=\"sf-rail-nav\">");
         if (tenant) {
             group(sb, "Portal", PORTAL, active);
+            group(sb, "Live", TENANT_LIVE, active);
         } else {
             group(sb, "Live", LIVE, active);
             if (operator) {

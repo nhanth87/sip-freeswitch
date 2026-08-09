@@ -22,10 +22,10 @@ flowchart LR
 | **elisa** | CSCF roles (flags), Cx, HSS-lite, HTMX admin, ESL, xml_curl, CDR, ACL |
 | **freeswitch** | MRF/AS dialplan, media, Sofia |
 | **coturn / ICE** | **rtp_redirect** — not Elisa RTP |
-| **postgres** | Config, tenants, IMS subscribers/bindings, CDR |
-| **Infinispan** | Dialog + registration checkpoints (C1) |
+| **postgres** | Config, tenants, IMS profiles/bindings, call sessions, CDR |
+| **Infinispan** | Dialog + registration + call-session (C1/P2) |
 
-Detail: [`ims-core.md`](ims-core.md). Cluster: [`cluster-c2-vip-affinity.md`](cluster-c2-vip-affinity.md).
+Detail: [`ims-core.md`](ims-core.md). Profiles: [`user-profile.md`](user-profile.md) · SLEE 1.1 ProfileFacility: [`jainslee-profile.md`](jainslee-profile.md). Datastore: [`datastore.md`](datastore.md). Cluster: [`cluster-c2-vip-affinity.md`](cluster-c2-vip-affinity.md). Call continuity: [`cmp-recovery.md`](cmp-recovery.md) · dead-SBB orchestrator (design): [`sbb-recovery-manager.md`](sbb-recovery-manager.md).
 
 ## Explicit non-goals (SBC)
 

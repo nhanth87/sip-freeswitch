@@ -82,6 +82,11 @@ public class SfCdr extends PanacheEntityBase {
     @Column(name = "hangup_cause")
     public String hangupCause;
 
+    @Column(name = "sip_call_id")
+    public String sipCallId;
+    @Column(length = 32)
+    public String msisdn;
+
     @Column(columnDefinition = "text")
     public String payload;
     @Column(name = "created_at")

@@ -52,6 +52,6 @@ IVR runtime ── xml_curl any Elisa ──► FS; optional conf export
 
 ## Implementation status (2026-08-07)
 
-Landed in `elisa/`: `V3__tenants_cdr_ivr_cluster.sql`, bcrypt login, tenant/trunk CRUD, portal users ADMIN-only, CDR RestComm-shaped ingest+scoped UI, IVR menus/entries + `/admin/ivr/xml/{tenant}/{name}`.
+Landed in `elisa/`: Flyway baseline [`V1__elisa_baseline.sql`](../../elisa/src/main/resources/db/migration/V1__elisa_baseline.sql) (squashed), bcrypt login, tenant/trunk CRUD, portal users ADMIN-only, CDR RestComm-shaped ingest+scoped UI, IVR menus/entries + `/admin/ivr/xml/{tenant}/{name}`. Datastore notes: [`datastore.md`](datastore.md).
 
 **Runtime wiring:** `DialogCheckpointStore` (Infinispan LOCAL/DIST), `FsPairRegistry` + `EslFailoverService`, `ProxySbb` checkpoints, SIP directory `a1-hash`, `IvrPublishService` + `POST /admin/ivr/publish/{id}`, docs [`cluster-c2-vip-affinity.md`](cluster-c2-vip-affinity.md).

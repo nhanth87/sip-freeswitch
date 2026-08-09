@@ -33,12 +33,24 @@ public final class ImsTestSupport {
 
     public static void injectRa(Object sbb, RaCommandPort port) {
         try {
-            Field f = sbb.getClass().getDeclaredField("sipRa");
+            Field f = findField(sbb.getClass(), "sipRa");
             f.setAccessible(true);
             f.set(sbb, port);
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    private static Field findField(Class<?> type, String name) throws NoSuchFieldException {
+        Class<?> c = type;
+        while (c != null && c != Object.class) {
+            try {
+                return c.getDeclaredField(name);
+            } catch (NoSuchFieldException ignored) {
+                c = c.getSuperclass();
+            }
+        }
+        throw new NoSuchFieldException(name);
     }
 
     public static void set(Object target, String field, Object value) throws ReflectiveOperationException {

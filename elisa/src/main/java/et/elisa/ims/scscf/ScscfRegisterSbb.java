@@ -14,6 +14,8 @@ import et.elisa.ims.cx.CxClient;
 import et.elisa.ims.cx.CxCodec;
 import et.elisa.ims.hss.HssLiteService;
 import et.elisa.ims.reg.BindingStore;
+import et.elisa.persist.ImsSubscriber;
+import et.elisa.profile.ElisaProfileService;
 import java.util.Map;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -28,21 +30,29 @@ public final class ScscfRegisterSbb implements Sbb, SleeEventHandler {
     private final HssLiteService hss;
     private final BindingStore bindings;
     private final IscThirdPartyRegister thirdParty;
+    private final ElisaProfileService sleeProfiles;
 
     @InjectRa(name = "sip-servlet-ra")
     private volatile RaCommandPort sipRa;
 
     public ScscfRegisterSbb() {
-        this(null, null, null, null, null);
+        this(null, null, null, null, null, null);
     }
 
     public ScscfRegisterSbb(ImsRoleFlags roles, CxClient cx, HssLiteService hss,
                             BindingStore bindings, IscThirdPartyRegister thirdParty) {
+        this(roles, cx, hss, bindings, thirdParty, null);
+    }
+
+    public ScscfRegisterSbb(ImsRoleFlags roles, CxClient cx, HssLiteService hss,
+                            BindingStore bindings, IscThirdPartyRegister thirdParty,
+                            ElisaProfileService sleeProfiles) {
         this.roles = roles;
         this.cx = cx;
         this.hss = hss;
         this.bindings = bindings;
         this.thirdParty = thirdParty;
+        this.sleeProfiles = sleeProfiles;
     }
 
     @Override public void sbbCreate() {}
@@ -102,6 +112,7 @@ public final class ScscfRegisterSbb implements Sbb, SleeEventHandler {
         hss.commitSqn(pending.get().impi(), pending.get().nextSqn());
         cx.sar(impi, impu);
         bindings.upsert(impu, contact, e.pathHeader(), e.callId(), expires);
+        mirrorSubscriberProfile(impi, impu);
         if (thirdParty != null) {
             thirdParty.notifyAs(impu, contact, expires);
         }
@@ -110,6 +121,18 @@ public final class ScscfRegisterSbb implements Sbb, SleeEventHandler {
                 "Path", e.pathHeader() == null ? "<" + roles.pcscfUri() + ";lr>" : e.pathHeader()
         )));
         LOG.debug("[S-CSCF] REGISTER ok impu={} expires={}", impu, expires);
+    }
+
+    private void mirrorSubscriberProfile(String impi, String impu) {
+        if (sleeProfiles == null || hss == null) {
+            return;
+        }
+        ImsSubscriber row = hss.findByImpi(impi)
+                .or(() -> hss.findByImpu(impu))
+                .orElse(null);
+        if (row != null) {
+            sleeProfiles.upsertSubscriber(row);
+        }
     }
 
     private static String extractImpi(String from, String impu) {

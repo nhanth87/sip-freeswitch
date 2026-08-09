@@ -103,4 +103,12 @@ public class DialogCheckpointStore {
     public boolean enabled() {
         return cache != null;
     }
+
+    /** Snapshot of live checkpoints (orphan scan / admin). Empty when disabled. */
+    public java.util.Collection<DialogCheckpoint> entries() {
+        if (cache == null) {
+            return java.util.List.of();
+        }
+        return java.util.List.copyOf(cache.values());
+    }
 }

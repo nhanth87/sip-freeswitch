@@ -6,6 +6,7 @@ import et.elisa.ims.hss.HssLiteService;
 import et.elisa.ims.reg.BindingStore;
 import et.elisa.persist.ImsBinding;
 import et.elisa.persist.ImsSubscriber;
+import et.elisa.profile.ElisaProfileService;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import jakarta.ws.rs.*;
@@ -27,6 +28,7 @@ public class ImsAdminRoutes {
     @Inject DiameterRaBridge diameter;
     @Inject HssLiteService hss;
     @Inject BindingStore bindings;
+    @Inject ElisaProfileService sleeProfiles;
 
     @ConfigProperty(name = "sf.admin.api-key")
     String apiKey;
@@ -117,6 +119,9 @@ public class ImsAdminRoutes {
         s.createdAt = Instant.now();
         s.updatedAt = Instant.now();
         s.persist();
+        if (sleeProfiles != null) {
+            sleeProfiles.upsertSubscriber(s);
+        }
         return Response.seeOther(URI.create("/admin/subscribers")).build();
     }
 

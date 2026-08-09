@@ -1,12 +1,13 @@
 package et.elisa.fsxml;
 
+import et.elisa.persist.ImsSubscriber;
 import et.elisa.persist.SfDialplanRule;
 import et.elisa.persist.SfExtension;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import java.util.List;
 
-/** FreeSWITCH mod_xml_curl endpoint — directory/dialplan from Postgres when present. */
+/** FreeSWITCH mod_xml_curl — IMS-first directory (P1), extension fallback. */
 @Path("/fs/xml")
 public class FsXmlCurlResource {
 
@@ -27,27 +28,30 @@ public class FsXmlCurlResource {
     }
 
     private static String directoryXml(String user) {
-        List<SfExtension> all = SfExtension.listAll();
-        if (all.isEmpty()) {
-            return notFound("directory");
-        }
         StringBuilder users = new StringBuilder();
-        for (SfExtension e : all) {
-            if (!e.enabled) {
+        List<ImsSubscriber> profiles = ImsSubscriber.listAll();
+        for (ImsSubscriber s : profiles) {
+            if (!s.enabled) {
                 continue;
             }
-            if (user != null && !user.isBlank() && !user.equals(e.extension)) {
+            String uid = s.directoryUserId();
+            if (user != null && !user.isBlank() && !user.equals(uid) && !user.equals(s.msisdn)) {
                 continue;
             }
-            users.append("<user id=\"").append(esc(e.extension)).append("\">")
-                    .append("<params>");
-            String secret = e.passwordHash == null ? e.extension : e.passwordHash;
-            if (et.elisa.security.SipDigestHasher.looksLikeA1Hash(secret)) {
-                users.append("<param name=\"a1-hash\" value=\"").append(esc(secret)).append("\"/>");
-            } else {
-                users.append("<param name=\"password\" value=\"").append(esc(secret)).append("\"/>");
+            users.append(userXml(uid, s.fsA1Hash, uid));
+        }
+        if (users.isEmpty()) {
+            // Legacy fallback when no IMS profiles
+            List<SfExtension> all = SfExtension.listAll();
+            for (SfExtension e : all) {
+                if (!e.enabled) {
+                    continue;
+                }
+                if (user != null && !user.isBlank() && !user.equals(e.extension)) {
+                    continue;
+                }
+                users.append(userXml(e.extension, e.passwordHash, e.extension));
             }
-            users.append("</params></user>");
         }
         if (users.isEmpty()) {
             return notFound("directory");
@@ -60,6 +64,19 @@ public class FsXmlCurlResource {
                   </section>
                 </document>
                 """.formatted(users);
+    }
+
+    private static String userXml(String id, String secretOrHash, String fallbackSecret) {
+        String secret = secretOrHash == null || secretOrHash.isBlank() ? fallbackSecret : secretOrHash;
+        StringBuilder sb = new StringBuilder();
+        sb.append("<user id=\"").append(esc(id)).append("\"><params>");
+        if (et.elisa.security.SipDigestHasher.looksLikeA1Hash(secret)) {
+            sb.append("<param name=\"a1-hash\" value=\"").append(esc(secret)).append("\"/>");
+        } else {
+            sb.append("<param name=\"password\" value=\"").append(esc(secret)).append("\"/>");
+        }
+        sb.append("</params></user>");
+        return sb.toString();
     }
 
     private static String dialplanXml() {
@@ -75,7 +92,6 @@ public class FsXmlCurlResource {
             exts.append("<extension name=\"").append(esc(r.name)).append("\">")
                     .append("<condition field=\"destination_number\" expression=\"")
                     .append(esc(r.destination)).append("\">")
-                    // rtp_redirect: keep media on FS/TURN path through firewall (no bypass)
                     .append("<action application=\"set\" data=\"bypass_media=false\"/>")
                     .append("<action application=\"export\" data=\"nolocal:bypass_media=false\"/>")
                     .append("<action application=\"set\" data=\"elisa_rtp_redirect=true\"/>")
