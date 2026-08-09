@@ -41,13 +41,10 @@ public final class AkaMd5 {
         if (expectedXres == null || res == null) {
             return false;
         }
-        int n = Math.min(expectedXres.length, res.length);
-        if (n == 0) {
+        if (expectedXres.length == 0 || res.length != expectedXres.length) {
             return false;
         }
-        return MessageDigest.isEqual(
-                Arrays.copyOf(expectedXres, n),
-                Arrays.copyOf(res, n));
+        return MessageDigest.isEqual(expectedXres, res);
     }
 
     public static byte[] parseHex(String hex) {

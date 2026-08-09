@@ -78,12 +78,12 @@ public final class ScscfRegisterSbb implements Sbb, SleeEventHandler {
                 return;
             }
             String randAutn = maa.get(CxCodec.SIP_AUTHENTICATE);
-            if (randAutn == null || randAutn.length() < 32) {
+            if (randAutn == null || randAutn.length() < 64) {
                 send(SendResponse.of(e.callId(), 500, "Server Internal Error"));
                 return;
             }
             byte[] rand = AkaMd5.parseHex(randAutn.substring(0, 32));
-            byte[] autn = AkaMd5.parseHex(randAutn.substring(32));
+            byte[] autn = AkaMd5.parseHex(randAutn.substring(32, 64));
             String www = AkaMd5.wwwAuthenticate(roles.realm(), rand, autn);
             send(SendResponse.withHeaders(e.callId(), 401, "Unauthorized",
                     Map.of("WWW-Authenticate", www)));
