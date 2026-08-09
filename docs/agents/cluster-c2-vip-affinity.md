@@ -57,7 +57,13 @@ Do **not** load-balance Elisa trunks across random FS nodes without updating the
 4. Point each Elisa trunk URI at its primary FS Sofia profile.
 5. Enable `DIST_SYNC` only when ≥2 Elisa share the Infinispan cluster name.
 
-## Out of scope (this tree)
+## IMS extension (grill I7)
 
-- Full SIP dialog HA migrate across Elisa (RA DialogRegistry still local; checkpoints are metadata).
-- Mesh ESL (every Elisa ↔ every FS) — deferred after paired topology proves out.
+| Plane | Sticky |
+|-------|--------|
+| Registration | `ims_binding.home_scscf_node` + Infinispan `RegistrationHomeStore` |
+| Dialog | `DialogCheckpointStore` on home S-CSCF |
+| I-CSCF LIR | Returns home S-CSCF URI for IMPU |
+| FS pair | Affinity to S-CSCF node that owns the dialog |
+
+See [`ims-core.md`](ims-core.md).

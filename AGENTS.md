@@ -9,35 +9,38 @@ Symlink: `worktrees/sip-freeswitch/main`. Chat worktree: `worktrees/sip-freeswit
 
 - Never make public; never push Digicom-ET/other remotes; never public mirrors.
 
-## Role — SIP only (not an SBC)
+## Role — lab IMS Core (not an SBC)
 
-**Elisa is a high-CPS SIP signaling edge.** It is **not** an SBC.
+**Elisa is a feature-flagged lab IMS Core** (P/I/S-CSCF + optional HSS-lite) plus FreeSWITCH control. It is **not** an SBC.
 
 | Owns | Does **not** own |
 |------|------------------|
 | SIP transaction / dialog (RFC 3261) via **`ra-sip-servlet`** | RTP/SRTP relay, media anchoring, codec transcoding |
-| FreeSWITCH control via **`ra-freeswitch`** (ESL / FS events — JAINSLEE 3-port) | Topology hiding / full B2BUA SBC product features |
-| Admin HTTP, xml_curl (HTTP), ACL, CDR ingest | P-CSCF / I-CSCF / S-CSCF, Diameter Cx/Rx as product |
-| 3GPP SIP header awareness for future IMS/5G/6G signaling | |
+| CSCF roles (Gm/Mw/ISC) when `sf.ims.role.*` enabled | Topology hiding / full B2BUA SBC product features |
+| Diameter **Cx** via **`ra-diameter`** + HSS-lite (Postgres) | PCRF/PCF Rx/N5, MGCF/BGCF (later phases) |
+| FreeSWITCH control via **`ra-freeswitch`** (ESL) | FreePBX as signaling controller |
+| Admin HTTP, xml_curl, ACL, CDR, IMS subscribers | |
 
-**Media** stays on FreeSWITCH (+ TURN/ICE on the media path). **Ingress later:** nginx (or stream) in front of admin HTTP; SIP L4 only if needed — Elisa remains the SIP state machine.
+**Media** stays on FreeSWITCH as MRF/AS (+ TURN/ICE). **Ingress later:** nginx in front of admin HTTP; SIP L4 if needed — Elisa keeps the SIP state machine.
 
-See [`docs/agents/architecture.md`](docs/agents/architecture.md), [`docs/agents/3gpp-sip-ims.md`](docs/agents/3gpp-sip-ims.md), [`docs/agents/ra-freeswitch.md`](docs/agents/ra-freeswitch.md).
+Grill locks I1–I8: [`docs/agents/ims-core.md`](docs/agents/ims-core.md). Also [`architecture.md`](docs/agents/architecture.md), [`3gpp-sip-ims.md`](docs/agents/3gpp-sip-ims.md), [`ra-freeswitch.md`](docs/agents/ra-freeswitch.md).
 
 ## Planned RA split (grill-locked direction)
 
 ```text
-UA ──SIP──► ra-sip-servlet ──SIP trunk──► FreeSWITCH (Sofia)
-                 │
-Elisa SBBs ──► ra-freeswitch ──ESL :8021──► FreeSWITCH (Event Socket)
-                 │                 (api / bgapi / events)
+UE ──Gm──► P-CSCF ──Mw──► I-CSCF ──Mw──► S-CSCF ──ISC──► FreeSWITCH (MRF/AS)
+                              │              │
+                           Cx UAR/LIR     Cx MAR/SAR
+                              └──────► HSS-lite / external HSS
+S-CSCF SBBs ──► ra-freeswitch ──ESL :8021──► FreeSWITCH
               (3-port: RaEndpointPort + RaCommandPort + RaBootstrapPort)
 ```
 
 | RA | Name (inject) | Plane | Spec |
 |----|---------------|-------|------|
-| **`ra-sip-servlet`** | `sip-servlet-ra` | SIP signaling (UA + trunk) | Existing vendor RA; never break SIP transaction SM |
-| **`ra-freeswitch`** | `freeswitch-ra` | FreeSWITCH control / status | **New internal RA** — JAINSLEE 3-port; replace ad-hoc `EslClient` CDI |
+| **`ra-sip-servlet`** | `sip-servlet-ra` | SIP Gm/Mw/ISC | Vendor RA; never break SIP transaction SM |
+| **`ra-diameter`** | `diameter-ra` | Diameter Cx | micro-jainslee vendor RA |
+| **`ra-freeswitch`** | `freeswitch-ra` | FreeSWITCH ESL control | Internal RA — JAINSLEE 3-port |
 
 ### `ra-freeswitch` — mandatory shape (do not invent outside this)
 

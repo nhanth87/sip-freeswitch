@@ -27,6 +27,9 @@ public class AdminNavRenderer {
             new Link("FS Control", "/admin/fs-control", "·")
     };
     private static final Link[] ADMIN = {
+            new Link("IMS", "/admin/ims", "·"),
+            new Link("Subscribers", "/admin/subscribers", "·"),
+            new Link("Bindings", "/admin/bindings", "·"),
             new Link("Tenants", "/admin/tenants", "·"),
             new Link("Users", "/admin/users", "·"),
             new Link("ESL", "/admin/esl", "·"),

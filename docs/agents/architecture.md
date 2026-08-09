@@ -1,34 +1,31 @@
 # Architecture — sip-freeswitch / Elisa
 
-## Locked shape
+## Locked shape (IMS Core pivot — grill I1–I8)
 
-**SIP signaling only — not an SBC.** Elisa terminates/proxies SIP toward FreeSWITCH; RTP never hairpins through Elisa. Later, **nginx** sits in front (admin HTTP first; optional L4 for SIP TCP/TLS). Elisa keeps the SIP transaction state machine.
+**SIP/IMS signaling only — not an SBC.** Elisa runs feature-flagged P/I/S-CSCF (+ optional HSS-lite); FreeSWITCH is MRF/AS media. RTP never hairpins through Elisa.
 
 ```mermaid
 flowchart LR
-  subgraph ingress [Future_ingress]
-    NGX[nginx]
-  end
-  UA[SIP_UA_or_SIPp] -->|SIP_5060| Elisa[elisa_SIP_only]
-  NGX -->|HTTP_admin| Elisa
-  Elisa -->|SIP_trunk| FS[freeswitch]
+  UE[UE_lab] -->|Gm| Elisa[elisa_IMS_roles]
+  Elisa -->|ISC_SIP| FS[freeswitch_MRF]
+  Elisa -->|ESL| FS
+  Elisa -->|Cx| HSS[HSS_lite_or_peer]
   FS -->|RTP_ICE_TURN| Media[media_path]
-  Elisa -->|ESL_8021| FS
-  FS -->|mod_xml_curl| Elisa
+  FS -->|xml_curl| Elisa
   Elisa --> PG[(postgres)]
-  Admin[Browser_HTMX] -->|8088_or_via_nginx| Elisa
+  Elisa --> ISPN[(infinispan)]
+  Admin[Browser_HTMX] -->|8088| Elisa
 ```
 
 | Component | Owns |
 |-----------|------|
-| **nginx** (later) | TLS/HTTP front for admin; optional stream for SIP TCP — **not** SIP dialog SM |
-| **elisa** | SIP signaling edge (CPS), HTMX admin, ESL, xml_curl, CDR, ACL |
-| **freeswitch** | Dialplan, media, Sofia |
-| **coturn / ICE** | **rtp_redirect** media path through firewall (TURN relay) — not Elisa RTP |
-| **postgres** | Config, tenants, extensions, CDR |
-| **Infinispan** | Dialog/session checkpoints (C1); PG remains config/CDR SoT |
+| **elisa** | CSCF roles (flags), Cx, HSS-lite, HTMX admin, ESL, xml_curl, CDR, ACL |
+| **freeswitch** | MRF/AS dialplan, media, Sofia |
+| **coturn / ICE** | **rtp_redirect** — not Elisa RTP |
+| **postgres** | Config, tenants, IMS subscribers/bindings, CDR |
+| **Infinispan** | Dialog + registration checkpoints (C1) |
 
-Cluster VIP + Sofia affinity: [`cluster-c2-vip-affinity.md`](cluster-c2-vip-affinity.md).
+Detail: [`ims-core.md`](ims-core.md). Cluster: [`cluster-c2-vip-affinity.md`](cluster-c2-vip-affinity.md).
 
 ## Explicit non-goals (SBC)
 
@@ -36,10 +33,10 @@ Do **not** grow Elisa into:
 
 - RTP/SRTP media relay or topology-hiding media anchor
 - Full session-border product (transcoding farm, SIP-I/SIP-T gateway farm)
-- IMS CSCF roles (P/I/S-CSCF) or Diameter as core product in this tree
+- FreePBX as the signaling controller
 
-3GPP readiness = **SIP header / dialog / transaction compliance** so interconnect can extend to VoLTE/VoNR later — see [`3gpp-sip-ims.md`](3gpp-sip-ims.md).
+IMS CSCF + Cx **are in scope** (lab); PCRF Rx/N5 / MGCF deferred.
 
-**rtp_redirect** (required): media RTP must traverse the firewall via TURN / FS RTP ports — Elisa enforces SDP policy + FS `bypass_media=false`; it does not relay RTP. See [`media-ice-turn.md`](media-ice-turn.md).
+**rtp_redirect** (required): media via TURN / FS RTP; Elisa enforces SDP policy + FS `bypass_media=false`. See [`media-ice-turn.md`](media-ice-turn.md).
 
-Capacity: **10 000 INVITE/s** on elisa signaling — claim only after SIPp green.
+Capacity: **10 000 INVITE/s** on signaling — claim only after SIPp green.

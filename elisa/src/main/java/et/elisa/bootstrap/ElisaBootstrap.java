@@ -1,11 +1,19 @@
 package et.elisa.bootstrap;
 
 import com.microjainslee.core.MicroSleeContainer;
+import com.microjainslee.ra.diameter.DiameterRaConfig;
+import com.microjainslee.ra.diameter.DiameterRaEndpoint;
+import com.microjainslee.ra.diameter.DiameterResourceAdaptor;
+import com.microjainslee.ra.diameter.events.DiameterAnswerEvent;
+import com.microjainslee.ra.diameter.events.DiameterRequestEvent;
 import com.microjainslee.ra.prometheus.PrometheusRaEndpoint;
 import com.microjainslee.ra.prometheus.PrometheusResourceAdaptor;
 import com.microjainslee.ra.sipservlet.SipRaConfig;
 import com.microjainslee.ra.sipservlet.SipServletRaEndpoint;
 import com.microjainslee.ra.sipservlet.SipServletResourceAdaptor;
+import com.microjainslee.ra.sipservlet.events.IceCandidateEvent;
+import com.microjainslee.ra.sipservlet.events.IceCompletedEvent;
+import com.microjainslee.ra.sipservlet.events.IceFailedEvent;
 import com.microjainslee.ra.sipservlet.events.SipInviteEvent;
 import com.microjainslee.ra.sipservlet.events.SipRegisterEvent;
 import com.microjainslee.ra.sipservlet.events.SipResponseEvent;
@@ -17,6 +25,19 @@ import et.elisa.acl.SipIngressAclService;
 import et.elisa.cluster.DialogCheckpointStore;
 import et.elisa.cluster.FsPairRegistry;
 import et.elisa.esl.FreeSwitchRaBridge;
+import et.elisa.ims.config.ImsRoleFlags;
+import et.elisa.ims.cx.CxClient;
+import et.elisa.ims.cx.CxServer;
+import et.elisa.ims.cx.DiameterCxSbb;
+import et.elisa.ims.cx.DiameterRaBridge;
+import et.elisa.ims.hss.HssLiteService;
+import et.elisa.ims.icscf.IcscfRoutingSbb;
+import et.elisa.ims.pcscf.PcscfProxySbb;
+import et.elisa.ims.reg.BindingStore;
+import et.elisa.ims.scscf.IscAsRouter;
+import et.elisa.ims.scscf.IscThirdPartyRegister;
+import et.elisa.ims.scscf.ScscfInviteSbb;
+import et.elisa.ims.scscf.ScscfRegisterSbb;
 import et.elisa.media.MediaIceTurnPolicy;
 import et.elisa.metrics.SipCpsMetrics;
 import et.elisa.ra.freeswitch.FreeSwitchRaConfig;
@@ -29,9 +50,6 @@ import et.elisa.sbbs.FreeSwitchMonitorSbb;
 import et.elisa.sbbs.IceNegotiationSbb;
 import et.elisa.sbbs.ProxySbb;
 import et.elisa.sbbs.RegistrationSbb;
-import com.microjainslee.ra.sipservlet.events.IceCandidateEvent;
-import com.microjainslee.ra.sipservlet.events.IceCompletedEvent;
-import com.microjainslee.ra.sipservlet.events.IceFailedEvent;
 import io.micrometer.prometheusmetrics.PrometheusConfig;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import io.quarkus.runtime.StartupEvent;
@@ -43,74 +61,48 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
-/**
- * Wires SIP RA + SBBs into MicroSleeContainer. Observes {@link StartupEvent}
- * so the bean is not left lazy.
- */
 @ApplicationScoped
 final class ElisaBootstrap {
 
     private static final Logger LOG = LogManager.getLogger(ElisaBootstrap.class);
 
-    @Inject
-    MicroSleeContainer container;
+    @Inject MicroSleeContainer container;
+    @Inject SipCpsMetrics cpsMetrics;
+    @Inject SipIngressAclService sipAcl;
+    @Inject MediaIceTurnPolicy mediaPolicy;
+    @Inject FreeSwitchRaBridge freeSwitchRaBridge;
+    @Inject FsPairRegistry fsPairRegistry;
+    @Inject DialogCheckpointStore dialogCheckpoints;
+    @Inject ImsRoleFlags imsRoles;
+    @Inject CxClient cxClient;
+    @Inject CxServer cxServer;
+    @Inject HssLiteService hssLite;
+    @Inject BindingStore bindingStore;
+    @Inject IscAsRouter iscAsRouter;
+    @Inject IscThirdPartyRegister thirdParty;
+    @Inject DiameterRaBridge diameterRaBridge;
 
-    @Inject
-    SipCpsMetrics cpsMetrics;
-
-    @Inject
-    SipIngressAclService sipAcl;
-
-    @Inject
-    MediaIceTurnPolicy mediaPolicy;
-
-    @Inject
-    FreeSwitchRaBridge freeSwitchRaBridge;
-
-    @Inject
-    FsPairRegistry fsPairRegistry;
-
-    @Inject
-    DialogCheckpointStore dialogCheckpoints;
-
-    @ConfigProperty(name = "sip.ra.host", defaultValue = "0.0.0.0")
-    String sipHost;
-
-    @ConfigProperty(name = "sip.ra.udp-port", defaultValue = "5060")
-    int udpPort;
-
-    @ConfigProperty(name = "sip.ra.tcp-port", defaultValue = "5060")
-    int tcpPort;
-
-    @ConfigProperty(name = "sip.ra.ice-enabled", defaultValue = "true")
-    boolean iceEnabled;
-
-    @ConfigProperty(name = "sip.ra.stun-server", defaultValue = "stun.l.google.com")
-    String stunServer;
-
-    @ConfigProperty(name = "sip.ra.stun-port", defaultValue = "3478")
-    int stunPort;
-
-    @ConfigProperty(name = "sip.ra.ice-keep-alive-secs", defaultValue = "30")
-    long iceKeepAliveSecs;
-
-    @ConfigProperty(name = "sip.trunk.freeswitch-uri", defaultValue = "sip:1000@127.0.0.1:5062")
-    String freeswitchTrunkUri;
-
-    @ConfigProperty(name = "sip.trunk.domain", defaultValue = "freeswitch.lab")
-    String trunkDomain;
-
-    @ConfigProperty(name = "sf.esl.host", defaultValue = "localhost")
-    String eslHost;
-
-    @ConfigProperty(name = "sf.esl.port", defaultValue = "8021")
-    int eslPort;
-
-    @ConfigProperty(name = "sf.esl.password", defaultValue = "ClueCon")
-    String eslPassword;
+    @ConfigProperty(name = "sip.ra.host", defaultValue = "0.0.0.0") String sipHost;
+    @ConfigProperty(name = "sip.ra.udp-port", defaultValue = "5060") int udpPort;
+    @ConfigProperty(name = "sip.ra.tcp-port", defaultValue = "5060") int tcpPort;
+    @ConfigProperty(name = "sip.ra.ice-enabled", defaultValue = "true") boolean iceEnabled;
+    @ConfigProperty(name = "sip.ra.stun-server", defaultValue = "stun.l.google.com") String stunServer;
+    @ConfigProperty(name = "sip.ra.stun-port", defaultValue = "3478") int stunPort;
+    @ConfigProperty(name = "sip.ra.ice-keep-alive-secs", defaultValue = "30") long iceKeepAliveSecs;
+    @ConfigProperty(name = "sip.trunk.freeswitch-uri", defaultValue = "sip:1000@127.0.0.1:5062") String freeswitchTrunkUri;
+    @ConfigProperty(name = "sip.trunk.domain", defaultValue = "freeswitch.lab") String trunkDomain;
+    @ConfigProperty(name = "sf.esl.host", defaultValue = "localhost") String eslHost;
+    @ConfigProperty(name = "sf.esl.port", defaultValue = "8021") int eslPort;
+    @ConfigProperty(name = "sf.esl.password", defaultValue = "ClueCon") String eslPassword;
+    @ConfigProperty(name = "sf.ims.cx.listen-host", defaultValue = "0.0.0.0") String cxHost;
+    @ConfigProperty(name = "sf.ims.cx.listen-port", defaultValue = "3868") int cxPort;
+    @ConfigProperty(name = "sf.ims.cx.origin-host", defaultValue = "elisa.ims.lab") String cxOriginHost;
+    @ConfigProperty(name = "sf.ims.cx.origin-realm", defaultValue = "ims.lab") String cxOriginRealm;
+    @ConfigProperty(name = "sf.ims.cx.enabled", defaultValue = "true") boolean cxEnabled;
 
     private volatile SipServletRaEndpoint sipEndpoint;
     private volatile FreeSwitchRaEndpoint freeSwitchEndpoint;
+    private volatile DiameterRaEndpoint diameterEndpoint;
     private volatile TelemetryPort telemetryPort;
     private volatile boolean started;
 
@@ -119,7 +111,7 @@ final class ElisaBootstrap {
             return;
         }
         started = true;
-        LOG.info("sip-freeswitch edge bootstrap (StartupEvent)");
+        LOG.info("Elisa IMS Core bootstrap roles={}", imsRoles.summary());
         if (container.getState() != MicroSleeContainer.State.STARTED) {
             container.start();
         }
@@ -128,22 +120,25 @@ final class ElisaBootstrap {
         bindInitialEventSelector();
         wireSipRa();
         wireFreeSwitchRa();
+        wireDiameterRa();
         wirePrometheusRa();
         mapEventToSbb();
         FsPairRegistry.EslTarget primary = fsPairRegistry.primary().orElse(null);
-        LOG.info("=== sip-freeswitch Ready — SIP UDP:{} TCP:{} trunk={} esl={}:{} node={} fsNode={} checkpoints={} ===",
-                udpPort, tcpPort, freeswitchTrunkUri,
+        LOG.info("=== Elisa Ready — SIP {}:{} IMS[{}] esl={}:{} node={} cxPeerReady={} ===",
+                udpPort, tcpPort, imsRoles.summary(),
                 primary != null ? primary.host() : eslHost,
                 primary != null ? primary.port() : eslPort,
                 fsPairRegistry.nodeId(),
-                primary != null ? primary.fsNodeId() : "fallback",
-                dialogCheckpoints.enabled());
+                diameterRaBridge.peerReady());
     }
 
     @PreDestroy
     void shutdown() {
         if (telemetryPort instanceof MicrometerTelemetryPort mtp) {
             mtp.stop();
+        }
+        if (diameterEndpoint != null) {
+            diameterEndpoint.deactivate();
         }
         if (freeSwitchEndpoint != null) {
             freeSwitchEndpoint.deactivate();
@@ -177,7 +172,6 @@ final class ElisaBootstrap {
             config.setStunPort(stunPort);
             config.setIceKeepAliveSecs(iceKeepAliveSecs);
         }
-        // rtp_redirect: prefer relay ordering; real TURN ALLOCATE stays on UA/coturn
         config.setPreferRelayCandidate(mediaPolicy.rtpRedirect() || mediaPolicy.requireTurn());
         String turnHost = turnHost(mediaPolicy.turnUri());
         if (turnHost != null) {
@@ -186,14 +180,11 @@ final class ElisaBootstrap {
             config.setTurnUsername(mediaPolicy.turnUsername());
             config.setTurnCredential(mediaPolicy.turnCredential());
         }
-
         SipServletResourceAdaptor ra = new SipServletResourceAdaptor();
         sipEndpoint = new SipServletRaEndpoint(ra);
         sipEndpoint.setConfig(config);
         container.registerRa(sipEndpoint, sipEndpoint);
-        LOG.info("SIP RA registered on UDP:{} TCP:{} ice={} stun={}:{} rtpRedirect={} turnHost={}",
-                udpPort, tcpPort, iceEnabled, stunServer, stunPort,
-                mediaPolicy.rtpRedirect(), turnHost);
+        LOG.info("SIP RA UDP:{} TCP:{} ice={}", udpPort, tcpPort, iceEnabled);
     }
 
     private void wireFreeSwitchRa() {
@@ -206,9 +197,116 @@ final class ElisaBootstrap {
         container.registerRa(freeSwitchEndpoint, freeSwitchEndpoint);
         freeSwitchRaBridge.bind(ra);
         freeSwitchRaBridge.setActiveFsNodeId(target.fsNodeId());
-        LOG.info("FreeSWITCH RA registered ESL {}:{} fsNode={} name={} (pair size={})",
-                target.host(), target.port(), target.fsNodeId(), freeSwitchEndpoint.getRaName(),
-                fsPairRegistry.targetsForThisNode().size());
+        LOG.info("FreeSWITCH RA ESL {}:{} fsNode={}", target.host(), target.port(), target.fsNodeId());
+    }
+
+    private void wireDiameterRa() {
+        if (!cxEnabled || !(imsRoles.icscf() || imsRoles.scscf() || imsRoles.hss())) {
+            LOG.info("Diameter RA skipped (cx.enabled={} roles={})", cxEnabled, imsRoles.summary());
+            return;
+        }
+        DiameterRaConfig cfg = new DiameterRaConfig();
+        cfg.setHost(cxHost);
+        cfg.setPort(cxPort);
+        cfg.setOriginHost(cxOriginHost);
+        cfg.setRealm(cxOriginRealm);
+        cfg.setProductName("elisa-ims-cx");
+        DiameterResourceAdaptor ra = new DiameterResourceAdaptor();
+        diameterEndpoint = new DiameterRaEndpoint(ra);
+        diameterEndpoint.setConfig(cfg);
+        container.registerRa(diameterEndpoint, diameterEndpoint);
+        diameterRaBridge.bind(diameterEndpoint);
+        cxClient.bindDiameter(diameterEndpoint);
+        cxServer.bindDiameter(diameterEndpoint);
+        LOG.info("Diameter RA Cx {}:{} originHost={} peerReady={}",
+                cxHost, cxPort, cxOriginHost, diameterEndpoint.isPeerReady());
+    }
+
+    private void wireTelemetry() {
+        PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+        MicrometerTelemetryPort micrometer = new MicrometerTelemetryPort(registry, container);
+        micrometer.start();
+        telemetryPort = micrometer;
+        cpsMetrics.bind(registry);
+        container.getEventRouter().setDispatchObserver(new TelemetryDispatchObserver(micrometer));
+        container.setRaObserver(new TelemetryRaObserver(micrometer));
+    }
+
+    private void wirePrometheusRa() {
+        var prometheusRa = new PrometheusResourceAdaptor();
+        prometheusRa.setPort(9090);
+        container.registerRa(new PrometheusRaEndpoint(prometheusRa));
+    }
+
+    private void registerSbbTypes() {
+        String trunk = freeswitchTrunkUri;
+        String domain = trunkDomain;
+        SipCpsMetrics metrics = cpsMetrics;
+        SipIngressAclService acl = sipAcl;
+        MediaIceTurnPolicy media = mediaPolicy;
+        DialogCheckpointStore cps = dialogCheckpoints;
+        String nodeId = fsPairRegistry.nodeId();
+        boolean preferRelay = media.requireTurn();
+
+        container.registerSbbType(ProxySbb.class,
+                () -> new ProxySbb(trunk, domain, metrics, acl, media, cps, nodeId,
+                        freeSwitchRaBridge.activeFsNodeId() != null
+                                ? freeSwitchRaBridge.activeFsNodeId() : "fallback"));
+        container.registerSbbType(RegistrationSbb.class, () -> new RegistrationSbb(acl));
+        container.registerSbbType(IceNegotiationSbb.class, () -> new IceNegotiationSbb(preferRelay));
+        container.registerSbbType(FreeSwitchMonitorSbb.class, FreeSwitchMonitorSbb::new);
+
+        if (imsRoles.scscf()) {
+            container.registerSbbType(ScscfRegisterSbb.class,
+                    () -> new ScscfRegisterSbb(imsRoles, cxClient, hssLite, bindingStore, thirdParty));
+            container.registerSbbType(ScscfInviteSbb.class,
+                    () -> new ScscfInviteSbb(imsRoles, iscAsRouter, bindingStore, cps, metrics, hssLite, nodeId,
+                            freeSwitchRaBridge.activeFsNodeId() != null
+                                    ? freeSwitchRaBridge.activeFsNodeId() : "fallback"));
+        }
+        if (imsRoles.pcscf()) {
+            container.registerSbbType(PcscfProxySbb.class, () -> new PcscfProxySbb(imsRoles));
+        }
+        if (imsRoles.icscf()) {
+            container.registerSbbType(IcscfRoutingSbb.class, () -> new IcscfRoutingSbb(imsRoles, cxClient));
+        }
+        if (cxEnabled && (imsRoles.hss() || imsRoles.icscf() || imsRoles.scscf())) {
+            container.registerSbbType(DiameterCxSbb.class, () -> new DiameterCxSbb(cxServer, cxClient));
+        }
+        LOG.info("SBB types registered IMS={}", imsRoles.summary());
+    }
+
+    private void mapEventToSbb() {
+        if (imsRoles.scscf()) {
+            container.mapEventToSbb(SipRegisterEvent.class, "ScscfRegisterSbb");
+            container.mapEventToSbb(SipInviteEvent.class, "ScscfInviteSbb");
+            container.mapEventToSbb(SipResponseEvent.class, "ScscfInviteSbb");
+        } else if (imsRoles.pcscf()) {
+            container.mapEventToSbb(SipRegisterEvent.class, "PcscfProxySbb");
+            container.mapEventToSbb(SipInviteEvent.class, "PcscfProxySbb");
+            container.mapEventToSbb(SipResponseEvent.class, "PcscfProxySbb");
+        } else if (imsRoles.icscf()) {
+            container.mapEventToSbb(SipRegisterEvent.class, "IcscfRoutingSbb");
+            container.mapEventToSbb(SipInviteEvent.class, "IcscfRoutingSbb");
+        } else {
+            container.mapEventToSbb(SipInviteEvent.class, "ProxySbb");
+            container.mapEventToSbb(SipResponseEvent.class, "ProxySbb");
+            container.mapEventToSbb(SipRegisterEvent.class, "RegistrationSbb");
+        }
+        container.mapEventToSbb(IceCandidateEvent.class, "IceNegotiationSbb");
+        container.mapEventToSbb(IceCompletedEvent.class, "IceNegotiationSbb");
+        container.mapEventToSbb(IceFailedEvent.class, "IceNegotiationSbb");
+        container.mapEventToSbb(FsHeartbeatEvent.class, "FreeSwitchMonitorSbb");
+        container.mapEventToSbb(FsChannelEvent.class, "FreeSwitchMonitorSbb");
+        container.mapEventToSbb(FsApiResponseEvent.class, "FreeSwitchMonitorSbb");
+        if (cxEnabled && (imsRoles.hss() || imsRoles.icscf() || imsRoles.scscf())) {
+            container.mapEventToSbb(DiameterRequestEvent.class, "DiameterCxSbb");
+            container.mapEventToSbb(DiameterAnswerEvent.class, "DiameterCxSbb");
+        }
+    }
+
+    private void bindInitialEventSelector() {
+        container.createIesDispatcher();
     }
 
     private static String turnHost(String turnUri) {
@@ -251,60 +349,5 @@ final class ElisaBootstrap {
             }
         }
         return defaultPort;
-    }
-
-    private void wireTelemetry() {
-        PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
-        MicrometerTelemetryPort micrometer = new MicrometerTelemetryPort(registry, container);
-        micrometer.start();
-        telemetryPort = micrometer;
-        cpsMetrics.bind(registry);
-        container.getEventRouter().setDispatchObserver(new TelemetryDispatchObserver(micrometer));
-        container.setRaObserver(new TelemetryRaObserver(micrometer));
-    }
-
-    private void wirePrometheusRa() {
-        var prometheusRa = new PrometheusResourceAdaptor();
-        prometheusRa.setPort(9090);
-        container.registerRa(new PrometheusRaEndpoint(prometheusRa));
-    }
-
-    private void registerSbbTypes() {
-        String trunk = freeswitchTrunkUri;
-        String domain = trunkDomain;
-        SipCpsMetrics metrics = cpsMetrics;
-        SipIngressAclService acl = sipAcl;
-        MediaIceTurnPolicy media = mediaPolicy;
-        DialogCheckpointStore cps = dialogCheckpoints;
-        String nodeId = fsPairRegistry.nodeId();
-        String fsNode = freeSwitchRaBridge.activeFsNodeId() != null
-                ? freeSwitchRaBridge.activeFsNodeId()
-                : fsPairRegistry.primary().map(FsPairRegistry.EslTarget::fsNodeId).orElse("fallback");
-        boolean preferRelay = media.requireTurn();
-        container.registerSbbType(ProxySbb.class,
-                () -> new ProxySbb(trunk, domain, metrics, acl, media, cps, nodeId,
-                        freeSwitchRaBridge.activeFsNodeId() != null
-                                ? freeSwitchRaBridge.activeFsNodeId() : fsNode));
-        container.registerSbbType(RegistrationSbb.class, () -> new RegistrationSbb(acl));
-        container.registerSbbType(IceNegotiationSbb.class, () -> new IceNegotiationSbb(preferRelay));
-        container.registerSbbType(FreeSwitchMonitorSbb.class, FreeSwitchMonitorSbb::new);
-        LOG.info("Registered SBB types: ProxySbb, RegistrationSbb, IceNegotiationSbb, FreeSwitchMonitorSbb preferRelay={} node={}",
-                preferRelay, nodeId);
-    }
-
-    private void mapEventToSbb() {
-        container.mapEventToSbb(SipInviteEvent.class, "ProxySbb");
-        container.mapEventToSbb(SipResponseEvent.class, "ProxySbb");
-        container.mapEventToSbb(SipRegisterEvent.class, "RegistrationSbb");
-        container.mapEventToSbb(IceCandidateEvent.class, "IceNegotiationSbb");
-        container.mapEventToSbb(IceCompletedEvent.class, "IceNegotiationSbb");
-        container.mapEventToSbb(IceFailedEvent.class, "IceNegotiationSbb");
-        container.mapEventToSbb(FsHeartbeatEvent.class, "FreeSwitchMonitorSbb");
-        container.mapEventToSbb(FsChannelEvent.class, "FreeSwitchMonitorSbb");
-        container.mapEventToSbb(FsApiResponseEvent.class, "FreeSwitchMonitorSbb");
-    }
-
-    private void bindInitialEventSelector() {
-        container.createIesDispatcher();
     }
 }
