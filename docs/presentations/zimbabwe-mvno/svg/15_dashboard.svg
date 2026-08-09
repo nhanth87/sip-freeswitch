@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <rect width="1280" height="720" fill="#0B1F14"/>
+  <rect x="0" y="0.0" width="1280" height="3.9" fill="#009B48"/>
+<rect x="0" y="3.4" width="1280" height="3.9" fill="#FCE300"/>
+<rect x="0" y="6.9" width="1280" height="3.9" fill="#DE2010"/>
+<rect x="0" y="10.3" width="1280" height="3.9" fill="#000000"/>
+<rect x="0" y="13.7" width="1280" height="3.9" fill="#DE2010"/>
+<rect x="0" y="17.1" width="1280" height="3.9" fill="#FCE300"/>
+<rect x="0" y="20.6" width="1280" height="3.9" fill="#009B48"/>
+  <text x="80" y="100" font-family="Georgia, serif" font-size="36" fill="#FFFFFF" font-weight="700">Profitability Dashboard Concept</text>
+  <!-- sparkline fake -->
+  <polyline points="120,400 200,360 280,380 360,300 440,320 520,250 600,280 680,220 760,240 840,180 920,200 1000,160 1080,190 1160,140"
+            fill="none" stroke="#FCE300" stroke-width="4"/>
+  <polyline points="120,450 200,440 280,455 360,430 440,445 520,420 600,435 680,410 760,425 840,400 920,415 1000,390 1080,405 1160,380"
+            fill="none" stroke="#009B48" stroke-width="3"/>
+  <text x="120" y="520" fill="#FCE300" font-size="16" font-family="Helvetica, Arial, sans-serif">Contribution margin (gold)</text>
+  <text x="120" y="550" fill="#009B48" font-size="16" font-family="Helvetica, Arial, sans-serif">Active subscribers (green)</text>
+  <text x="120" y="620" fill="#C8E6D0" font-size="16" font-family="Helvetica, Arial, sans-serif">
+    Alerts when margin &lt; threshold · auto-suggest tariff / throttle / VAS push
+  </text>
+</svg>

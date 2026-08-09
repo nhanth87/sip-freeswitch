@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0B1F14"/>
+      <stop offset="55%" stop-color="#0F3A22"/>
+      <stop offset="100%" stop-color="#009B48"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="40%" r="50%">
+      <stop offset="0%" stop-color="#FCE300" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#FCE300" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1280" height="720" fill="url(#bg)"/>
+  <circle cx="640" cy="280" r="220" fill="url(#glow)"/>
+  <rect x="0" y="0.0" width="1280" height="5.6" fill="#009B48"/>
+<rect x="0" y="5.1" width="1280" height="5.6" fill="#FCE300"/>
+<rect x="0" y="10.3" width="1280" height="5.6" fill="#DE2010"/>
+<rect x="0" y="15.4" width="1280" height="5.6" fill="#000000"/>
+<rect x="0" y="20.6" width="1280" height="5.6" fill="#DE2010"/>
+<rect x="0" y="25.7" width="1280" height="5.6" fill="#FCE300"/>
+<rect x="0" y="30.9" width="1280" height="5.6" fill="#009B48"/>
+  <polygon points="640.0,208.0 657.6,255.7 708.5,257.8 668.5,289.3 682.3,338.2 640.0,310.0 597.7,338.2 611.5,289.3 571.5,257.8 622.4,255.7" fill="#FCE300" stroke="#DE2010" stroke-width="4"/>
+  <circle cx="640" cy="280" r="18" fill="#DE2010"/>
+  <text x="640" y="430" text-anchor="middle" font-family="Georgia, serif" font-size="48" fill="#FFFFFF" font-weight="700">
+    Zimbabwe National MVNO
+  </text>
+  <text x="640" y="490" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="26" fill="#FCE300">
+    Sovereign Voice · 5G · Digital Identity
+  </text>
+  <text x="640" y="560" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="18" fill="#C8E6D0">
+    Proposal to the Government of Zimbabwe
+  </text>
+  <text x="640" y="620" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#9BBFA8">
+    Powered by Elisa IMS Core · 5G Core · CAMARA Silent Authentication · Profit Analytics
+  </text>
+  <rect x="0" y="684.0" width="1280" height="5.6" fill="#009B48"/>
+<rect x="0" y="689.1" width="1280" height="5.6" fill="#FCE300"/>
+<rect x="0" y="694.3" width="1280" height="5.6" fill="#DE2010"/>
+<rect x="0" y="699.4" width="1280" height="5.6" fill="#000000"/>
+<rect x="0" y="704.6" width="1280" height="5.6" fill="#DE2010"/>
+<rect x="0" y="709.7" width="1280" height="5.6" fill="#FCE300"/>
+<rect x="0" y="714.9" width="1280" height="5.6" fill="#009B48"/>
+</svg>

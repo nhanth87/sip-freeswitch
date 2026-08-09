@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <rect width="1280" height="720" fill="#0B1F14"/>
+  <rect x="0" y="0.0" width="1280" height="3.9" fill="#009B48"/>
+<rect x="0" y="3.4" width="1280" height="3.9" fill="#FCE300"/>
+<rect x="0" y="6.9" width="1280" height="3.9" fill="#DE2010"/>
+<rect x="0" y="10.3" width="1280" height="3.9" fill="#000000"/>
+<rect x="0" y="13.7" width="1280" height="3.9" fill="#DE2010"/>
+<rect x="0" y="17.1" width="1280" height="3.9" fill="#FCE300"/>
+<rect x="0" y="20.6" width="1280" height="3.9" fill="#009B48"/>
+  <text x="80" y="110" font-family="Georgia, serif" font-size="40" fill="#FFFFFF" font-weight="700">National Vision</text>
+  <text x="80" y="155" font-family="Helvetica, Arial, sans-serif" font-size="18" fill="#FCE300">A Zimbabwe-owned MVNO that connects every citizen securely and profitably</text>
+  <g transform="translate(80,210)">
+    <rect width="340" height="380" rx="16" fill="#123D26" stroke="#FCE300" stroke-width="2"/>
+    <text x="28" y="60" font-size="22" fill="#FCE300" font-family="Georgia, serif">Sovereignty</text>
+    <text x="28" y="110" font-size="16" fill="#FFFFFF" font-family="Helvetica, Arial, sans-serif">Local control of</text>
+    <text x="28" y="140" font-size="16" fill="#FFFFFF" font-family="Helvetica, Arial, sans-serif">IMS / 5G / identity</text>
+    <text x="28" y="170" font-size="16" fill="#FFFFFF" font-family="Helvetica, Arial, sans-serif">signalling &amp; data</text>
+  </g>
+  <g transform="translate(470,210)">
+    <rect width="340" height="380" rx="16" fill="#123D26" stroke="#DE2010" stroke-width="2"/>
+    <text x="28" y="60" font-size="22" fill="#FCE300" font-family="Georgia, serif">Inclusion</text>
+    <text x="28" y="110" font-size="16" fill="#FFFFFF" font-family="Helvetica, Arial, sans-serif">Affordable voice,</text>
+    <text x="28" y="140" font-size="16" fill="#FFFFFF" font-family="Helvetica, Arial, sans-serif">data &amp; digital ID</text>
+    <text x="28" y="170" font-size="16" fill="#FFFFFF" font-family="Helvetica, Arial, sans-serif">for all provinces</text>
+  </g>
+  <g transform="translate(860,210)">
+    <rect width="340" height="380" rx="16" fill="#123D26" stroke="#009B48" stroke-width="2"/>
+    <text x="28" y="60" font-size="22" fill="#FCE300" font-family="Georgia, serif">Prosperity</text>
+    <text x="28" y="110" font-size="16" fill="#FFFFFF" font-family="Helvetica, Arial, sans-serif">MVNO designed</text>
+    <text x="28" y="140" font-size="16" fill="#FFFFFF" font-family="Helvetica, Arial, sans-serif">for margin — not</text>
+    <text x="28" y="170" font-size="16" fill="#FFFFFF" font-family="Helvetica, Arial, sans-serif">subsidy forever</text>
+  </g>
+</svg>

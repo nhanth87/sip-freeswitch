@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <rect width="1280" height="720" fill="#FFF9E6"/>
+  <rect x="0" y="0.0" width="1280" height="3.9" fill="#009B48"/>
+<rect x="0" y="3.4" width="1280" height="3.9" fill="#FCE300"/>
+<rect x="0" y="6.9" width="1280" height="3.9" fill="#DE2010"/>
+<rect x="0" y="10.3" width="1280" height="3.9" fill="#000000"/>
+<rect x="0" y="13.7" width="1280" height="3.9" fill="#DE2010"/>
+<rect x="0" y="17.1" width="1280" height="3.9" fill="#FCE300"/>
+<rect x="0" y="20.6" width="1280" height="3.9" fill="#009B48"/>
+  <text x="80" y="100" font-family="Georgia, serif" font-size="40" fill="#0B1F14" font-weight="700">5G Core Network Functions</text>
+  <text x="80" y="145" font-family="Helvetica, Arial, sans-serif" font-size="16" fill="#2A4A35">Cloud-native NFs we deploy &amp; operate for the Zimbabwe MVNO</text>
+  
+  <rect x="120" y="200" width="300" height="150" rx="16" fill="#009B48"/>
+  <text x="270" y="265" text-anchor="middle" fill="#FFFFFF" font-size="32" font-family="Georgia, serif">AMF</text>
+  <text x="270" y="305" text-anchor="middle" fill="#FFFFFF" font-size="14" font-family="Helvetica, Arial, sans-serif">Access &amp; Mobility</text>
+
+  <rect x="480" y="200" width="300" height="150" rx="16" fill="#FCE300"/>
+  <text x="630" y="265" text-anchor="middle" fill="#000000" font-size="32" font-family="Georgia, serif">SMF</text>
+  <text x="630" y="305" text-anchor="middle" fill="#000000" font-size="14" font-family="Helvetica, Arial, sans-serif">Session Mgmt</text>
+
+  <rect x="840" y="200" width="300" height="150" rx="16" fill="#DE2010"/>
+  <text x="990" y="265" text-anchor="middle" fill="#FFFFFF" font-size="32" font-family="Georgia, serif">UPF</text>
+  <text x="990" y="305" text-anchor="middle" fill="#FFFFFF" font-size="14" font-family="Helvetica, Arial, sans-serif">User Plane</text>
+
+  <rect x="120" y="400" width="300" height="150" rx="16" fill="#2A4A35"/>
+  <text x="270" y="465" text-anchor="middle" fill="#FFFFFF" font-size="32" font-family="Georgia, serif">AUSF</text>
+  <text x="270" y="505" text-anchor="middle" fill="#FFFFFF" font-size="14" font-family="Helvetica, Arial, sans-serif">Auth Server</text>
+
+  <rect x="480" y="400" width="300" height="150" rx="16" fill="#000000"/>
+  <text x="630" y="465" text-anchor="middle" fill="#FFFFFF" font-size="32" font-family="Georgia, serif">UDM</text>
+  <text x="630" y="505" text-anchor="middle" fill="#FFFFFF" font-size="14" font-family="Helvetica, Arial, sans-serif">Unified Data</text>
+
+  <rect x="840" y="400" width="300" height="150" rx="16" fill="#009B48"/>
+  <text x="990" y="465" text-anchor="middle" fill="#FFFFFF" font-size="32" font-family="Georgia, serif">NRF</text>
+  <text x="990" y="505" text-anchor="middle" fill="#FFFFFF" font-size="14" font-family="Helvetica, Arial, sans-serif">Discovery</text>
+
+</svg>

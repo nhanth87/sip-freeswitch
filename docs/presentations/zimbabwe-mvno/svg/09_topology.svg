@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <rect width="1280" height="720" fill="#0B1F14"/>
+  <rect x="0" y="0.0" width="1280" height="3.9" fill="#009B48"/>
+<rect x="0" y="3.4" width="1280" height="3.9" fill="#FCE300"/>
+<rect x="0" y="6.9" width="1280" height="3.9" fill="#DE2010"/>
+<rect x="0" y="10.3" width="1280" height="3.9" fill="#000000"/>
+<rect x="0" y="13.7" width="1280" height="3.9" fill="#DE2010"/>
+<rect x="0" y="17.1" width="1280" height="3.9" fill="#FCE300"/>
+<rect x="0" y="20.6" width="1280" height="3.9" fill="#009B48"/>
+  <text x="80" y="100" font-family="Georgia, serif" font-size="36" fill="#FFFFFF" font-weight="700">Service Topology</text>
+  <!-- UE -->
+  <circle cx="160" cy="360" r="55" fill="#FCE300"/>
+  <text x="160" y="368" text-anchor="middle" font-size="18" fill="#000000" font-family="Georgia, serif">UE</text>
+  <!-- RAN -->
+  <rect x="280" y="310" width="140" height="100" rx="12" fill="#009B48"/>
+  <text x="350" y="370" text-anchor="middle" fill="#FFFFFF" font-size="18" font-family="Georgia, serif">RAN</text>
+  <!-- 5GC -->
+  <rect x="480" y="250" width="200" height="80" rx="12" fill="#DE2010"/>
+  <text x="580" y="300" text-anchor="middle" fill="#FFFFFF" font-size="18" font-family="Georgia, serif">5GC</text>
+  <!-- IMS -->
+  <rect x="480" y="360" width="200" height="80" rx="12" fill="#FCE300"/>
+  <text x="580" y="410" text-anchor="middle" fill="#000000" font-size="18" font-family="Georgia, serif">Elisa IMS</text>
+  <!-- CAMARA -->
+  <rect x="760" y="250" width="200" height="80" rx="12" fill="#009B48"/>
+  <text x="860" y="300" text-anchor="middle" fill="#FFFFFF" font-size="16" font-family="Georgia, serif">CAMARA SA</text>
+  <!-- R -->
+  <rect x="760" y="360" width="200" height="80" rx="12" fill="#000000" stroke="#FCE300" stroke-width="2"/>
+  <text x="860" y="410" text-anchor="middle" fill="#FCE300" font-size="18" font-family="Georgia, serif">Analytics R</text>
+  <!-- Banks -->
+  <rect x="1020" y="300" width="180" height="100" rx="12" fill="#FFF9E6"/>
+  <text x="1110" y="360" text-anchor="middle" fill="#0B1F14" font-size="16" font-family="Georgia, serif">Banks / Apps</text>
+  <line x1="215" y1="360" x2="280" y2="360" stroke="#FCE300" stroke-width="3"/>
+  <line x1="420" y1="360" x2="480" y2="360" stroke="#FCE300" stroke-width="3"/>
+  <line x1="680" y1="290" x2="760" y2="290" stroke="#FCE300" stroke-width="3"/>
+  <line x1="680" y1="400" x2="760" y2="400" stroke="#FCE300" stroke-width="3"/>
+  <line x1="960" y1="350" x2="1020" y2="350" stroke="#FCE300" stroke-width="3"/>
+  <text x="80" y="560" fill="#C8E6D0" font-size="16" font-family="Helvetica, Arial, sans-serif">
+    Voice/data sessions stay on-net · Silent auth APIs monetize trust for banks &amp; fintech
+  </text>
+</svg>

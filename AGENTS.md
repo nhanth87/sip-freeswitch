@@ -100,6 +100,18 @@ Admin: `http://127.0.0.1:8088/admin/` (dev `admin`/`admin` when `sf.admin.dev-lo
 
 Do not merge. Do not wire ChipChipVoice TTS → FreeSWITCH playback.
 
+## Do-not-miss checklist (Elisa)
+
+- **Java 25 only** — mise `zulu-25`. Never Java 8/11/17/21. Module name is **`elisa/`** (not sip-servlet).
+- **Ship only `dist/elisa/`** — after `./tools/package-dist.sh`, ship **`dist/elisa/`** alone → `dist/elisa/run.sh`. Never deploy the monorepo / `elisa/src/`. Rsync jars/`bin`/`lib`/`app/html` as packaged — **never** overwrite host `configs/` casually. → [packaging](docs/agents/packaging.md)
+- **Never sandbox `package-dist` / `mvn package|test` / `tools/build-all`** — Shell **`required_permissions: ["all"]`** on the **first** call; do not fail-then-retry. → [lessons](docs/agents/lessons.md)
+- **Prove the artifact, not the source (NON-NEGOTIABLE — SIẾT)** — Green `mvn test` / new unit tests / source greps **NEVER** mean a remote or local host runs the new Elisa code. **Forbidden** to report “fixed” / “done” / “redeployed OK” until **all** of:
+  1. **Package** — `./tools/package-dist.sh` (or `./tools/build-all.sh` then package) — JDK 25.
+  2. **Ship bits only** — copy/rsync the packaged `dist/elisa/` runtime (jars / `bin` / UI) — **never** clobber operator `configs/` without asking.
+  3. **Restart + ready** — restart Elisa → wait **`:8088`** admin/health ready (compose `elisa` service or `dist/elisa/run.sh`).
+  4. **Artifact on host** — jar/html **mtime** vs change, or `jar tf` / class presence for the new symbol; running PID classpath.
+  5. **Live broken surface** — hit the admin/SIP/ESL path that failed (e.g. `/admin/...`, Sofia/ESL status) — health alone may not prove the bug. Never trust `mvn -q test` alone. → [lessons](docs/agents/lessons.md) · [packaging](docs/agents/packaging.md)
+
 ## Constraints
 
 - JDK **25** only (mise `zulu-25`).

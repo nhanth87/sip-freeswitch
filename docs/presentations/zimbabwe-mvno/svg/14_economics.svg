@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <rect width="1280" height="720" fill="#FFF9E6"/>
+  <rect x="0" y="0.0" width="1280" height="3.9" fill="#009B48"/>
+<rect x="0" y="3.4" width="1280" height="3.9" fill="#FCE300"/>
+<rect x="0" y="6.9" width="1280" height="3.9" fill="#DE2010"/>
+<rect x="0" y="10.3" width="1280" height="3.9" fill="#000000"/>
+<rect x="0" y="13.7" width="1280" height="3.9" fill="#DE2010"/>
+<rect x="0" y="17.1" width="1280" height="3.9" fill="#FCE300"/>
+<rect x="0" y="20.6" width="1280" height="3.9" fill="#009B48"/>
+  <text x="80" y="100" font-family="Georgia, serif" font-size="36" fill="#0B1F14" font-weight="700">Unit Economics (Illustrative)</text>
+  <!-- waterfall-ish -->
+  <rect x="100" y="200" width="160" height="320" rx="10" fill="#009B48"/>
+  <text x="180" y="360" text-anchor="middle" fill="#FFFFFF" font-size="16" font-family="Helvetica, Arial, sans-serif">Revenue</text>
+  <rect x="300" y="280" width="160" height="240" rx="10" fill="#DE2010"/>
+  <text x="380" y="400" text-anchor="middle" fill="#FFFFFF" font-size="14" font-family="Helvetica, Arial, sans-serif">Wholesale</text>
+  <rect x="500" y="320" width="160" height="200" rx="10" fill="#2A4A35"/>
+  <text x="580" y="420" text-anchor="middle" fill="#FFFFFF" font-size="14" font-family="Helvetica, Arial, sans-serif">OPEX</text>
+  <rect x="700" y="260" width="160" height="260" rx="10" fill="#FCE300"/>
+  <text x="780" y="390" text-anchor="middle" fill="#000000" font-size="14" font-family="Helvetica, Arial, sans-serif">VAS lift</text>
+  <rect x="900" y="220" width="200" height="300" rx="10" fill="#000000"/>
+  <text x="1000" y="370" text-anchor="middle" fill="#FCE300" font-size="18" font-family="Georgia, serif">Margin</text>
+  <text x="80" y="580" font-size="16" fill="#2A4A35" font-family="Helvetica, Arial, sans-serif">
+    CAMARA verify fees + smart data bundles offset wholesale floor — R enforces floor prices.
+  </text>
+</svg>
