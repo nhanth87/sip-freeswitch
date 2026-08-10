@@ -23,6 +23,7 @@ import et.elisa.ims.charging.PChargingVectors;
 import et.elisa.ims.config.ImsRoleFlags;
 import et.elisa.ims.hss.HssLiteService;
 import et.elisa.ims.reg.BindingStore;
+import et.elisa.logging.SleeEventTrace;
 import et.elisa.metrics.SipCpsMetrics;
 import et.elisa.persist.ImsBinding;
 import java.lang.reflect.Method;
@@ -183,11 +184,18 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
 
     @Override
     public void onEvent(SleeEvent event, ActivityContextInterface aci) {
-        switch (event) {
-            case SipInviteEvent e -> onInvite(e);
-            case SipByeEvent e -> onBye(e);
-            case SipResponseEvent e -> onResponse(e);
-            default -> {}
+        SleeEventTrace.inSbb("ScscfInviteSbb", event);
+        try {
+            switch (event) {
+                case SipInviteEvent e -> onInvite(e);
+                case SipByeEvent e -> onBye(e);
+                case SipResponseEvent e -> onResponse(e);
+                default -> {}
+            }
+            SleeEventTrace.outSbb("ScscfInviteSbb", event, null);
+        } catch (Throwable t) {
+            LOG.error("[S-CSCF] onEvent failed: {}", t.toString(), t);
+            SleeEventTrace.outSbb("ScscfInviteSbb", event, "error=" + t.getClass().getSimpleName());
         }
     }
 

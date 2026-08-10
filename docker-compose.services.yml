@@ -129,3 +129,14 @@ services:
       - "5060:5060/udp"
     depends_on: [pcscf, icscf, scscf, hss]
     networks: [sf-net]
+
+  # Optional CGRates sidecar (grill G4). Without profile, set sf.cgrates.url to an external OCS.
+  #   docker compose -f docker-compose.yml -f docker-compose.services.yml --profile cgrates up -d cgrates
+  # Then: SF_CGRATES_URL=http://cgrates:2080 SF_CGRATES_ENABLED=true SF_CGRATES_CDRS_ENABLED=true SF_CHARGING_DUAL_WRITE=true
+  cgrates:
+    profiles: ["cgrates"]
+    image: cgrates/cgrates:latest
+    command: ["cgr-engine", "-config_path", "/etc/cgrates"]
+    ports:
+      - "2080:2080"
+    networks: [sf-net]

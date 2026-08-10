@@ -11,7 +11,7 @@ Living checklist vs lab IMS Core. Deploy shape: [`multi-service-deploy.md`](mult
 | ISC → FreeSWITCH | **Lab** | iFC-lite string match; ESL correlate |
 | Call session dual-write | **Lab** | ISPN + `sf_call_session` |
 | CDR RestComm-shaped | **Lab** | + `sip_call_id` / `msisdn` / `icid` |
-| P-Charging-Vector / ICID | **Lab** | stamp/preserve on INVITE; CDR `icid` |
+| Charging / Rf / Ro / Gx | **Lab ICID** | ICID + CDR only; Rf/Ro deferred (P1/P2); Gx/Gy/PFCP **No** — [`ims-core.md`](ims-core.md) § Charging |
 | C1–C3 HA | **Lab** | ISPN + VIP + FS pair |
 | ICE/TURN policy | **Lab** | no RTP through Elisa |
 | Tenants / ACL / admin HTMX | **Lab** | profiles, sessions, CDR |

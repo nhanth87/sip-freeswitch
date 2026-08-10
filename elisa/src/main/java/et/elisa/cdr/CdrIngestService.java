@@ -1,23 +1,29 @@
 package et.elisa.cdr;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import et.elisa.cluster.CallSession;
+import et.elisa.ims.charging.ChargingDualWrite;
 import et.elisa.ims.charging.PChargingVectors;
 import et.elisa.persist.SfCdr;
 import et.elisa.persist.SfExtension;
 import et.elisa.persist.SfTenant;
 import et.elisa.session.CallSessionService;
-import et.elisa.cluster.CallSession;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 @ApplicationScoped
 public class CdrIngestService {
 
+    private static final Logger LOG = LogManager.getLogger(CdrIngestService.class);
+
     @Inject CallSessionService callSessions;
+    @Inject ChargingDualWrite chargingDualWrite;
 
     @Transactional
     public SfCdr ingest(JsonNode cdr) {
@@ -93,6 +99,13 @@ public class CdrIngestService {
             }
         }
         row.persist();
+        try {
+            if (chargingDualWrite != null) {
+                chargingDualWrite.afterCdrPersist(row);
+            }
+        } catch (Throwable t) {
+            LOG.warn("CDR charging dual-write soft-fail uuid={}: {}", row.callUuid, t.toString());
+        }
         return row;
     }
 

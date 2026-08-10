@@ -6,6 +6,7 @@ import com.microjainslee.api.SleeEventHandler;
 import com.microjainslee.api.annotations.CmpField;
 import com.microjainslee.api.annotations.SbbAnnotation;
 import com.microjainslee.core.CmpBackedSbb;
+import et.elisa.logging.SleeEventTrace;
 import et.elisa.ra.freeswitch.events.FsApiResponseEvent;
 import et.elisa.ra.freeswitch.events.FsChannelEvent;
 import et.elisa.ra.freeswitch.events.FsHeartbeatEvent;
@@ -119,13 +120,20 @@ public abstract class CallSessionSbb extends CmpBackedSbb implements SleeEventHa
 
     @Override
     public void onEvent(SleeEvent event, ActivityContextInterface aci) {
-        switch (event) {
-            case FsChannelEvent e -> onChannel(e);
-            case FsHeartbeatEvent e ->
-                    LOG.debug("[FS] HEARTBEAT uptime={}", e.headers().getOrDefault("Up-Time", "?"));
-            case FsApiResponseEvent e ->
-                    LOG.debug("[FS] api requestId={} ok={} live={}", e.requestId(), e.ok(), e.live());
-            default -> {}
+        SleeEventTrace.inSbb("CallSessionSbb", event);
+        try {
+            switch (event) {
+                case FsChannelEvent e -> onChannel(e);
+                case FsHeartbeatEvent e ->
+                        LOG.debug("[FS] HEARTBEAT uptime={}", e.headers().getOrDefault("Up-Time", "?"));
+                case FsApiResponseEvent e ->
+                        LOG.debug("[FS] api requestId={} ok={} live={}", e.requestId(), e.ok(), e.live());
+                default -> {}
+            }
+            SleeEventTrace.outSbb("CallSessionSbb", event, null);
+        } catch (Throwable t) {
+            LOG.error("[CallSessionSbb] onEvent failed: {}", t.toString(), t);
+            SleeEventTrace.outSbb("CallSessionSbb", event, "error=" + t.getClass().getSimpleName());
         }
     }
 

@@ -269,6 +269,20 @@ sequenceDiagram
 - VoLTE/VoNR certification claims without interconnect tests
 - nginx as SIP application / RTP proxy
 
+## Charging (grill locks)
+
+| Phase | Lock |
+|-------|------|
+| **P0 docs** | PFCP / Gx / Gy **out**; lab = **ICID** (`P-Charging-Vector`) + CDR correlation |
+| **P1 (G2=C)** | Offline dual-write: Diameter **Rf** ACR stub keyed by `icid` **+** HTTP CGRates **CDRsV1**, behind feature flag |
+| **P2 (G3/G4)** | CGRates SessionS (Ro-like); account key default **`msisdn`**; optional compose profile `cgrates` |
+| **OCS down (G3)** | **`sf.ocs.mode=deferred`**: fake-continue + durable pending debit (`icid` / `sipCallId`); reconcile on recover — **not** hard 403. When OCS **UP** + credit fail → SIP/AS **302** later, not UPF |
+| **Never** | PFCP/N4, Gx, Gy, Gx-over-Gy (App-Id 16777225), owning PCRF/PCEF, RTP through Elisa, SBC |
+
+**Improve plan (G1–G5):** [`elisa-improve-plan.md`](elisa-improve-plan.md) — Phase A + B stub + Phase C scaffold landed; SessionS INVITE gate / PG pending / real Rf Diameter = follow-up.
+
+No Rx ⇒ no dedicated-bearer VoLTE QoS claims. Footguns: [`lessons.md`](lessons.md) § PFCP / Gx / Gy + Elisa improve (2026-08-10).
+
 ## Related
 
 - Spec header preserve list: [`3gpp-sip-ims.md`](3gpp-sip-ims.md)
@@ -278,3 +292,4 @@ sequenceDiagram
 - FS control / xml_curl: [`fs-control.md`](fs-control.md)
 - User profile + FS call correlate: [`user-profile.md`](user-profile.md)
 - JAIN SLEE ProfileFacility: [`jainslee-profile.md`](jainslee-profile.md)
+- Charging / CGRates improve (G1–G5): [`elisa-improve-plan.md`](elisa-improve-plan.md)
