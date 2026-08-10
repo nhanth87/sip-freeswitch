@@ -92,8 +92,17 @@ public final class ScscfRegisterSbb implements Sbb, SleeEventHandler {
                 send(SendResponse.of(e.callId(), 500, "Server Internal Error"));
                 return;
             }
+            String xresHex = maa.get(CxCodec.SIP_AUTHORIZATION);
+            if (xresHex == null || xresHex.isBlank()) {
+                send(SendResponse.of(e.callId(), 500, "Server Internal Error"));
+                return;
+            }
             byte[] rand = AkaMd5.parseHex(randAutn.substring(0, 32));
             byte[] autn = AkaMd5.parseHex(randAutn.substring(32, 64));
+            // TS 29.229: S-CSCF must retain XRES from MAA to verify UE RES (remote HSS path).
+            if (hss != null) {
+                hss.rememberChallenge(e.callId(), impi, impu, AkaMd5.parseHex(xresHex), sqnFromAutn(autn));
+            }
             String www = AkaMd5.wwwAuthenticate(roles.realm(), rand, autn);
             send(SendResponse.withHeaders(e.callId(), 401, "Unauthorized",
                     Map.of("WWW-Authenticate", www)));
@@ -140,6 +149,18 @@ public final class ScscfRegisterSbb implements Sbb, SleeEventHandler {
             return from.replaceFirst("(?i)^sip:", "");
         }
         return impu == null ? "" : impu.replaceFirst("(?i)^sip:", "");
+    }
+
+    /** AUTN = SQN(6) || AMF(2) || MAC-A(8) — SQN is the value embedded in the challenge. */
+    private static long sqnFromAutn(byte[] autn) {
+        if (autn == null || autn.length < 6) {
+            return 0L;
+        }
+        long v = 0;
+        for (int i = 0; i < 6; i++) {
+            v = (v << 8) | (autn[i] & 0xffL);
+        }
+        return v;
     }
 
     private void send(SendResponse cmd) {

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.microjainslee.ra.sipservlet.command.SendInvite;
+import com.microjainslee.ra.sipservlet.command.SendRegister;
 import com.microjainslee.ra.sipservlet.command.SendResponse;
 import com.microjainslee.ra.sipservlet.events.SipInviteEvent;
 import com.microjainslee.ra.sipservlet.events.SipRegisterEvent;
@@ -28,13 +29,15 @@ class IcscfRoutingSbbTest {
     }
 
     @Test
-    void register_iOnly_503WhenNoScscf() {
+    void register_iOnly_mwForwardsToScscf() {
         CapturingRa ra = new CapturingRa();
         StubCx cx = new StubCx(CxCodec.uaaAvps("sip:scscf.ims.lab"), Map.of());
         IcscfRoutingSbb sbb = new IcscfRoutingSbb(ImsTestSupport.roles(false, true, false, false), cx);
         ImsTestSupport.injectRa(sbb, ra);
         sbb.onRegister(new SipRegisterEvent("c1", "sip:u@ims.lab", "sip:u@ims.lab", "sip:u@1", 3600));
-        assertEquals(503, ra.ofType(SendResponse.class).getFirst().statusCode());
+        SendRegister reg = ra.ofType(SendRegister.class).getFirst();
+        assertTrue(reg.requestUri().contains("scscf"));
+        assertEquals(3600, reg.expires());
     }
 
     @Test

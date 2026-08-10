@@ -1,0 +1,131 @@
+# Overlay: one elisa image, deploy by IMS service (+ optional N–N S/FS).
+#
+# Lab all-in-one (unchanged):
+#   docker compose up -d --build
+#
+# Split services (scale down combined elisa + default nginx):
+#   docker compose -f docker-compose.yml -f docker-compose.services.yml \
+#     --profile services up -d --build --scale elisa=0 --scale nginx=0
+#
+# N–N second S-CSCF + FS:
+#   ... --profile services --profile nn up -d --build --scale elisa=0 --scale nginx=0
+
+services:
+  pcscf:
+    profiles: ["services"]
+    build: ./elisa
+    env_file: [./deploy/elisa/roles/pcscf.env]
+    environment:
+      SF_JDBC_URL: jdbc:postgresql://postgres:5432/elisa
+      SF_DB_USER: elisa
+      SF_DB_PASSWORD: elisa
+      SF_HTML_DIR: /html
+      SF_MEDIA_RTP_REDIRECT: "true"
+      SF_MEDIA_REQUIRE_TURN: "true"
+      SF_MEDIA_ICE_REQUIRED: "true"
+      SF_MEDIA_TURN_URI: turn:coturn:3478
+      SF_MEDIA_TURN_USERNAME: elisa
+      SF_MEDIA_TURN_CREDENTIAL: elisaturn
+      SF_MEDIA_STUN_URI: stun:coturn:3478
+      SIP_RA_ICE_ENABLED: "true"
+      SIP_RA_STUN_SERVER: coturn
+      SIP_RA_STUN_PORT: "3478"
+    volumes: [./app/html:/html:ro]
+    expose: ["8088", "5060"]
+    depends_on: [postgres, coturn]
+    networks: [sf-net]
+
+  icscf:
+    profiles: ["services"]
+    build: ./elisa
+    env_file: [./deploy/elisa/roles/icscf.env]
+    environment:
+      SF_JDBC_URL: jdbc:postgresql://postgres:5432/elisa
+      SF_DB_USER: elisa
+      SF_DB_PASSWORD: elisa
+      SF_HTML_DIR: /html
+    volumes: [./app/html:/html:ro]
+    expose: ["8088", "5060"]
+    depends_on: [postgres, hss]
+    networks: [sf-net]
+
+  scscf:
+    profiles: ["services"]
+    build: ./elisa
+    env_file: [./deploy/elisa/roles/scscf.env]
+    environment:
+      SF_JDBC_URL: jdbc:postgresql://postgres:5432/elisa
+      SF_DB_USER: elisa
+      SF_DB_PASSWORD: elisa
+      SF_HTML_DIR: /html
+      SF_ESL_HOST: freeswitch
+      SF_TRUNK_FREESWITCH_URI: sip:1000@freeswitch:5060
+      SF_CLUSTER_NODE_ID: elisa-scscf-1
+      SF_CLUSTER_ISPN_MODE: DIST_SYNC
+      SF_MEDIA_RTP_REDIRECT: "true"
+      SF_MEDIA_REQUIRE_TURN: "true"
+      SF_MEDIA_ICE_REQUIRED: "true"
+      SF_MEDIA_TURN_URI: turn:coturn:3478
+      SF_MEDIA_TURN_USERNAME: elisa
+      SF_MEDIA_TURN_CREDENTIAL: elisaturn
+      SF_MEDIA_STUN_URI: stun:coturn:3478
+    volumes: [./app/html:/html:ro]
+    expose: ["8088", "5060"]
+    depends_on: [postgres, freeswitch, hss, coturn]
+    networks: [sf-net]
+
+  scscf-2:
+    profiles: ["services", "nn"]
+    build: ./elisa
+    env_file: [./deploy/elisa/roles/scscf.env]
+    environment:
+      SF_JDBC_URL: jdbc:postgresql://postgres:5432/elisa
+      SF_DB_USER: elisa
+      SF_DB_PASSWORD: elisa
+      SF_HTML_DIR: /html
+      SF_ESL_HOST: freeswitch-2
+      SF_TRUNK_FREESWITCH_URI: sip:1000@freeswitch-2:5060
+      SF_CLUSTER_NODE_ID: elisa-scscf-2
+      SF_CLUSTER_ISPN_MODE: DIST_SYNC
+      SF_IMS_SCSCF_URI: sip:scscf-2:5060
+    volumes: [./app/html:/html:ro]
+    expose: ["8088", "5060"]
+    depends_on: [postgres, freeswitch-2, hss]
+    networks: [sf-net]
+
+  freeswitch-2:
+    profiles: ["services", "nn"]
+    image: safarov/freeswitch:latest
+    volumes:
+      - ./freeswitch/conf/autoload_configs/event_socket.conf.xml:/etc/freeswitch/autoload_configs/event_socket.conf.xml:ro
+      - ./freeswitch/conf/autoload_configs/xml_curl.conf.xml:/etc/freeswitch/autoload_configs/xml_curl.conf.xml:ro
+      - ./freeswitch/conf/sip_profiles/external.xml:/etc/freeswitch/sip_profiles/external.xml:ro
+    expose: ["5060", "8021"]
+    networks: [sf-net]
+
+  hss:
+    profiles: ["services"]
+    build: ./elisa
+    env_file: [./deploy/elisa/roles/hss.env]
+    environment:
+      SF_JDBC_URL: jdbc:postgresql://postgres:5432/elisa
+      SF_DB_USER: elisa
+      SF_DB_PASSWORD: elisa
+      SF_HTML_DIR: /html
+    volumes: [./app/html:/html:ro]
+    expose: ["8088", "3868"]
+    depends_on: [postgres]
+    networks: [sf-net]
+
+  nginx-services:
+    profiles: ["services"]
+    build: ./deploy/nginx
+    volumes:
+      - ./deploy/nginx/nginx.services.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "8080:8080"
+      - "8443:8443"
+      - "5060:5060/tcp"
+      - "5060:5060/udp"
+    depends_on: [pcscf, icscf, scscf, hss]
+    networks: [sf-net]

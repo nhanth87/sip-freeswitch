@@ -86,6 +86,9 @@ public class SfCdr extends PanacheEntityBase {
     public String sipCallId;
     @Column(length = 32)
     public String msisdn;
+    /** P-Charging-Vector icid-value (lab IMS charging correlate). */
+    @Column(length = 64)
+    public String icid;
 
     @Column(columnDefinition = "text")
     public String payload;

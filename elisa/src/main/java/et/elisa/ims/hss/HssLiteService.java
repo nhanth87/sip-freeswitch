@@ -105,6 +105,21 @@ public class HssLiteService {
         return Optional.ofNullable(pending.get(callId));
     }
 
+    /**
+     * Cache XRES from Cx MAA (TS 29.229 SIP-Authorization) so S-CSCF can verify
+     * the subsequent REGISTER when HSS is remote or when MAR short-circuits.
+     */
+    public void rememberChallenge(String callId, String impi, String impu, byte[] xres, long nextSqn) {
+        if (xres == null || xres.length == 0 || impi == null || impi.isBlank()) {
+            return;
+        }
+        PendingAuth p = new PendingAuth(impi, impu, xres, nextSqn);
+        if (callId != null && !callId.isBlank()) {
+            pending.put(callId, p);
+        }
+        pending.put(impi, p);
+    }
+
     @Transactional
     public void commitSqn(String impi, long nextSqn) {
         ImsSubscriber sub = findByImpi(impi).orElse(null);

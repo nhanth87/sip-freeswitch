@@ -119,6 +119,7 @@ create table sf_cdr (
   hangup_cause varchar(64),
   sip_call_id varchar(255),
   msisdn varchar(32),
+  icid varchar(64),
   payload text,
   created_at timestamptz not null default now()
 );
@@ -127,6 +128,7 @@ create index sf_cdr_reseller_time_idx on sf_cdr (reseller_id, start_time desc nu
 create index sf_cdr_uuid_idx on sf_cdr (call_uuid);
 create index sf_cdr_sip_call_id_idx on sf_cdr (sip_call_id);
 create index sf_cdr_msisdn_idx on sf_cdr (msisdn);
+create index sf_cdr_icid_idx on sf_cdr (icid);
 
 create table sf_recording (
   id bigserial primary key,

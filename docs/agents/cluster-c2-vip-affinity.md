@@ -27,7 +27,7 @@ UA ── VIP / L4 LB ──► Elisa-1 .. Elisa-N
 
 UDP SIP load-balancing is weaker than TCP/TLS; lab can pin UA → one Elisa. Production: prefer SIP over TCP/TLS behind the VIP.
 
-Elisa does **not** own the VIP — nginx/stream or an L4 appliance does. Elisa keeps the SIP transaction/dialog state machine on the node that accepted the INVITE.
+Elisa does **not** own the VIP — **nginx `stream`** (locked) or an L4 appliance does. Design: [`nginx-ingress.md`](nginx-ingress.md) (N1–N8). Elisa keeps the SIP transaction/dialog state machine on the node that accepted the INVITE.
 
 ## Sofia profile affinity (FreeSWITCH)
 

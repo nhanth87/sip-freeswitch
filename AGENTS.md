@@ -21,9 +21,9 @@ Symlink: `worktrees/sip-freeswitch/main`. Chat worktree: `worktrees/sip-freeswit
 | FreeSWITCH control via **`ra-freeswitch`** (ESL) | FreePBX as signaling controller |
 | Admin HTTP, xml_curl, ACL, CDR, IMS subscribers | |
 
-**Media** stays on FreeSWITCH as MRF/AS (+ TURN/ICE). **Ingress later:** nginx in front of admin HTTP; SIP L4 if needed — Elisa keeps the SIP state machine.
+**Media** stays on FreeSWITCH as MRF/AS (+ TURN/ICE). **Ingress (locked):** nginx in front — HTTPS admin + SIP L4 VIP; RTP/TURN bypass nginx — [`docs/agents/nginx-ingress.md`](docs/agents/nginx-ingress.md). Elisa keeps the SIP state machine.
 
-Grill locks I1–I8: [`docs/agents/ims-core.md`](docs/agents/ims-core.md). Also [`architecture.md`](docs/agents/architecture.md), [`3gpp-sip-ims.md`](docs/agents/3gpp-sip-ims.md), [`ra-freeswitch.md`](docs/agents/ra-freeswitch.md).
+Grill locks I1–I8: [`docs/agents/ims-core.md`](docs/agents/ims-core.md). Also [`architecture.md`](docs/agents/architecture.md), [`nginx-ingress.md`](docs/agents/nginx-ingress.md), [`3gpp-sip-ims.md`](docs/agents/3gpp-sip-ims.md), [`ra-freeswitch.md`](docs/agents/ra-freeswitch.md).
 
 ## Planned RA split (grill-locked direction)
 
@@ -81,7 +81,7 @@ Do not claim 10k until SIPp green — [`docs/agents/capacity-acceptance.md`](doc
 | **2** | [`freeswitch/`](freeswitch/) | FreeSWITCH conf overlays + lab |
 | **3** | [`app/html/`](app/html/) | Disk admin UI ({{TOKEN}}, HTMX) |
 | **4** | [`loadtest/`](loadtest/) | SIPp CPS harness |
-| **5** | [`docs/agents/`](docs/agents/) | architecture, ra-freeswitch, 3gpp-sip-ims, media-ice-turn, … |
+| **5** | [`docs/agents/`](docs/agents/) | architecture, multi-service-deploy (1 code → P/I/S/HSS + N–N), ra-freeswitch, … |
 | **6** | [`tools/`](tools/) | build-all, smoke, bench-cps, package-dist |
 
 ```bash
@@ -112,6 +112,8 @@ Do not merge. Do not wire ChipChipVoice TTS → FreeSWITCH playback.
   4. **Artifact on host** — jar/html **mtime** vs change, or `jar tf` / class presence for the new symbol; running PID classpath.
   5. **Live broken surface** — hit the admin/SIP/ESL path that failed (e.g. `/admin/...`, Sofia/ESL status) — health alone may not prove the bug. Never trust `mvn -q test` alone. → [lessons](docs/agents/lessons.md) · [packaging](docs/agents/packaging.md)
 
+- **Session/identity SIẾT (shared)** — in-flight PK ≠ user/profile PK; rehydrate wipes heap CAS; stamp peer gen to session; no per-tick write storms; Digicom/Quarkus = PG bake + rsync runtime only (never `configs/`). → skill `digicom-et-host` § Session / identity SIẾT · parent [`docs/agents/lessons.md`](../../../docs/agents/lessons.md)
+
 ## Constraints
 
 - JDK **25** only (mise `zulu-25`).
@@ -120,5 +122,5 @@ Do not merge. Do not wire ChipChipVoice TTS → FreeSWITCH playback.
 - Hot-path: no INFO SIP body dumps.
 - Admin UI standard: [`docs/agents/admin-ui.md`](docs/agents/admin-ui.md) (OTA sim-push pattern).
 - Media: **rtp_redirect** (default on) — ICE + TURN relay so RTP crosses the firewall; FS `bypass_media=false`. Elisa does not relay RTP. See [`docs/agents/media-ice-turn.md`](docs/agents/media-ice-turn.md).
-- **Not an SBC**; SIP only; nginx in front later — [`docs/agents/architecture.md`](docs/agents/architecture.md).
+- **Not an SBC**; SIP only; nginx edge VIP — [`docs/agents/nginx-ingress.md`](docs/agents/nginx-ingress.md) · [`docs/agents/architecture.md`](docs/agents/architecture.md).
 - **RA split:** `ra-sip-servlet` = SIP; **`ra-freeswitch`** = ESL/control (JAINSLEE 3-port). See Planned RA split above + [`docs/agents/ra-freeswitch.md`](docs/agents/ra-freeswitch.md).

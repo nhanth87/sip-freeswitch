@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.microjainslee.ra.sipservlet.command.SendInvite;
-import com.microjainslee.ra.sipservlet.command.SendResponse;
+import com.microjainslee.ra.sipservlet.command.SendRegister;
 import com.microjainslee.ra.sipservlet.events.SipInviteEvent;
 import com.microjainslee.ra.sipservlet.events.SipRegisterEvent;
 import et.elisa.ims.support.ImsTestSupport;
@@ -25,14 +25,15 @@ class PcscfProxySbbTest {
     }
 
     @Test
-    void pOnly_registerReturns503WithPath() {
+    void pOnly_registerMwForwardsToIcscfWithPath() {
         CapturingRa ra = new CapturingRa();
         PcscfProxySbb sbb = new PcscfProxySbb(ImsTestSupport.roles(true, false, false, false));
         ImsTestSupport.injectRa(sbb, ra);
         sbb.onRegister(new SipRegisterEvent("c1", "sip:a@ims.lab", "sip:a@ims.lab", "sip:a@1", 600));
-        SendResponse r = ra.ofType(SendResponse.class).getFirst();
-        assertEquals(503, r.statusCode());
-        assertTrue(r.headers().get("Path").contains("pcscf"));
+        SendRegister reg = ra.ofType(SendRegister.class).getFirst();
+        assertTrue(reg.requestUri().contains("icscf"));
+        assertTrue(reg.extensionHeaders().get("Path").getFirst().contains("pcscf"));
+        assertEquals(600, reg.expires());
     }
 
     @Test
@@ -46,6 +47,8 @@ class PcscfProxySbbTest {
         assertTrue(inv.toUri().contains("icscf"));
         assertEquals("sip:a@ims.lab", inv.extensionHeaders().get("P-Asserted-Identity").getFirst());
         assertTrue(inv.extensionHeaders().get("Route").getFirst().contains("icscf"));
+        assertTrue(inv.extensionHeaders().get("P-Charging-Vector").getFirst().contains("icid-value="));
+        assertTrue(inv.extensionHeaders().containsKey("X-Elisa-Icid"));
     }
 
     @Test

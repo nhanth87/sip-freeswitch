@@ -1,5 +1,7 @@
 # Lessons
 
+**Shared (USSDGW / OTA / Elisa / jain-slee):** workspace [`docs/agents/lessons.md`](../../../../../docs/agents/lessons.md) · skill `digicom-et-host`.
+
 - Do not put FreeSWITCH status on the dashboard (OTA rule) — use `/admin/sofia` + `/admin/links/fs`.
 - ESL soft-fails when FS is down; admin must show `eslLive=false`, never fake REGED.
 - Hot-path SIP: DEBUG only for message bodies (CPS).

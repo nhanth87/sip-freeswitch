@@ -19,6 +19,7 @@ import com.microjainslee.ra.sipservlet.events.SipResponseEvent;
 import et.elisa.cluster.DialogCheckpoint;
 import et.elisa.cmp.DialogCmpPersistence;
 import et.elisa.cmp.InviteCmpSnapshot;
+import et.elisa.ims.charging.PChargingVectors;
 import et.elisa.ims.config.ImsRoleFlags;
 import et.elisa.ims.hss.HssLiteService;
 import et.elisa.ims.reg.BindingStore;
@@ -208,7 +209,8 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
             if (isc != null && isc.shouldInvokeAs(ifc)) {
                 target = isc.asUri();
             } else {
-                target = isc == null ? to : isc.asUri();
+                // iFC skip / no AS → route toward Request-URI (callee), not force AS
+                target = to;
             }
         }
         String msisdn = hss == null ? null
@@ -221,12 +223,13 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
                 fsNodeId, nodeId, DialogCheckpoint.STATE_INVITE, now, now));
         flushCmp();
         LOG.debug("[S-CSCF] INVITE callId={} target={} terminating={}", e.callId(), target, terminating);
-        Map<String, java.util.List<String>> ims = new java.util.LinkedHashMap<>(
-                e.imsHeaders() == null ? Map.of() : e.imsHeaders());
+        Map<String, java.util.List<String>> ims = PChargingVectors.copyIms(e.imsHeaders());
         if (!ims.containsKey("P-Asserted-Identity") && e.fromUri() != null) {
             ims.put("P-Asserted-Identity", java.util.List.of(e.fromUri()));
         }
         ims.put("X-Elisa-Sip-Call-Id", java.util.List.of(e.callId()));
+        String realm = roles.realm() != null ? roles.realm() : "ims.lab";
+        PChargingVectors.ensureInvite(ims, e.callId(), realm);
         if (!terminating) {
             ims.put("Route", java.util.List.of("<" + target + ";lr>"));
         }

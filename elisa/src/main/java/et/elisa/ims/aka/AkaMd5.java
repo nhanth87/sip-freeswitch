@@ -81,7 +81,11 @@ public final class AkaMd5 {
         if (end < 0) {
             return null;
         }
-        return parseHex(authorization.substring(start, end));
+        String hex = authorization.substring(start, end).trim();
+        if (hex.isEmpty()) {
+            return null;
+        }
+        return parseHex(hex);
     }
 
     private static byte[] sqnToBytes(long sqn) {

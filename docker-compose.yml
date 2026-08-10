@@ -9,6 +9,7 @@ services:
     networks: [sf-net]
 
   # TURN/STUN for media — UAs must use relay when sf.media.require-turn=true
+  # RTP/TURN bypass nginx (N4)
   coturn:
     image: coturn/coturn:4.6.2
     command:
@@ -36,6 +37,7 @@ services:
       - ./freeswitch/conf/autoload_configs/event_socket.conf.xml:/etc/freeswitch/autoload_configs/event_socket.conf.xml:ro
       - ./freeswitch/conf/autoload_configs/xml_curl.conf.xml:/etc/freeswitch/autoload_configs/xml_curl.conf.xml:ro
       - ./freeswitch/conf/sip_profiles/external.xml:/etc/freeswitch/sip_profiles/external.xml:ro
+    # ESL + RTP published; SIP trunk stays on sf-net (Elisa→FS). xml_curl → elisa:8088 internal.
     ports: ["5062:5060/udp", "5062:5060/tcp", "8021:8021", "16384-16484:16384-16484/udp"]
     networks: [sf-net]
 
@@ -59,9 +61,26 @@ services:
       SIP_RA_ICE_ENABLED: "true"
       SIP_RA_STUN_SERVER: coturn
       SIP_RA_STUN_PORT: "3478"
+      # N6 — advertise VIP hostname (clients hit nginx :5060)
+      SF_IMS_PCSCF_URI: sip:pcscf.ims.lab:5060
+      SF_IMS_ICSCF_URI: sip:pcscf.ims.lab:5060
+      SF_IMS_SCSCF_URI: sip:pcscf.ims.lab:5060
     volumes:
       - ./app/html:/html:ro
-    ports: ["8088:8088", "5060:5060/udp", "5060:5060/tcp"]
+    # SIP + admin only on sf-net; public edge is nginx (N1)
+    expose:
+      - "8088"
+      - "5060"
+    networks: [sf-net]
+
+  nginx:
+    build: ./deploy/nginx
+    depends_on: [elisa]
+    ports:
+      - "8080:8080"           # admin HTTP lab
+      - "8443:8443"           # admin HTTPS
+      - "5060:5060/tcp"       # SIP VIP TCP
+      - "5060:5060/udp"       # SIP VIP UDP (lab)
     networks: [sf-net]
 
 networks: {sf-net: {}}

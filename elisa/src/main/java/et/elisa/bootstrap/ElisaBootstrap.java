@@ -130,19 +130,37 @@ final class ElisaBootstrap {
         wireTelemetry();
         registerSbbTypes();
         bindInitialEventSelector();
-        wireSipRa();
-        wireFreeSwitchRa();
+        if (needsSipPlane()) {
+            wireSipRa();
+        } else {
+            LOG.info("SIP RA skipped (role plane has no CSCF — HSS-only / Cx service)");
+        }
+        if (needsFsPlane()) {
+            wireFreeSwitchRa();
+        } else {
+            LOG.info("FreeSWITCH RA skipped (not S-CSCF / non-IMS edge)");
+        }
         wireDiameterRa();
         wirePrometheusRa();
         mapEventToSbb();
         wireSbbRecovery();
         FsPairRegistry.EslTarget primary = fsPairRegistry.primary().orElse(null);
         LOG.info("=== Elisa Ready — SIP {}:{} IMS[{}] esl={}:{} node={} cxPeerReady={} ===",
-                udpPort, tcpPort, imsRoles.summary(),
-                primary != null ? primary.host() : eslHost,
-                primary != null ? primary.port() : eslPort,
+                needsSipPlane() ? udpPort : 0, needsSipPlane() ? tcpPort : 0, imsRoles.summary(),
+                needsFsPlane() ? (primary != null ? primary.host() : eslHost) : "-",
+                needsFsPlane() ? (primary != null ? primary.port() : eslPort) : 0,
                 fsPairRegistry.nodeId(),
                 diameterRaBridge.peerReady());
+    }
+
+    /** Gm/Mw/ISC SIP plane — any CSCF, or legacy non-IMS edge. */
+    private boolean needsSipPlane() {
+        return !imsRoles.enabled() || imsRoles.anyCscf();
+    }
+
+    /** ESL / CallSession — S-CSCF (ISC↔FS) or legacy non-IMS edge. */
+    private boolean needsFsPlane() {
+        return !imsRoles.enabled() || imsRoles.scscf();
     }
 
     @PreDestroy
@@ -291,17 +309,23 @@ final class ElisaBootstrap {
         String nodeId = fsPairRegistry.nodeId();
         boolean preferRelay = media.requireTurn();
 
-        container.registerSbbType(ProxySbb.class,
-                () -> new ProxySbb(trunk, domain, metrics, acl, media, cps, nodeId,
-                        freeSwitchRaBridge.activeFsNodeId() != null
-                                ? freeSwitchRaBridge.activeFsNodeId() : "fallback"));
-        container.registerSbbType(RegistrationSbb.class, () -> new RegistrationSbb(acl));
-        container.registerSbbType(IceNegotiationSbb.class, () -> new IceNegotiationSbb(preferRelay));
-        container.registerSbbType(FreeSwitchMonitorSbb.class, FreeSwitchMonitorSbb::new);
-        container.registerSbbType(CallSessionSbb.class,
-                () -> new CallSessionSbb.$Concrete(callSessionService,
-                        freeSwitchRaBridge.activeFsNodeId() != null
-                                ? freeSwitchRaBridge.activeFsNodeId() : "fallback"));
+        if (needsSipPlane() && !imsRoles.anyCscf()) {
+            container.registerSbbType(ProxySbb.class,
+                    () -> new ProxySbb(trunk, domain, metrics, acl, media, cps, nodeId,
+                            freeSwitchRaBridge.activeFsNodeId() != null
+                                    ? freeSwitchRaBridge.activeFsNodeId() : "fallback"));
+            container.registerSbbType(RegistrationSbb.class, () -> new RegistrationSbb(acl));
+        }
+        if (needsSipPlane()) {
+            container.registerSbbType(IceNegotiationSbb.class, () -> new IceNegotiationSbb(preferRelay));
+        }
+        if (needsFsPlane()) {
+            container.registerSbbType(FreeSwitchMonitorSbb.class, FreeSwitchMonitorSbb::new);
+            container.registerSbbType(CallSessionSbb.class,
+                    () -> new CallSessionSbb.$Concrete(callSessionService,
+                            freeSwitchRaBridge.activeFsNodeId() != null
+                                    ? freeSwitchRaBridge.activeFsNodeId() : "fallback"));
+        }
 
         if (imsRoles.scscf()) {
             container.registerSbbType(ScscfRegisterSbb.class,
@@ -337,17 +361,22 @@ final class ElisaBootstrap {
         } else if (imsRoles.icscf()) {
             container.mapEventToSbb(SipRegisterEvent.class, "IcscfRoutingSbb");
             container.mapEventToSbb(SipInviteEvent.class, "IcscfRoutingSbb");
-        } else {
+            container.mapEventToSbb(SipResponseEvent.class, "IcscfRoutingSbb");
+        } else if (needsSipPlane()) {
             container.mapEventToSbb(SipInviteEvent.class, "ProxySbb");
             container.mapEventToSbb(SipResponseEvent.class, "ProxySbb");
             container.mapEventToSbb(SipRegisterEvent.class, "RegistrationSbb");
         }
-        container.mapEventToSbb(IceCandidateEvent.class, "IceNegotiationSbb");
-        container.mapEventToSbb(IceCompletedEvent.class, "IceNegotiationSbb");
-        container.mapEventToSbb(IceFailedEvent.class, "IceNegotiationSbb");
-        container.mapEventToSbb(FsHeartbeatEvent.class, "CallSessionSbb");
-        container.mapEventToSbb(FsChannelEvent.class, "CallSessionSbb");
-        container.mapEventToSbb(FsApiResponseEvent.class, "CallSessionSbb");
+        if (needsSipPlane()) {
+            container.mapEventToSbb(IceCandidateEvent.class, "IceNegotiationSbb");
+            container.mapEventToSbb(IceCompletedEvent.class, "IceNegotiationSbb");
+            container.mapEventToSbb(IceFailedEvent.class, "IceNegotiationSbb");
+        }
+        if (needsFsPlane()) {
+            container.mapEventToSbb(FsHeartbeatEvent.class, "CallSessionSbb");
+            container.mapEventToSbb(FsChannelEvent.class, "CallSessionSbb");
+            container.mapEventToSbb(FsApiResponseEvent.class, "CallSessionSbb");
+        }
         if (cxEnabled && (imsRoles.hss() || imsRoles.icscf() || imsRoles.scscf())) {
             container.mapEventToSbb(DiameterRequestEvent.class, "DiameterCxSbb");
             container.mapEventToSbb(DiameterAnswerEvent.class, "DiameterCxSbb");

@@ -1,6 +1,7 @@
 package et.elisa.cdr;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import et.elisa.ims.charging.PChargingVectors;
 import et.elisa.persist.SfCdr;
 import et.elisa.persist.SfExtension;
 import et.elisa.persist.SfTenant;
@@ -66,6 +67,15 @@ public class CdrIngestService {
         }
         if ((row.msisdn == null || row.msisdn.isBlank())) {
             row.msisdn = text(cdr, "variable_msisdn", null);
+        }
+        if (row.icid == null || row.icid.isBlank()) {
+            String pcv = text(cdr, "variable_sip_h_p-charging-vector",
+                    text(cdr, "variable_sip_h_P-Charging-Vector", null));
+            row.icid = blankToNull(PChargingVectors.extractIcidValue(pcv));
+            if (row.icid == null) {
+                row.icid = blankToNull(text(cdr, "variable_elisa_icid",
+                        text(cdr, "variable_sip_h_X-Elisa-Icid", null)));
+            }
         }
 
         if (row.tenantId != null) {

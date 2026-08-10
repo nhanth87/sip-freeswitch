@@ -7,13 +7,14 @@ import com.microjainslee.api.SleeEvent;
 import com.microjainslee.api.SleeEventHandler;
 import com.microjainslee.api.annotations.InjectRa;
 import com.microjainslee.ra.sipservlet.command.SendInvite;
+import com.microjainslee.ra.sipservlet.command.SendRegister;
 import com.microjainslee.ra.sipservlet.command.SendResponse;
 import com.microjainslee.ra.sipservlet.command.SipOutboundCommand;
 import com.microjainslee.ra.sipservlet.events.SipInviteEvent;
 import com.microjainslee.ra.sipservlet.events.SipRegisterEvent;
 import com.microjainslee.ra.sipservlet.events.SipResponseEvent;
+import et.elisa.ims.charging.PChargingVectors;
 import et.elisa.ims.config.ImsRoleFlags;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.apache.logging.log4j.LogManager;
@@ -61,12 +62,23 @@ public final class PcscfProxySbb implements Sbb, SleeEventHandler {
         }
         String path = "<" + roles.pcscfUri() + ";lr>";
         LOG.debug("[P-CSCF] REGISTER Path={} callId={} (sec-agree soft-fail)", path, e.callId());
-        // Co-located I/S: ScscfRegisterSbb owns AKA; Path is stamped on 200 by S-CSCF.
-        // P-only deploy: no Mw hop yet — reject until split forward exists.
-        if (!roles.scscf() && !roles.icscf()) {
-            send(SendResponse.withHeaders(e.callId(), 503, "Service Unavailable",
-                    Map.of("Path", path)));
+        // Co-located I/S: ScscfRegisterSbb owns AKA; Path stamped on 200 by S-CSCF.
+        if (roles.scscf() || roles.icscf()) {
+            return;
         }
+        // P-only service deploy: Mw REGISTER → I-CSCF (same Call-ID; relay responses).
+        String next = roles.icscfUri();
+        Map<String, List<String>> ext = new java.util.LinkedHashMap<>();
+        ext.put("Path", List.of(path));
+        if (e.authorization() != null && !e.authorization().isBlank()) {
+            ext.put("Authorization", List.of(e.authorization()));
+        }
+        if (e.pathHeader() != null && !e.pathHeader().isBlank()) {
+            ext.put("Path", List.of(e.pathHeader() + "," + path));
+        }
+        LOG.debug("[P-CSCF] REGISTER -> {} callId={}", next, e.callId());
+        send(new SendRegister(e.callId(), next, e.fromUri(), e.toUri(), e.contactUri(),
+                e.expires(), ext));
     }
 
     void onInvite(SipInviteEvent e) {
@@ -78,10 +90,10 @@ public final class PcscfProxySbb implements Sbb, SleeEventHandler {
             LOG.debug("[P-CSCF] INVITE observed (co-located) callId={}", e.callId());
             return;
         }
-        Map<String, List<String>> ims = new LinkedHashMap<>(
-                e.imsHeaders() == null ? Map.of() : e.imsHeaders());
+        Map<String, List<String>> ims = PChargingVectors.copyIms(e.imsHeaders());
         ims.put("P-Asserted-Identity", List.of(e.fromUri()));
         ims.put("Route", List.of("<" + roles.icscfUri() + ";lr>"));
+        PChargingVectors.ensureInvite(ims, e.callId(), roles.realm());
         String next = roles.icscfUri();
         LOG.debug("[P-CSCF] INVITE -> {} callId={}", next, e.callId());
         send(new SendInvite(e.callId(), next, e.fromUri(), e.sdpBody(), ims));
