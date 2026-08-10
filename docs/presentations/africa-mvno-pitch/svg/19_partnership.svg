@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <rect width="1280" height="720" fill="#FFFCFA"/>
+  <rect x="0" y="0" width="1280" height="24" fill="#1A120B"/>
+<polygon points="0,24 18.0,0 36,24" fill="#E0A82E" opacity="0.92"/>
+<polygon points="36,0 54.0,24 72,0" fill="#C2512A" opacity="0.85"/>
+<polygon points="72,24 90.0,0 108,24" fill="#3D6B4F" opacity="0.92"/>
+<polygon points="108,0 126.0,24 144,0" fill="#1E3A5F" opacity="0.85"/>
+<polygon points="144,24 162.0,0 180,24" fill="#E0A82E" opacity="0.92"/>
+<polygon points="180,0 198.0,24 216,0" fill="#C2512A" opacity="0.85"/>
+<polygon points="216,24 234.0,0 252,24" fill="#3D6B4F" opacity="0.92"/>
+<polygon points="252,0 270.0,24 288,0" fill="#E0A82E" opacity="0.85"/>
+<polygon points="288,24 306.0,0 324,24" fill="#C2512A" opacity="0.92"/>
+<polygon points="324,0 342.0,24 360,0" fill="#3D6B4F" opacity="0.85"/>
+<polygon points="360,24 378.0,0 396,24" fill="#1E3A5F" opacity="0.92"/>
+<polygon points="396,0 414.0,24 432,0" fill="#E0A82E" opacity="0.85"/>
+<polygon points="432,24 450.0,0 468,24" fill="#C2512A" opacity="0.92"/>
+<polygon points="468,0 486.0,24 504,0" fill="#3D6B4F" opacity="0.85"/>
+<polygon points="504,24 522.0,0 540,24" fill="#E0A82E" opacity="0.92"/>
+<polygon points="540,0 558.0,24 576,0" fill="#C2512A" opacity="0.85"/>
+<polygon points="576,24 594.0,0 612,24" fill="#3D6B4F" opacity="0.92"/>
+<polygon points="612,0 630.0,24 648,0" fill="#1E3A5F" opacity="0.85"/>
+<polygon points="648,24 666.0,0 684,24" fill="#E0A82E" opacity="0.92"/>
+<polygon points="684,0 702.0,24 720,0" fill="#C2512A" opacity="0.85"/>
+<polygon points="720,24 738.0,0 756,24" fill="#3D6B4F" opacity="0.92"/>
+<polygon points="756,0 774.0,24 792,0" fill="#E0A82E" opacity="0.85"/>
+<polygon points="792,24 810.0,0 828,24" fill="#C2512A" opacity="0.92"/>
+<polygon points="828,0 846.0,24 864,0" fill="#3D6B4F" opacity="0.85"/>
+<polygon points="864,24 882.0,0 900,24" fill="#1E3A5F" opacity="0.92"/>
+<polygon points="900,0 918.0,24 936,0" fill="#E0A82E" opacity="0.85"/>
+<polygon points="936,24 954.0,0 972,24" fill="#C2512A" opacity="0.92"/>
+<polygon points="972,0 990.0,24 1008,0" fill="#3D6B4F" opacity="0.85"/>
+<polygon points="1008,24 1026.0,0 1044,24" fill="#E0A82E" opacity="0.92"/>
+<polygon points="1044,0 1062.0,24 1080,0" fill="#C2512A" opacity="0.85"/>
+<polygon points="1080,24 1098.0,0 1116,24" fill="#3D6B4F" opacity="0.92"/>
+<polygon points="1116,0 1134.0,24 1152,0" fill="#1E3A5F" opacity="0.85"/>
+<polygon points="1152,24 1170.0,0 1188,24" fill="#E0A82E" opacity="0.92"/>
+<polygon points="1188,0 1206.0,24 1224,0" fill="#C2512A" opacity="0.85"/>
+<polygon points="1224,24 1242.0,0 1260,24" fill="#3D6B4F" opacity="0.92"/>
+<polygon points="1260,0 1278.0,24 1296,0" fill="#E0A82E" opacity="0.85"/>
+<polygon points="1296,24 1314.0,0 1332,24" fill="#C2512A" opacity="0.92"/>
+  <text x="80" y="100" font-family="Georgia, serif" font-size="36" fill="#1A120B" font-weight="700">Partnership &amp; Investment Model</text>
+  <rect x="80" y="180" width="540" height="400" rx="18" fill="#3D6B4F"/>
+  <text x="120" y="250" fill="#E0A82E" font-size="24" font-family="Georgia, serif">MVNO Operator</text>
+  <text x="120" y="310" fill="#FFFCFA" font-size="16" font-family="Helvetica, Arial, sans-serif">· Brand, retail &amp; customer care</text>
+  <text x="120" y="350" fill="#FFFCFA" font-size="16" font-family="Helvetica, Arial, sans-serif">· Host-MNO wholesale agreement</text>
+  <text x="120" y="390" fill="#FFFCFA" font-size="16" font-family="Helvetica, Arial, sans-serif">· Spectrum / numbering where required</text>
+  <text x="120" y="430" fill="#FFFCFA" font-size="16" font-family="Helvetica, Arial, sans-serif">· Anchor enterprise &amp; bank tenants</text>
+  <rect x="660" y="180" width="540" height="400" rx="18" fill="#1A120B"/>
+  <text x="700" y="250" fill="#E0A82E" font-size="24" font-family="Georgia, serif">IMS &amp; VAS Provider</text>
+  <text x="700" y="310" fill="#FFFCFA" font-size="16" font-family="Helvetica, Arial, sans-serif">· IMS Core + 5G Core build</text>
+  <text x="700" y="350" fill="#FFFCFA" font-size="16" font-family="Helvetica, Arial, sans-serif">· CAMARA Silent Auth VAS</text>
+  <text x="700" y="390" fill="#FFFCFA" font-size="16" font-family="Helvetica, Arial, sans-serif">· Analytics R for margin</text>
+  <text x="700" y="430" fill="#FFFCFA" font-size="16" font-family="Helvetica, Arial, sans-serif">· Knowledge transfer &amp; ops support</text>
+</svg>

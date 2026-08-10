@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <rect width="1280" height="720" fill="#F3E6D3"/>
+  <rect x="0" y="0" width="1280" height="24" fill="#1A120B"/>
+<polygon points="0,24 18.0,0 36,24" fill="#E0A82E" opacity="0.92"/>
+<polygon points="36,0 54.0,24 72,0" fill="#C2512A" opacity="0.85"/>
+<polygon points="72,24 90.0,0 108,24" fill="#3D6B4F" opacity="0.92"/>
+<polygon points="108,0 126.0,24 144,0" fill="#1E3A5F" opacity="0.85"/>
+<polygon points="144,24 162.0,0 180,24" fill="#E0A82E" opacity="0.92"/>
+<polygon points="180,0 198.0,24 216,0" fill="#C2512A" opacity="0.85"/>
+<polygon points="216,24 234.0,0 252,24" fill="#3D6B4F" opacity="0.92"/>
+<polygon points="252,0 270.0,24 288,0" fill="#E0A82E" opacity="0.85"/>
+<polygon points="288,24 306.0,0 324,24" fill="#C2512A" opacity="0.92"/>
+<polygon points="324,0 342.0,24 360,0" fill="#3D6B4F" opacity="0.85"/>
+<polygon points="360,24 378.0,0 396,24" fill="#1E3A5F" opacity="0.92"/>
+<polygon points="396,0 414.0,24 432,0" fill="#E0A82E" opacity="0.85"/>
+<polygon points="432,24 450.0,0 468,24" fill="#C2512A" opacity="0.92"/>
+<polygon points="468,0 486.0,24 504,0" fill="#3D6B4F" opacity="0.85"/>
+<polygon points="504,24 522.0,0 540,24" fill="#E0A82E" opacity="0.92"/>
+<polygon points="540,0 558.0,24 576,0" fill="#C2512A" opacity="0.85"/>
+<polygon points="576,24 594.0,0 612,24" fill="#3D6B4F" opacity="0.92"/>
+<polygon points="612,0 630.0,24 648,0" fill="#1E3A5F" opacity="0.85"/>
+<polygon points="648,24 666.0,0 684,24" fill="#E0A82E" opacity="0.92"/>
+<polygon points="684,0 702.0,24 720,0" fill="#C2512A" opacity="0.85"/>
+<polygon points="720,24 738.0,0 756,24" fill="#3D6B4F" opacity="0.92"/>
+<polygon points="756,0 774.0,24 792,0" fill="#E0A82E" opacity="0.85"/>
+<polygon points="792,24 810.0,0 828,24" fill="#C2512A" opacity="0.92"/>
+<polygon points="828,0 846.0,24 864,0" fill="#3D6B4F" opacity="0.85"/>
+<polygon points="864,24 882.0,0 900,24" fill="#1E3A5F" opacity="0.92"/>
+<polygon points="900,0 918.0,24 936,0" fill="#E0A82E" opacity="0.85"/>
+<polygon points="936,24 954.0,0 972,24" fill="#C2512A" opacity="0.92"/>
+<polygon points="972,0 990.0,24 1008,0" fill="#3D6B4F" opacity="0.85"/>
+<polygon points="1008,24 1026.0,0 1044,24" fill="#E0A82E" opacity="0.92"/>
+<polygon points="1044,0 1062.0,24 1080,0" fill="#C2512A" opacity="0.85"/>
+<polygon points="1080,24 1098.0,0 1116,24" fill="#3D6B4F" opacity="0.92"/>
+<polygon points="1116,0 1134.0,24 1152,0" fill="#1E3A5F" opacity="0.85"/>
+<polygon points="1152,24 1170.0,0 1188,24" fill="#E0A82E" opacity="0.92"/>
+<polygon points="1188,0 1206.0,24 1224,0" fill="#C2512A" opacity="0.85"/>
+<polygon points="1224,24 1242.0,0 1260,24" fill="#3D6B4F" opacity="0.92"/>
+<polygon points="1260,0 1278.0,24 1296,0" fill="#E0A82E" opacity="0.85"/>
+<polygon points="1296,24 1314.0,0 1332,24" fill="#C2512A" opacity="0.92"/>
+  <text x="80" y="100" font-family="Georgia, serif" font-size="40" fill="#1A120B" font-weight="700">End-to-End Architecture</text>
+  <text x="80" y="140" font-family="Helvetica, Arial, sans-serif" font-size="16" fill="#6B5344">Subscriber → radio → intelligent core → profitable services</text>
+  
+  <rect x="60" y="200" width="200" height="100" rx="14" fill="#3D6B4F" stroke="#1A120B" stroke-width="2"/>
+  <text x="160.0" y="258.0" text-anchor="middle" fill="#FFFCFA" font-size="20" font-family="Georgia, serif">UE / Apps</text>
+
+  <rect x="300" y="200" width="220" height="100" rx="14" fill="#E0A82E" stroke="#1A120B" stroke-width="2"/>
+  <text x="410.0" y="258.0" text-anchor="middle" fill="#1A120B" font-size="20" font-family="Georgia, serif">RAN / Host MNO</text>
+
+  <rect x="560" y="120" width="300" height="80" rx="14" fill="#C2512A" stroke="#1A120B" stroke-width="2"/>
+  <text x="710.0" y="168.0" text-anchor="middle" fill="#FFFCFA" font-size="20" font-family="Georgia, serif">5G Core</text>
+
+  <rect x="560" y="230" width="300" height="80" rx="14" fill="#3D6B4F" stroke="#1A120B" stroke-width="2"/>
+  <text x="710.0" y="278.0" text-anchor="middle" fill="#FFFCFA" font-size="20" font-family="Georgia, serif">IMS Core</text>
+
+  <rect x="560" y="340" width="300" height="80" rx="14" fill="#E0A82E" stroke="#1A120B" stroke-width="2"/>
+  <text x="710.0" y="388.0" text-anchor="middle" fill="#1A120B" font-size="20" font-family="Georgia, serif">CAMARA / VAS</text>
+
+  <rect x="920" y="200" width="280" height="100" rx="14" fill="#1A120B" stroke="#1A120B" stroke-width="2"/>
+  <text x="1060.0" y="258.0" text-anchor="middle" fill="#E0A82E" font-size="20" font-family="Georgia, serif">Analytics R</text>
+
+  <path d="M260 250 H300" stroke="#1A120B" stroke-width="3" marker-end="url(#m)"/>
+  <path d="M520 250 H560" stroke="#1A120B" stroke-width="3"/>
+  <path d="M860 250 H920" stroke="#1A120B" stroke-width="3"/>
+  <defs>
+    <marker id="m" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#1A120B"/>
+    </marker>
+  </defs>
+  <text x="80" y="520" font-size="16" fill="#6B5344" font-family="Helvetica, Arial, sans-serif">
+    Signalling &amp; session control in IMS + 5GC · Media on MRF · Identity via CAMARA
+  </text>
+</svg>

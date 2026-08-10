@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <rect width="1280" height="720" fill="#1A120B"/>
+  <rect x="0" y="0" width="1280" height="24" fill="#1A120B"/>
+<polygon points="0,24 18.0,0 36,24" fill="#E0A82E" opacity="0.92"/>
+<polygon points="36,0 54.0,24 72,0" fill="#C2512A" opacity="0.85"/>
+<polygon points="72,24 90.0,0 108,24" fill="#3D6B4F" opacity="0.92"/>
+<polygon points="108,0 126.0,24 144,0" fill="#1E3A5F" opacity="0.85"/>
+<polygon points="144,24 162.0,0 180,24" fill="#E0A82E" opacity="0.92"/>
+<polygon points="180,0 198.0,24 216,0" fill="#C2512A" opacity="0.85"/>
+<polygon points="216,24 234.0,0 252,24" fill="#3D6B4F" opacity="0.92"/>
+<polygon points="252,0 270.0,24 288,0" fill="#E0A82E" opacity="0.85"/>
+<polygon points="288,24 306.0,0 324,24" fill="#C2512A" opacity="0.92"/>
+<polygon points="324,0 342.0,24 360,0" fill="#3D6B4F" opacity="0.85"/>
+<polygon points="360,24 378.0,0 396,24" fill="#1E3A5F" opacity="0.92"/>
+<polygon points="396,0 414.0,24 432,0" fill="#E0A82E" opacity="0.85"/>
+<polygon points="432,24 450.0,0 468,24" fill="#C2512A" opacity="0.92"/>
+<polygon points="468,0 486.0,24 504,0" fill="#3D6B4F" opacity="0.85"/>
+<polygon points="504,24 522.0,0 540,24" fill="#E0A82E" opacity="0.92"/>
+<polygon points="540,0 558.0,24 576,0" fill="#C2512A" opacity="0.85"/>
+<polygon points="576,24 594.0,0 612,24" fill="#3D6B4F" opacity="0.92"/>
+<polygon points="612,0 630.0,24 648,0" fill="#1E3A5F" opacity="0.85"/>
+<polygon points="648,24 666.0,0 684,24" fill="#E0A82E" opacity="0.92"/>
+<polygon points="684,0 702.0,24 720,0" fill="#C2512A" opacity="0.85"/>
+<polygon points="720,24 738.0,0 756,24" fill="#3D6B4F" opacity="0.92"/>
+<polygon points="756,0 774.0,24 792,0" fill="#E0A82E" opacity="0.85"/>
+<polygon points="792,24 810.0,0 828,24" fill="#C2512A" opacity="0.92"/>
+<polygon points="828,0 846.0,24 864,0" fill="#3D6B4F" opacity="0.85"/>
+<polygon points="864,24 882.0,0 900,24" fill="#1E3A5F" opacity="0.92"/>
+<polygon points="900,0 918.0,24 936,0" fill="#E0A82E" opacity="0.85"/>
+<polygon points="936,24 954.0,0 972,24" fill="#C2512A" opacity="0.92"/>
+<polygon points="972,0 990.0,24 1008,0" fill="#3D6B4F" opacity="0.85"/>
+<polygon points="1008,24 1026.0,0 1044,24" fill="#E0A82E" opacity="0.92"/>
+<polygon points="1044,0 1062.0,24 1080,0" fill="#C2512A" opacity="0.85"/>
+<polygon points="1080,24 1098.0,0 1116,24" fill="#3D6B4F" opacity="0.92"/>
+<polygon points="1116,0 1134.0,24 1152,0" fill="#1E3A5F" opacity="0.85"/>
+<polygon points="1152,24 1170.0,0 1188,24" fill="#E0A82E" opacity="0.92"/>
+<polygon points="1188,0 1206.0,24 1224,0" fill="#C2512A" opacity="0.85"/>
+<polygon points="1224,24 1242.0,0 1260,24" fill="#3D6B4F" opacity="0.92"/>
+<polygon points="1260,0 1278.0,24 1296,0" fill="#E0A82E" opacity="0.85"/>
+<polygon points="1296,24 1314.0,0 1332,24" fill="#C2512A" opacity="0.92"/>
+  <text x="80" y="110" font-family="Georgia, serif" font-size="40" fill="#FFFCFA" font-weight="700">Product Vision</text>
+  <text x="80" y="155" font-family="Helvetica, Arial, sans-serif" font-size="18" fill="#E0A82E">
+    Across Africa, chat and data dominate — MVNOs win with IMS + digital-identity VAS, not expensive direct voice alone
+  </text>
+  <g transform="translate(80,210)">
+    <rect width="340" height="380" rx="16" fill="#123D26" stroke="#E0A82E" stroke-width="2"/>
+    <text x="28" y="60" font-size="22" fill="#E0A82E" font-family="Georgia, serif">Sovereignty</text>
+    <text x="28" y="110" font-size="16" fill="#FFFCFA" font-family="Helvetica, Arial, sans-serif">Local control of</text>
+    <text x="28" y="140" font-size="16" fill="#FFFCFA" font-family="Helvetica, Arial, sans-serif">IMS / 5G / identity</text>
+    <text x="28" y="170" font-size="16" fill="#FFFCFA" font-family="Helvetica, Arial, sans-serif">signalling &amp; data</text>
+  </g>
+  <g transform="translate(470,210)">
+    <rect width="340" height="380" rx="16" fill="#123D26" stroke="#C2512A" stroke-width="2"/>
+    <text x="28" y="60" font-size="22" fill="#E0A82E" font-family="Georgia, serif">Inclusion</text>
+    <text x="28" y="110" font-size="16" fill="#FFFCFA" font-family="Helvetica, Arial, sans-serif">Affordable voice,</text>
+    <text x="28" y="140" font-size="16" fill="#FFFCFA" font-family="Helvetica, Arial, sans-serif">data &amp; digital ID</text>
+    <text x="28" y="170" font-size="16" fill="#FFFCFA" font-family="Helvetica, Arial, sans-serif">for every segment</text>
+  </g>
+  <g transform="translate(860,210)">
+    <rect width="340" height="380" rx="16" fill="#123D26" stroke="#3D6B4F" stroke-width="2"/>
+    <text x="28" y="60" font-size="22" fill="#E0A82E" font-family="Georgia, serif">Prosperity</text>
+    <text x="28" y="110" font-size="16" fill="#FFFCFA" font-family="Helvetica, Arial, sans-serif">MVNO designed</text>
+    <text x="28" y="140" font-size="16" fill="#FFFCFA" font-family="Helvetica, Arial, sans-serif">for margin — not</text>
+    <text x="28" y="170" font-size="16" fill="#FFFCFA" font-family="Helvetica, Arial, sans-serif">subsidy forever</text>
+  </g>
+</svg>
