@@ -87,11 +87,14 @@ final class ElisaBootstrap {
     @Inject HssLiteService hssLite;
     @Inject BindingStore bindingStore;
     @Inject IscAsRouter iscAsRouter;
+    @Inject et.elisa.ims.trunk.SipTrunkService sipTrunks;
     @Inject IscThirdPartyRegister thirdParty;
     @Inject DiameterRaBridge diameterRaBridge;
     @Inject CallSessionService callSessionService;
     @Inject ElisaProfileService elisaProfiles;
     @Inject SbbRecoveryManagerImpl sbbRecovery;
+    @Inject et.elisa.ims.charging.OnlineChargingService onlineCharging;
+    @Inject et.elisa.ims.charging.DiameterRfAcrEmitter rfAcrEmitter;
 
     @ConfigProperty(name = "sip.ra.host", defaultValue = "0.0.0.0") String sipHost;
     @ConfigProperty(name = "sip.ra.udp-port", defaultValue = "5060") int udpPort;
@@ -127,6 +130,11 @@ final class ElisaBootstrap {
             container.start();
         }
         elisaProfiles.provisionTables();
+        try {
+            sipTrunks.ensureDefaultIfEmpty();
+        } catch (RuntimeException ex) {
+            LOG.warn("SIP trunk seed skipped (DB not ready?): {}", ex.toString());
+        }
         wireTelemetry();
         registerSbbTypes();
         bindInitialEventSelector();
@@ -216,6 +224,9 @@ final class ElisaBootstrap {
         sipEndpoint.setConfig(config);
         container.registerRa(sipEndpoint, sipEndpoint);
         sbbRecovery.bindSipRa(ra);
+        if (dialogCmp != null) {
+            dialogCmp.setSipHaEnricher(callId -> ra.dialogRegistry().exportPortable(callId));
+        }
         LOG.info("SIP RA UDP:{} TCP:{} ice={}", udpPort, tcpPort, iceEnabled);
     }
 
@@ -279,6 +290,9 @@ final class ElisaBootstrap {
         diameterRaBridge.bind(diameterEndpoint);
         cxClient.bindDiameter(diameterEndpoint);
         cxServer.bindDiameter(diameterEndpoint);
+        if (rfAcrEmitter != null) {
+            rfAcrEmitter.bindDiameter(diameterEndpoint);
+        }
         LOG.info("Diameter RA Cx {}:{} originHost={} peerReady={}",
                 cxHost, cxPort, cxOriginHost, diameterEndpoint.isPeerReady());
     }
@@ -300,7 +314,19 @@ final class ElisaBootstrap {
     }
 
     private void registerSbbTypes() {
-        String trunk = freeswitchTrunkUri;
+        final String trunkUri;
+        try {
+            trunkUri = sipTrunks != null ? sipTrunks.resolveIscOrMrfUri() : freeswitchTrunkUri;
+        } catch (RuntimeException ex) {
+            LOG.debug("trunk resolve fell back to props: {}", ex.toString());
+            // fall through with props below
+            registerSbbTypesWithTrunk(freeswitchTrunkUri);
+            return;
+        }
+        registerSbbTypesWithTrunk(trunkUri);
+    }
+
+    private void registerSbbTypesWithTrunk(String trunk) {
         String domain = trunkDomain;
         SipCpsMetrics metrics = cpsMetrics;
         SipIngressAclService acl = sipAcl;
@@ -333,6 +359,7 @@ final class ElisaBootstrap {
             DialogCmpPersistence cmp = dialogCmp;
             container.registerSbbType(ScscfInviteSbb.class,
                     () -> new ScscfInviteSbb.$Concrete(imsRoles, iscAsRouter, bindingStore, cmp, metrics, hssLite,
+                            onlineCharging,
                             nodeId,
                             freeSwitchRaBridge.activeFsNodeId() != null
                                     ? freeSwitchRaBridge.activeFsNodeId() : "fallback"));

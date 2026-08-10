@@ -1,6 +1,6 @@
 # SbbRecoveryManager — dead SBB detect + respawn
 
-**Status:** PARTIAL IMPLEMENTATION (2026-08-09) — Elisa manager + fencing + local respawn + DialogRegistry portable peer meta shipped; full remote SIP TX continue still gated on wire rebuild of `lastRequest`.  
+**Status:** PARTIAL IMPLEMENTATION (2026-08-10) — Elisa manager + fencing + local respawn + DialogRegistry portable peer **and** lab synthetic wire restore from `SipDialogHa` / sticky attrs; not Clearwater Chronos.  
 **Product context:** Elisa lab IMS Core + FreeSWITCH MRF/AS; N–N cluster **C1** (Infinispan) / **C2** (VIP affinity) / **C3** (FS pair); target **10 000 INVITE/s** on `ra-sip-servlet`; host **JDK 25** micro-jainslee.  
 **Related:** [`cmp-recovery.md`](cmp-recovery.md) (app CMP dual-write), [`jainslee-profile.md`](jainslee-profile.md), [`cluster-c2-vip-affinity.md`](cluster-c2-vip-affinity.md), [`ims-core.md`](ims-core.md) (I7 sticky), jain-slee ADR [`0002-ra-sticky-ha-fabric.md`](../../../../jain-slee/jain-slee/docs/adr/0002-ra-sticky-ha-fabric.md), `SessionRecoveryService` (Gap-SR-1), `DistributedSbbEntityPool`.
 
@@ -33,10 +33,10 @@ Detection → Decision (home sticky / fence) → Restore (ISPN→PG→Profile) �
 | Decision policy | `RecoveryDecisionPolicy` (R1/R2/R6) | **done** + unit tests |
 | Ownership fence | `DialogOwner` + `DialogOwnerStore` (ISPN CAS gen) | **done** — dual-write from `DialogCmpPersistence.save` |
 | Bootstrap wire | `ElisaBootstrap.wireSbbRecovery` | **done** — removal bus + `SessionRecoveryServiceImpl` |
-| RA portable peers | `DialogRegistry.PortableDialogMeta` + `restorePortable` / `restoreDialogFromCluster` | **done** — peers+cseq; **not** lastRequest |
+| RA portable peers + wire | `DialogRegistry.PortableDialogMeta` + `restorePortable` / `restoreDialog` / `restoreDialogFromCheckpoint` | **done** — peers+cseq+URI/tags; synthetic lastRequest/lastResponse for lab Send* |
 | Soft-hang heartbeat | `onEntitySuspect` | stub (P2) |
 | Admin orphan HTMX | — | not in this pass |
-| Full SIP TX HA | lastRequest/lastResponse objects | **gap** — rebuild from first recovered inbound |
+| Full SIP TX HA | Chronos-class dialog SM | **gap** — lab synthetic rebuild only; TCP affinity / first inbound still preferred |
 
 ### Grill R1–R10 compliance
 

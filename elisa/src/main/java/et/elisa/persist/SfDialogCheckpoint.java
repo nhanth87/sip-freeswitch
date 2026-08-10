@@ -51,4 +51,38 @@ public class SfDialogCheckpoint extends PanacheEntityBase {
 
     @Column(name = "ended_at")
     public Instant endedAt;
+
+    /** Portable SIP HA (DialogRegistry peers/tags) — lab mid-dialog failover. */
+    @Column(name = "remote_peer", length = 255)
+    public String remotePeer;
+
+    @Column(length = 16)
+    public String transport;
+
+    @Column(name = "remote_transport", length = 16)
+    public String remoteTransport;
+
+    @Column
+    public long cseq;
+
+    @Column(name = "from_tag", length = 128)
+    public String fromTag;
+
+    @Column(name = "to_tag", length = 128)
+    public String toTag;
+
+    @Column(name = "contact_uri", columnDefinition = "text")
+    public String contactUri;
+
+    @Column(name = "remote_contact_uri", columnDefinition = "text")
+    public String remoteContactUri;
+
+    @Column(name = "sip_method", length = 32)
+    public String sipMethod;
+
+    @Column(name = "far_from_uri", columnDefinition = "text")
+    public String farFromUri;
+
+    @Column(name = "far_from_tag", length = 128)
+    public String farFromTag;
 }

@@ -109,3 +109,29 @@ sequenceDiagram
 ```
 
 INVITE: P stamps PAI + Route → I LIR → S ISC → paired FreeSWITCH.
+
+## 100-server N–N path (ops model)
+
+**Server ≠ physical box.** A “server” here is a **process role** behind a VIP: `pcscf` / `icscf` / `scscf` / `hss` (same `dist/elisa/` image, `SF_IMS_*` only), plus `freeswitch`, `nginx`, shared **Postgres**, and **coturn** (RTP bypass). One host may run several roles; ~100 capacity units ≈ N×P + N×I + N×S + N×HSS + N×FS, not 100 all-in-one Elisas.
+
+| Plane | Path at scale |
+|-------|----------------|
+| Gm VIP | nginx `stream` → **P-CSCF pool** (`hash $remote_addr`) — Path/Contact = VIP hostname (N6) |
+| Mw | P → I (config `SF_IMS_ICSCF_URI`) → home **S** (Cx UAR/LIR `SERVER_NAME` / `SF_IMS_SCSCF_URI`) |
+| Sticky S | `ims_binding.home_scscf_node` + ISPN `RegistrationHomeStore`; Service-Route on 200 |
+| ISC + ESL | S node-id → `sf_fs_pair` primary FS; trunk URI = paired Sofia (`SipTrunkService` PG / per-node env) — prefer **1:1**, failover list OK |
+| Shared SoT | Postgres (bindings, trunks, CMP durable); ISPN `DIST_SYNC` only among **S-CSCF** peers sharing `sf.cluster.infinispan.cluster-name` |
+| Not on VIP | ESL `:8021`, Diameter Cx, ISC Elisa→FS, RTP/TURN |
+
+```text
+UE ──SIP VIP──► nginx ──► P×N ──Mw──► I×N ──Cx──► HSS×N
+                              │              │
+                              │ Mw           │ MAR/SAR/LIR
+                              ▼              │
+                           S×N ◄─────────────┘   (home sticky)
+                            │ ESL pair + ISC trunk
+                            ▼
+                           FS×N     RTP ◄── coturn (no nginx)
+```
+
+**Honest limits today:** default ISPN `LOCAL`; one embedded JGroups view for all DIST peers (not sized/proven for ~100 members — keep ISPN membership ≈ S-CSCF count, P/I/HSS `LOCAL` or separate cluster-name); ProfileFacility still **JVM-local**; mid-dialog SIP continue after S-CSCF crash is **lab-grade** via `DialogCheckpoint.sipHa` → `DialogRegistry.restorePortable` (peers + synthetic lastRequest/tags) — not Chronos, still prefer L4 affinity for inbound. No Dx/SLF multi-HSS. Detail: [`cluster-c2-vip-affinity.md`](cluster-c2-vip-affinity.md), [`cmp-recovery.md`](cmp-recovery.md), [`ims-protocol-roadmap.md`](ims-protocol-roadmap.md).

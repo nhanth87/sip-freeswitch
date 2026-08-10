@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Phase C scaffold — durable pending debit store (icid / sipCallId). Postgres back-end later.
+ * Durable pending debit store (icid / sipCallId). Claim → debit → settle = at-most-once.
  */
 public interface PendingChargeStore {
 
@@ -13,8 +13,19 @@ public interface PendingChargeStore {
 
     Optional<PendingCharge> findByKey(String key);
 
-    /** Mark settled once — returns false if already settled or missing (at-most-once debit). */
+    /** Update usage/destination on an existing PENDING row (BYE finalize). */
+    boolean finalizeUsage(String key, String destination, String usage);
+
+    /**
+     * Atomically claim PENDING → CLAIMING for debit. Empty if missing/settled/already claimed.
+     */
+    Optional<PendingCharge> claim(String key);
+
+    /** Mark settled once — returns false if already settled or missing. */
     boolean markSettled(String key);
+
+    /** CLAIMING → PENDING after soft-fail debit (retry later). */
+    boolean releaseClaim(String key);
 
     List<PendingCharge> listPending(int limit);
 }

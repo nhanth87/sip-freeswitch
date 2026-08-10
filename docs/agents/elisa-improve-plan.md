@@ -1,9 +1,9 @@
 # Elisa improve plan (grill G1–G5)
 
-**Locked:** 2026-08-10 (user). **Status:** Phase A + B stub + Phase C scaffold implemented (2026-08-10).  
+**Locked:** 2026-08-10 (user). **Status:** Phase A–C production-capable (feature-flagged) + **Production P0** checklist — [`production-p0.md`](production-p0.md).  
 **Pointer from:** [`ims-core.md`](ims-core.md) § Charging.
 
-Lab IMS Core charging / OCS path: offline CDR dual-write (Rf ACR stub + CGRates **CDRsV1**) then SessionS online with **deferred debit** when OCS is down. Not an SBC; no RTP; no PFCP/Gx/Gy.
+Lab/prod IMS Core charging / OCS path: offline CDR dual-write (Rf ACR + CGRates **CDRsV1**) then SessionS online with **deferred debit** when OCS is down. Not an SBC; no RTP; no PFCP/Gx/Gy. **Charging master off by default** (`sf.ims.feature.charging=false`).
 
 ---
 
@@ -12,7 +12,7 @@ Lab IMS Core charging / OCS path: offline CDR dual-write (Rf ACR stub + CGRates 
 | Id | Answer | Lock |
 |----|--------|------|
 | **G1 slice** | **B** | Jump to Rf / CGRates client next. Hygiene (Throwable + `SleeEventTrace`) is **not** blocking the first PR; still apply when touching SBBs. |
-| **G2 P1 offline** | **C** | Both: Diameter **Rf ACR stub** in path **and** HTTP CGRates **CDRsV1** dual-write, behind feature flag(s). |
+| **G2 P1 offline** | **C** | Both: Diameter **Rf ACR** in path **and** HTTP CGRates **CDRsV1** dual-write, behind feature flag(s). |
 | **G3 OCS down** | **Deferred debit / fake-continue** | When OCS (CGRates SessionS) **down** → allow call with synthetic/soft credit decision (“fake” continue). When OCS **recovers** → reconcile and debit. **Not** hard 403. Config: `sf.ocs.mode=deferred` (or similar). Footgun: **no double-debit** — durable pending charge keyed by `icid` / `sipCallId`. When OCS **UP** and credit fails → SIP/AS **302** later (not UPF redirect). |
 | **G4 CGRates** | **C** | Optional compose profile **`cgrates`** (sidecar when profile on; else external URL via props). **Account key default: `msisdn`** (IMS profile SoT); resolve via HssLite / `ims_subscriber`; if `msisdn` null → soft-fail to `impi` for lab. |
 | **G5 pool** | **40960** | Set / keep `microjainslee.container.sbb-pool-max=40960` now. Capacity verdict only after SIPp / other SIP load tool — **do not claim 10k** until green ([`capacity-acceptance.md`](capacity-acceptance.md)). |
@@ -57,7 +57,7 @@ sequenceDiagram
     S-->>UE: forward INVITE
   else OCS UP + credit FAIL
     OCS-->>S: Reject
-    Note over S: later: SIP/AS 302 (not UPF)
+    Note over S: SIP/AS 302 (not UPF)
   end
 
   CS->>CS: CHANNEL_* / dialog correlate (fs_uuid ↔ Call-ID)
@@ -68,17 +68,17 @@ sequenceDiagram
   end
 
   par Offline dual-write (feature flag)
-    S->>Rf: ACR STOP keyed by icid (stub)
+    S->>Rf: ACR STOP keyed by icid
     S->>CDR: HTTP CDRsV1 (account=msisdn)
   end
 
   Note over Q,OCS: sweeper when OCS recovers
-  Q->>OCS: debit / reconcile pending
+  Q->>OCS: debit / reconcile pending (claim by icid)
   OCS-->>Q: OK
   Q->>PG: mark settled (never double-debit)
 ```
 
-**Idempotency:** pending charge PK = `icid` preferred, else `sipCallId`; sweeper must be at-most-once debit after successful SessionS/AccountS charge.
+**Idempotency:** pending charge PK = `icid` preferred, else `sipCallId`; sweeper claim → debit → settle (at-most-once).
 
 ---
 
@@ -93,20 +93,34 @@ sequenceDiagram
 - [x] Bump `microjainslee.container.sbb-pool-max=40960` in `application.properties` (+ dist template).
 - [x] Throwable + `SleeEventTrace` on touched SBBs (`CallSessionSbb`, `ScscfInviteSbb`).
 
-### Phase B — Rf ACR stub + dual-write — **DONE (stub)**
+### Phase B — Rf ACR + dual-write — **DONE (prod-capable, flagged)**
 
-- [x] Diameter **Rf ACR stub** (`RfAcrEmitter` / `LoggingRfAcrEmitter`) keyed by **`icid`**.
-- [x] Dual-write with CDRsV1 behind `sf.charging.dual-write` (+ `sf.rf.enabled` / `sf.cgrates.*`).
-- [x] Still offline only; no SessionS gate yet.
-- [ ] Wire real Diameter Rf ACR via `ra-diameter` (follow-up).
+- [x] Diameter **Rf ACR** (`RfCodec` + `DiameterRfAcrEmitter`) keyed by **`icid`**; wire via `ra-diameter` when `peerReady`.
+- [x] Soft-fallback structured log when peer not ready (honesty — flat string AVP map, not full nested IMS-Information).
+- [x] Dual-write with CDRsV1 behind `sf.ims.feature.charging` + `sf.charging.dual-write` (+ `sf.rf.enabled` / `sf.cgrates.*`).
+- [x] START on INVITE confirmed / STOP on CDR path.
 
-### Phase C — SessionS + deferred-debit queue — **scaffold only**
+### Phase C — SessionS + deferred-debit — **DONE (prod-capable, flagged)**
 
-- [x] `PendingCharge` / `PendingChargeStore` / in-memory store + `PendingChargeSweeper` stub.
-- [ ] CGRates SessionS **Initiate / Update / Terminate** client.
-- [ ] Durable **Postgres** pending-charge queue + real sweeper debit.
-- [ ] INVITE-path gate: `sf.ocs.mode=deferred` fake-continue + enqueue; OCS UP + credit fail → SIP/AS **302**.
-- [ ] Reconcile on OCS recovery; **forbid double-debit** (store markSettled is ready).
+- [x] CGRates SessionS **Initiate / Update / Terminate** (`SessionSClient`).
+- [x] Durable **Postgres** `sf_pending_charge` (Flyway V5) + claim/settle sweeper.
+- [x] INVITE-path gate: `sf.ocs.mode=deferred` fake-continue + enqueue; OCS UP + credit fail → SIP **302**.
+- [x] Reconcile on OCS recovery; **forbid double-debit** (claim → markSettled).
+
+### Production P0 (ops) — **DONE (checklist)**
+
+- [x] `application-prod.properties` + `deploy/elisa/roles/prod.env` (secrets fail-closed / no lab defaults).
+- [x] `sf.admin.dev-login=false` in prod; refuse default bootstrap password.
+- [x] Charging / Rf / SessionS **OFF** by default until operator enables.
+- [x] Admin IMS: roles + features + cxPeerReady + eslLive + ISPN.
+- [x] Docs: [`production-p0.md`](production-p0.md).
+- [ ] Digicom host prove-artifact (package → rsync → restart → live surface) — **ops**, not claim from unit tests.
+
+### N–N Profile / CMP (ops — not G1–G5 but P0 IMS)
+
+- [x] Shared `ElisaInfinispanManager` + `DIST_SYNC` knobs; CMP = live INVITE SoT.
+- [x] ProfileFacility documented JVM-local (not failover SoT).
+- [x] `sf_sip_trunk` + `/admin/trunks` + `IscAsRouter` pick/fallback.
 
 ### Hygiene (cross-cutting)
 
@@ -124,8 +138,8 @@ sequenceDiagram
 | **Types** | Prefer **immutable records** for commands / CDR / pending payloads |
 | **No Camel** | HTTP client stays plain CDI / JDK HttpClient (or existing Elisa HTTP style) |
 | **No SBB instance maps** | Activity / CMP / store — not `Map` on SBB instance fields for dialog state |
-| **Link truth** | OCS/CGRates “live” = peer evidence (HTTP/SessionS), never “config applied” |
-| **Prove artifact** | Package → ship `dist/elisa/` → restart → prove live path ([`packaging.md`](packaging.md)) |
+| **Link truth** | OCS/CGRates “live” = peer evidence (HTTP/SessionS); Diameter = `peerReady`; ESL = `eslLive` |
+| **Prove artifact** | Package → ship `dist/elisa/` → restart → prove live path ([`packaging.md`](packaging.md) · [`production-p0.md`](production-p0.md)) |
 
 ---
 
@@ -145,6 +159,7 @@ sequenceDiagram
 
 | Doc | Role |
 |-----|------|
+| [`production-p0.md`](production-p0.md) | Go-live checklist |
 | [`ims-core.md`](ims-core.md) § Charging | Grill summary + link here |
 | [`lessons.md`](lessons.md) § PFCP / Gx / Gy + improve locks | Footguns + deferred-debit |
 | [`capacity-acceptance.md`](capacity-acceptance.md) | 10k gate |
@@ -156,21 +171,27 @@ sequenceDiagram
 ## Suggested property knobs
 
 ```properties
-# Phase A
+sf.ims.feature.charging=false
+sf.ims.feature.mmtel=true
+sf.ims.feature.enum=false
+
 sf.cgrates.enabled=false
 sf.cgrates.url=http://127.0.0.1:2080
 sf.cgrates.cdrs.enabled=false
+sf.cgrates.sessions.enabled=false
 sf.cgrates.account-key=msisdn
 sf.charging.dual-write=false
 microjainslee.container.sbb-pool-max=40960
 
-# Phase B
 sf.rf.enabled=false
+sf.rf.destination-host=ocs.ims.lab
+sf.rf.destination-realm=ims.lab
 
-# Phase C
 sf.ocs.mode=deferred
 sf.ocs.session.enabled=false
 sf.ocs.pending.sweep-interval-sec=30
+
+sf.admin.dev-login=false   # prod
 ```
 
 Compose: profile `cgrates` starts sidecar (`docker-compose.services.yml`); without profile, URL points at external CGRates.

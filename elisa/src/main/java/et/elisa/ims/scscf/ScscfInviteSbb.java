@@ -19,6 +19,7 @@ import com.microjainslee.ra.sipservlet.events.SipResponseEvent;
 import et.elisa.cluster.DialogCheckpoint;
 import et.elisa.cmp.DialogCmpPersistence;
 import et.elisa.cmp.InviteCmpSnapshot;
+import et.elisa.ims.charging.OnlineChargingService;
 import et.elisa.ims.charging.PChargingVectors;
 import et.elisa.ims.config.ImsRoleFlags;
 import et.elisa.ims.hss.HssLiteService;
@@ -37,8 +38,9 @@ import org.apache.logging.log4j.Logger;
  * S-CSCF session — ISC to FreeSWITCH AS/MRF; MT via binding contact.
  * <p>
  * JAIN SLEE 1.1 §6.5 CMP fields recover app call state after SBB entity death
- * via {@link DialogCmpPersistence} (ISPN → PG). SendResponse/SendInvite still
- * require RA {@code DialogRegistry} (JVM-local) — see docs/agents/cmp-recovery.md.
+ * via {@link DialogCmpPersistence} (ISPN → PG). Mid-dialog SendResponse/SendBye
+ * after failover uses RA {@code DialogRegistry.restorePortable} primed from
+ * checkpoint {@link et.elisa.cluster.SipDialogHa} (lab N–N — not Chronos).
  */
 @SbbAnnotation(name = "ScscfInviteSbb", vendor = "et.elisa", version = "1.0")
 public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHandler {
@@ -51,6 +53,7 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
     private final DialogCmpPersistence cmpStore;
     private final SipCpsMetrics metrics;
     private final HssLiteService hss;
+    private final OnlineChargingService charging;
     private final String nodeId;
     private final String fsNodeId;
 
@@ -58,18 +61,25 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
     private volatile RaCommandPort sipRa;
 
     public ScscfInviteSbb() {
-        this(null, null, null, null, null, null, "elisa-1", "fallback");
+        this(null, null, null, null, null, null, null, "elisa-1", "fallback");
     }
 
     public ScscfInviteSbb(ImsRoleFlags roles, IscAsRouter isc, BindingStore bindings,
                           DialogCmpPersistence cmpStore, SipCpsMetrics metrics, HssLiteService hss,
                           String nodeId, String fsNodeId) {
+        this(roles, isc, bindings, cmpStore, metrics, hss, null, nodeId, fsNodeId);
+    }
+
+    public ScscfInviteSbb(ImsRoleFlags roles, IscAsRouter isc, BindingStore bindings,
+                          DialogCmpPersistence cmpStore, SipCpsMetrics metrics, HssLiteService hss,
+                          OnlineChargingService charging, String nodeId, String fsNodeId) {
         this.roles = roles;
         this.isc = isc;
         this.bindings = bindings;
         this.cmpStore = cmpStore;
         this.metrics = metrics;
         this.hss = hss;
+        this.charging = charging;
         this.nodeId = nodeId;
         this.fsNodeId = fsNodeId;
     }
@@ -237,7 +247,14 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
         }
         ims.put("X-Elisa-Sip-Call-Id", java.util.List.of(e.callId()));
         String realm = roles.realm() != null ? roles.realm() : "ims.lab";
-        PChargingVectors.ensureInvite(ims, e.callId(), realm);
+        String icid = PChargingVectors.ensureInvite(ims, e.callId(), realm);
+        if (charging != null) {
+            OnlineChargingService.Decision d = charging.onInvite(icid, e.callId(), msisdn, to);
+            if (d == OnlineChargingService.Decision.REDIRECT_302) {
+                send(new SendResponse(e.callId(), 302, "Moved Temporarily"));
+                return;
+            }
+        }
         if (!terminating) {
             ims.put("Route", java.util.List.of("<" + target + ";lr>"));
         }
@@ -248,6 +265,14 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
         ensureCmpLoaded(e.callId());
         if (metrics != null) {
             metrics.onDialogEnd();
+        }
+        if (charging != null) {
+            Integer dur = null;
+            Long started = getStartedAtEpochMs();
+            if (started != null && started > 0) {
+                dur = (int) Math.max(0L, (Instant.now().toEpochMilli() - started) / 1000L);
+            }
+            charging.onHangup(null, e.callId(), getMsisdn(), getToUri(), dur);
         }
         setDialogState(DialogCheckpoint.STATE_TERMINATED);
         setUpdatedAtEpochMs(Instant.now().toEpochMilli());
@@ -272,6 +297,9 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
             setDialogState(DialogCheckpoint.STATE_CONFIRMED);
             setUpdatedAtEpochMs(Instant.now().toEpochMilli());
             flushCmp();
+            if (charging != null) {
+                charging.onConfirmed(null, e.callId(), getMsisdn());
+            }
             send(new SendSdpUpdate(e.callId(), e.sdpBody()));
         } else if (e.isFinal()) {
             if (e.statusCode() >= 400) {
@@ -284,6 +312,9 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
                 setDialogState(DialogCheckpoint.STATE_CONFIRMED);
                 setUpdatedAtEpochMs(Instant.now().toEpochMilli());
                 flushCmp();
+                if (charging != null) {
+                    charging.onConfirmed(null, e.callId(), getMsisdn());
+                }
             }
             send(new SendResponse(e.callId(), e.statusCode(), e.reasonPhrase()));
         }
@@ -414,7 +445,13 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
         public $Concrete(ImsRoleFlags roles, IscAsRouter isc, BindingStore bindings,
                          DialogCmpPersistence cmpStore, SipCpsMetrics metrics, HssLiteService hss,
                          String nodeId, String fsNodeId) {
-            super(roles, isc, bindings, cmpStore, metrics, hss, nodeId, fsNodeId);
+            super(roles, isc, bindings, cmpStore, metrics, hss, null, nodeId, fsNodeId);
+        }
+
+        public $Concrete(ImsRoleFlags roles, IscAsRouter isc, BindingStore bindings,
+                         DialogCmpPersistence cmpStore, SipCpsMetrics metrics, HssLiteService hss,
+                         OnlineChargingService charging, String nodeId, String fsNodeId) {
+            super(roles, isc, bindings, cmpStore, metrics, hss, charging, nodeId, fsNodeId);
         }
 
         @Override public String getSipCallId() { return str("sipCallId"); }

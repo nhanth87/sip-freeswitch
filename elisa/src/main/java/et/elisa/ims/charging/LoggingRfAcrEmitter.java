@@ -1,28 +1,33 @@
 package et.elisa.ims.charging;
 
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 /**
- * Phase B Rf ACR stub — logs Diameter Rf ACR STOP keyed by icid; no wire yet.
+ * Rf ACR structured-log fallback when Diameter peer not ready or RA unbound.
+ * Not a CDI bean — used by {@link DiameterRfAcrEmitter}.
  */
-@ApplicationScoped
-public class LoggingRfAcrEmitter implements RfAcrEmitter {
+public final class LoggingRfAcrEmitter implements RfAcrEmitter {
 
     private static final Logger LOG = LogManager.getLogger(LoggingRfAcrEmitter.class);
 
-    @Inject CgratesConfig config;
-
-    public LoggingRfAcrEmitter() {}
+    private final CgratesConfig config;
 
     public LoggingRfAcrEmitter(CgratesConfig config) {
         this.config = config;
     }
 
     @Override
+    public void emitStart(RfAcrRequest request) {
+        log("START", request);
+    }
+
+    @Override
     public void emitStop(RfAcrRequest request) {
+        log("STOP", request);
+    }
+
+    private void log(String kind, RfAcrRequest request) {
         try {
             if (config == null || !config.rfDualWriteActive()) {
                 return;
@@ -32,14 +37,14 @@ public class LoggingRfAcrEmitter implements RfAcrEmitter {
             }
             String icid = request.icid();
             if (icid == null || icid.isBlank()) {
-                LOG.debug("Rf ACR STOP stub skipped — no icid sipCallId={}", request.sipCallId());
+                LOG.debug("Rf ACR {} log-fallback skipped — no icid sipCallId={}", kind, request.sipCallId());
                 return;
             }
-            LOG.info("Rf ACR STOP stub icid={} sipCallId={} account={} duration={} cause={}",
-                    icid, request.sipCallId(), request.account(),
-                    request.durationSec(), request.hangupCause());
+            LOG.info("Rf ACR {} log-fallback icid={} sipCallId={} account={} duration={} cause={} avps={}",
+                    kind, icid, request.sipCallId(), request.account(),
+                    request.durationSec(), request.hangupCause(), RfCodec.acrAvps(request));
         } catch (Throwable t) {
-            LOG.warn("Rf ACR stub soft-fail: {}", t.toString());
+            LOG.warn("Rf ACR log-fallback soft-fail: {}", t.toString());
         }
     }
 }

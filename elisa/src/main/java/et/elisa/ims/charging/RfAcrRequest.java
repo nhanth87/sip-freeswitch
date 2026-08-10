@@ -1,7 +1,7 @@
 package et.elisa.ims.charging;
 
 /**
- * Diameter Rf ACR STOP stub payload keyed by {@code icid} (grill G2).
+ * Diameter Rf ACR payload keyed by {@code icid} + {@code sipCallId} (grill G2).
  */
 public record RfAcrRequest(
         String icid,
@@ -15,6 +15,10 @@ public record RfAcrRequest(
         if (recordType == null || recordType.isBlank()) {
             recordType = "STOP";
         }
+    }
+
+    public static RfAcrRequest start(String icid, String sipCallId, String account) {
+        return new RfAcrRequest(icid, sipCallId, account, null, null, "START");
     }
 
     public static RfAcrRequest stop(String icid, String sipCallId, String account,

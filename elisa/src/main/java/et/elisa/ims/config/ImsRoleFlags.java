@@ -3,7 +3,10 @@ package et.elisa.ims.config;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
-/** Feature flags for combined IMS Core roles (grill I2). */
+/**
+ * IMS Core role + lab feature flags (grill I2 + full-fledged surface).
+ * Roles = which CSCF/HSS process runs here; features = protocol planes gated on top.
+ */
 @ApplicationScoped
 public class ImsRoleFlags {
 
@@ -37,6 +40,18 @@ public class ImsRoleFlags {
     @ConfigProperty(name = "sf.ims.isc.as-uri", defaultValue = "")
     String iscAsUri;
 
+    /** iFC / MMTel-lite AS invoke gate ({@code IscAsRouter}). */
+    @ConfigProperty(name = "sf.ims.feature.mmtel", defaultValue = "true")
+    boolean featureMmtel;
+
+    /** Master for dual-write CDRsV1 + Rf ACR + SessionS / deferred debit. */
+    @ConfigProperty(name = "sf.ims.feature.charging", defaultValue = "false")
+    boolean featureCharging;
+
+    /** ENUM/NAPTR stub — off by default; no resolver until grilled. */
+    @ConfigProperty(name = "sf.ims.feature.enum", defaultValue = "false")
+    boolean featureEnum;
+
     public boolean enabled() { return enabled; }
     public boolean pcscf() { return enabled && pcscf; }
     public boolean icscf() { return enabled && icscf; }
@@ -49,8 +64,20 @@ public class ImsRoleFlags {
     public String pcscfUri() { return pcscfUri; }
     public String iscAsUri() { return iscAsUri; }
 
+    public boolean featureMmtel() { return enabled && featureMmtel; }
+    public boolean featureCharging() { return enabled && featureCharging; }
+    public boolean featureEnum() { return enabled && featureEnum; }
+
     public String summary() {
         return "enabled=" + enabled
-                + " P=" + pcscf() + " I=" + icscf() + " S=" + scscf() + " HSS=" + hss();
+                + " P=" + pcscf() + " I=" + icscf() + " S=" + scscf() + " HSS=" + hss()
+                + " mmtel=" + featureMmtel() + " charging=" + featureCharging()
+                + " enum=" + featureEnum();
+    }
+
+    public String featureSummary() {
+        return "mmtel=" + featureMmtel()
+                + " charging=" + featureCharging()
+                + " enum=" + featureEnum();
     }
 }

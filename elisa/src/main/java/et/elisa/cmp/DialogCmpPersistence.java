@@ -1,7 +1,9 @@
 package et.elisa.cmp;
 
+import com.microjainslee.ra.sipservlet.collab.DialogRegistry;
 import et.elisa.cluster.DialogCheckpoint;
 import et.elisa.cluster.DialogCheckpointStore;
+import et.elisa.cluster.SipDialogHa;
 import et.elisa.persist.SfDialogCheckpoint;
 import et.elisa.recovery.DialogOwnerStore;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -11,12 +13,16 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.function.Function;
 import org.jboss.logging.Logger;
 
 /**
  * Dual-write CMP recovery store for invite/dialog SBB state.
  * Hot path: Infinispan {@link DialogCheckpointStore}; durable: Postgres
  * {@code sf_dialog_checkpoint}. Load order: ISPN → PG (rehydrate ISPN on miss).
+ *
+ * <p>Optional {@link #setSipHaEnricher} merges live {@link DialogRegistry} portable
+ * meta into the checkpoint on save (same SoT plane — not a second registry).
  */
 @ApplicationScoped
 public class DialogCmpPersistence {
@@ -30,6 +36,7 @@ public class DialogCmpPersistence {
     private final ConcurrentMap<String, InviteCmpSnapshot> memoryFallback = new ConcurrentHashMap<>();
 
     private volatile boolean pgEnabled = true;
+    private volatile Function<String, DialogRegistry.PortableDialogMeta> sipHaEnricher;
 
     /** Unit-test ctor — no CDI. */
     public DialogCmpPersistence() {
@@ -53,27 +60,62 @@ public class DialogCmpPersistence {
         return this;
     }
 
+    /**
+     * Bind RA export so each CMP save dual-writes portable peers/tags into the
+     * checkpoint (Elisa ISPN DIST_SYNC SoT among S-CSCF nodes).
+     */
+    public void setSipHaEnricher(Function<String, DialogRegistry.PortableDialogMeta> enricher) {
+        this.sipHaEnricher = enricher;
+    }
+
     @Transactional
     public void save(InviteCmpSnapshot snap) {
         if (snap == null || snap.sipCallId() == null || snap.sipCallId().isBlank()) {
             return;
         }
-        DialogCheckpoint cp = snap.toCheckpoint();
+        InviteCmpSnapshot enriched = enrichFromRa(snap);
+        DialogCheckpoint cp = enriched.toCheckpoint();
         if (hot != null && hot.enabled()) {
             hot.put(cp);
         } else {
-            memoryFallback.put(snap.sipCallId(), snap);
+            memoryFallback.put(enriched.sipCallId(), enriched);
         }
         // R3 dual-write: record sticky ownership fence on first/live checkpoint.
         if (owners != null && owners.enabled()
-                && snap.elisaNodeId() != null
-                && !DialogCheckpoint.STATE_TERMINATED.equals(snap.dialogState())) {
-            owners.putIfAbsent(snap.sipCallId(), snap.elisaNodeId());
+                && enriched.elisaNodeId() != null
+                && !DialogCheckpoint.STATE_TERMINATED.equals(enriched.dialogState())) {
+            owners.putIfAbsent(enriched.sipCallId(), enriched.elisaNodeId());
         }
         if (pgEnabled) {
             persistPg(cp);
         }
-        LOG.debugf("cmp save callId=%s state=%s fs=%s", snap.sipCallId(), snap.dialogState(), snap.fsUuid());
+        LOG.debugf("cmp save callId=%s state=%s fs=%s haEmpty=%s",
+                enriched.sipCallId(), enriched.dialogState(), enriched.fsUuid(),
+                enriched.effectiveSipHa().isEmpty());
+    }
+
+    private InviteCmpSnapshot enrichFromRa(InviteCmpSnapshot snap) {
+        Function<String, DialogRegistry.PortableDialogMeta> enricher = sipHaEnricher;
+        if (enricher == null) {
+            return snap;
+        }
+        try {
+            DialogRegistry.PortableDialogMeta portable = enricher.apply(snap.sipCallId());
+            if (portable == null) {
+                return snap;
+            }
+            SipDialogHa ha = SipDialogHa.fromPortable(portable);
+            String peer = snap.peer();
+            if ((peer == null || peer.isBlank())
+                    && portable.peerHost() != null && portable.peerPort() > 0) {
+                peer = portable.peerHost() + ":" + portable.peerPort();
+            }
+            InviteCmpSnapshot withHa = snap.withSipHa(ha);
+            return peer != null && !peer.equals(snap.peer()) ? withHa.withPeer(peer) : withHa;
+        } catch (RuntimeException ex) {
+            LOG.debugf(ex, "sip HA enrich failed callId=%s", snap.sipCallId());
+            return snap;
+        }
     }
 
     public Optional<InviteCmpSnapshot> load(String sipCallId) {
@@ -140,6 +182,18 @@ public class DialogCmpPersistence {
         row.dialogState = cp.effectiveState();
         row.updatedAt = cp.updatedAt() != null ? cp.updatedAt() : Instant.now();
         row.endedAt = DialogCheckpoint.STATE_TERMINATED.equals(row.dialogState) ? Instant.now() : null;
+        SipDialogHa ha = cp.effectiveSipHa();
+        row.remotePeer = ha.remotePeer();
+        row.transport = ha.transport();
+        row.remoteTransport = ha.remoteTransport();
+        row.cseq = ha.cseq();
+        row.fromTag = ha.fromTag();
+        row.toTag = ha.toTag();
+        row.contactUri = ha.contactUri();
+        row.remoteContactUri = ha.remoteContactUri();
+        row.sipMethod = ha.method();
+        row.farFromUri = ha.farFromUri();
+        row.farFromTag = ha.farFromTag();
         row.persist();
     }
 
@@ -161,6 +215,18 @@ public class DialogCmpPersistence {
         }
         Instant started = row.startedAt != null ? row.startedAt : Instant.now();
         Instant updated = row.updatedAt != null ? row.updatedAt : started;
+        SipDialogHa ha = new SipDialogHa(
+                row.remotePeer,
+                row.transport,
+                row.remoteTransport,
+                row.cseq,
+                row.fromTag,
+                row.toTag,
+                row.contactUri,
+                row.remoteContactUri,
+                row.sipMethod,
+                row.farFromUri,
+                row.farFromTag);
         return Optional.of(new InviteCmpSnapshot(
                 row.sipCallId,
                 row.fsUuid,
@@ -173,6 +239,7 @@ public class DialogCmpPersistence {
                 row.elisaNodeId,
                 row.dialogState,
                 started.toEpochMilli(),
-                updated.toEpochMilli()));
+                updated.toEpochMilli(),
+                ha));
     }
 }

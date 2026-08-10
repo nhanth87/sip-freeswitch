@@ -73,6 +73,20 @@ public class CgratesClient {
         if (config == null || !config.cdrsDualWriteActive()) {
             return Result.skipped("cdrs-dual-write-inactive");
         }
+        return postProcessCdr(event);
+    }
+
+    /**
+     * Pending-charge reconcile debit — needs CGRates enabled + cdrs flag; not dual-write gate.
+     */
+    public Result processCdrReconcile(CgratesCdrEvent event) {
+        if (config == null || !config.enabled() || !config.cdrsEnabled()) {
+            return Result.skipped("cdrs-reconcile-inactive");
+        }
+        return postProcessCdr(event);
+    }
+
+    private Result postProcessCdr(CgratesCdrEvent event) {
         if (event == null || event.account() == null || event.account().isBlank()) {
             return Result.skipped("no-account");
         }

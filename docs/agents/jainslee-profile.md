@@ -112,6 +112,19 @@ Do **not** put AKA `ki` / `opc` / live `sqn` in Profile CMP for Phase 1 (HSS SQN
 
 `CallSession.profileId` (Long PG id today) becomes **SLEE `ProfileID`** conceptually (`ImsSubscriber` / msisdn), not a JDBC surrogate.
 
+### N–N vs JVM-local Profile (P0 lock — 2026-08-10)
+
+| Store | Cluster-safe? | Role |
+|-------|---------------|------|
+| `InMemoryProfileFacility` (default) | **No** — JVM-local | Hot mirror / indexes for directory + admin |
+| `DialogCmpPersistence` → ISPN + PG | **Yes** when `DIST_SYNC` | **Live INVITE SoT** for restore |
+| `CallSessionStore` / `RegistrationHomeStore` | **Yes** (shared `ElisaInfinispanManager`) | Session + home sticky |
+| `sf_sip_trunk` | **Yes** (Postgres) | ISC URI on any S-CSCF |
+
+**Do not** treat `CallSessionProfile` as the failover source of truth (USSDGW `ussdUser` footgun). Install `InfinispanProfileStore` later if Profile itself must be N–N; until then CMP/ISPN/PG owns mid-dialog identity.
+
+Config: `sf.cluster.infinispan.mode=DIST_SYNC` + shared `sf.cluster.infinispan.cluster-name` (default `elisa-cluster`).
+
 ---
 
 ## 4. SBB call pattern (JSR-240 style)

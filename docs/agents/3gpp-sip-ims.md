@@ -4,6 +4,8 @@ Elisa implements **lab IMS Core** roles (feature flags). Still **not** an SBC. S
 
 ## Spec anchors
 
+Local Rel-16 cache (PDF + MD extract): [`../3gpp/`](../3gpp/README.md). Roadmap matrix: [`ims-protocol-roadmap.md`](ims-protocol-roadmap.md).
+
 | Area | Spec | Elisa role |
 |------|------|------------|
 | Baseline SIP | RFC 3261 | Transaction + dialog SM — never break |
@@ -11,6 +13,7 @@ Elisa implements **lab IMS Core** roles (feature flags). Still **not** an SBC. S
 | IMS architecture | 3GPP TS 23.228 | CSCF + HSS-lite + ISC to FS MRF |
 | Cx | TS 29.228 / 29.229 | UAR/MAR/SAR/LIR via `ra-diameter` |
 | Auth | TS 33.203 | IMS AKA on REGISTER |
+| Charging Rf/Ro | TS 32.260 / 32.299 | Rf stub + CGRates; Gx/Gy **Never** |
 | VoLTE / VoNR media | GSMA IR.92 (+ ICE/TURN) | Media on FreeSWITCH / TURN — not Elisa RTP |
 | 5G access (context) | TS 23.501 / 23.502 | AMF/SMF/UPF **external**; SIP still Gm → P-CSCF |
 

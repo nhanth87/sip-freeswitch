@@ -1,47 +1,35 @@
 package et.elisa.recovery;
 
+import et.elisa.cluster.ElisaInfinispanManager;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.infinispan.Cache;
-import org.infinispan.configuration.cache.CacheMode;
-import org.infinispan.configuration.cache.ConfigurationBuilder;
-import org.infinispan.configuration.global.GlobalConfigurationBuilder;
-import org.infinispan.manager.DefaultCacheManager;
-import org.infinispan.manager.EmbeddedCacheManager;
 import org.jboss.logging.Logger;
 
 /**
  * Infinispan (or memory) ownership fence for dialog correlates (R2/R3).
  * Dual-write with app CMP: put-if-absent on create; CAS claim on failover.
+ * Shares {@link ElisaInfinispanManager} cluster name with dialog/call/reg caches.
  */
 @ApplicationScoped
 public class DialogOwnerStore {
 
     private static final Logger LOG = Logger.getLogger(DialogOwnerStore.class);
-    private static final String CACHE = "elisa-dialog-owners";
 
-    @ConfigProperty(name = "sf.cluster.infinispan.enabled", defaultValue = "true")
-    boolean enabled;
-
-    @ConfigProperty(name = "sf.cluster.infinispan.mode", defaultValue = "LOCAL")
-    String mode;
-
-    @ConfigProperty(name = "sf.cluster.infinispan.ttl-seconds", defaultValue = "7200")
-    long ttlSeconds;
+    @Inject ElisaInfinispanManager cluster;
 
     @ConfigProperty(name = "sf.cluster.node-id", defaultValue = "elisa-1")
     String localNodeId;
 
-    private EmbeddedCacheManager manager;
     private Cache<String, DialogOwner> cache;
     private final ConcurrentMap<String, DialogOwner> memory = new ConcurrentHashMap<>();
     private volatile boolean useMemoryOnly;
@@ -53,40 +41,27 @@ public class DialogOwnerStore {
     public DialogOwnerStore memoryOnly(String nodeId) {
         this.localNodeId = nodeId == null ? "elisa-1" : nodeId;
         this.useMemoryOnly = true;
-        this.enabled = false;
+        this.cluster = null;
         return this;
     }
 
     @PostConstruct
     void start() {
-        if (useMemoryOnly || !enabled) {
-            LOG.info("DialogOwnerStore memory/disabled mode");
+        if (useMemoryOnly) {
+            LOG.info("DialogOwnerStore memory mode");
             return;
         }
-        boolean dist = "DIST_SYNC".equalsIgnoreCase(mode) || "DIST".equalsIgnoreCase(mode);
-        GlobalConfigurationBuilder global = new GlobalConfigurationBuilder();
-        if (dist) {
-            global.transport().defaultTransport().clusterName("elisa-dialog-owners");
-        } else {
-            global.nonClusteredDefault();
+        if (cluster == null || !cluster.enabled()) {
+            LOG.info("DialogOwnerStore disabled — memory fence only");
+            return;
         }
-        ConfigurationBuilder cb = new ConfigurationBuilder();
-        cb.clustering().cacheMode(dist ? CacheMode.DIST_SYNC : CacheMode.LOCAL)
-                .expiration().lifespan(ttlSeconds, TimeUnit.SECONDS)
-                .memory().maxCount(200_000);
-        manager = new DefaultCacheManager(global.build());
-        manager.defineConfiguration(CACHE, cb.build());
-        cache = manager.getCache(CACHE);
-        LOG.infof("DialogOwnerStore ready mode=%s node=%s", dist ? "DIST_SYNC" : "LOCAL", localNodeId);
+        cache = cluster.cache(ElisaInfinispanManager.CACHE_DIALOG_OWNERS);
+        LOG.infof("DialogOwnerStore ready mode=%s node=%s", cluster.modeLabel(), localNodeId);
     }
 
     @PreDestroy
     void stop() {
-        if (manager != null) {
-            manager.stop();
-            manager = null;
-            cache = null;
-        }
+        cache = null;
     }
 
     public String localNodeId() {
@@ -103,9 +78,10 @@ public class DialogOwnerStore {
      * can be layered when Elisa shares one ClusterManager with jainslee-cluster.
      */
     public boolean isPrimaryPartition() {
-        if (cache == null || manager == null) {
+        if (cache == null || cluster == null || cluster.manager() == null) {
             return true;
         }
+        var manager = cluster.manager();
         if (!manager.getCacheManagerConfiguration().isClustered()) {
             return true;
         }

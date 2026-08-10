@@ -36,7 +36,7 @@ Elisa does **not** own the VIP — **nginx `stream`** (locked) or an L4 applianc
 | **Pair** | Elisa-i ESL primary → FS-i (`sf_fs_pair.priority=0`) |
 | **Failover** | Same Elisa → FS-j list by priority (`EslFailoverService`) |
 | **Profile** | Each FS exposes a Sofia profile bound to that node’s SIP IP (e.g. `internal@fs-i`) |
-| **Trunk URI** | Elisa `sip.trunk.freeswitch-uri` (or per-tenant trunk) points at the **paired** FS profile, not a floating VIP on FS |
+| **Trunk URI** | Elisa `sf_sip_trunk` primary ISC (or `sip.trunk.freeswitch-uri` fallback) points at the **paired** FS profile, not a floating VIP on FS |
 
 Do **not** load-balance Elisa trunks across random FS nodes without updating the pair table — media and ESL events would diverge.
 
@@ -47,6 +47,7 @@ Do **not** load-balance Elisa trunks across random FS nodes without updating the
 | `sf.cluster.node-id` | This Elisa id (`elisa-1`) — must match `sf_fs_pair.elisa_node_id` |
 | `sf_cluster_node` / `sf_fs_pair` | Topology rows (Flyway V3) |
 | `sf.cluster.infinispan.mode` | `LOCAL` lab; `DIST_SYNC` multi-Elisa |
+| `sf.cluster.infinispan.cluster-name` | Shared JGroups name for dialog+call+reg+owner caches (default `elisa-cluster`) |
 | `sf.esl.*` | Fallback when pair table empty |
 
 ## Ops checklist
@@ -55,7 +56,8 @@ Do **not** load-balance Elisa trunks across random FS nodes without updating the
 2. Insert `sf_fs_pair` (elisa → fs, priority 0 primary, 1+ failover).
 3. Point VIP → Elisa SIP ports; keep mid-dialog affinity.
 4. Point each Elisa trunk URI at its primary FS Sofia profile.
-5. Enable `DIST_SYNC` only when ≥2 Elisa share the Infinispan cluster name.
+5. Enable `DIST_SYNC` only when ≥2 Elisa share the Infinispan cluster name (`sf.cluster.infinispan.cluster-name`).
+6. Prefer `/admin/trunks` (or Flyway seed) for ISC URI so every S-CSCF node resolves the same primary.
 
 ## IMS extension (grill I7)
 

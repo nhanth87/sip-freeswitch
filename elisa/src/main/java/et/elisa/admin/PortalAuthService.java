@@ -22,24 +22,35 @@ public class PortalAuthService {
 
     private final String secret;
     private final String bootstrapPassword;
+    private final boolean devLogin;
 
     @Inject PortalUserService users;
     @Inject PasswordHasher hasher;
 
     public PortalAuthService(
             @ConfigProperty(name = "sf.admin.session-hmac-secret") String secret,
-            @ConfigProperty(name = "sf.admin.bootstrap-password", defaultValue = "admin") String bootstrapPassword) {
+            @ConfigProperty(name = "sf.admin.bootstrap-password", defaultValue = "admin") String bootstrapPassword,
+            @ConfigProperty(name = "sf.admin.dev-login", defaultValue = "true") boolean devLogin) {
         this.secret = secret;
         this.bootstrapPassword = bootstrapPassword;
+        this.devLogin = devLogin;
     }
 
     void onStart(@Observes StartupEvent ev) {
+        if (!devLogin && isInsecureLabSecret()) {
+            LOG.error("PROD fail-closed: sf.admin.dev-login=false but HMAC/bootstrap still lab defaults — "
+                    + "set SF_ADMIN_SESSION_HMAC_SECRET + SF_ADMIN_BOOTSTRAP_PASSWORD before go-live");
+        }
         bootstrapAdminIfEmpty();
     }
 
     @Transactional
     void bootstrapAdminIfEmpty() {
         if (SfPortalUser.count() > 0) {
+            return;
+        }
+        if (!devLogin && ("admin".equals(bootstrapPassword) || bootstrapPassword == null || bootstrapPassword.isBlank())) {
+            LOG.error("PROD fail-closed: refusing bootstrap admin/admin when sf.admin.dev-login=false");
             return;
         }
         SfPortalUser admin = new SfPortalUser();
@@ -52,6 +63,11 @@ public class PortalAuthService {
         admin.updatedAt = admin.createdAt;
         admin.persist();
         LOG.warn("Bootstrapped ADMIN user 'admin' — change password immediately (sf.admin.bootstrap-password)");
+    }
+
+    private boolean isInsecureLabSecret() {
+        return secret == null || secret.isBlank() || "change-me-sf".equals(secret)
+                || "admin".equals(bootstrapPassword);
     }
 
     public Optional<Session> login(String username, String password) {

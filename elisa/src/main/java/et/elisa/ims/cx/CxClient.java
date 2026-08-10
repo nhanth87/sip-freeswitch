@@ -14,7 +14,9 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 /**
- * Cx client: when HSS-lite local, short-circuit; else send via diameter-ra.
+ * Cx client: when HSS-lite local ({@code sf.ims.role.hss=true}), short-circuit;
+ * else Diameter RA path only — gated on {@link DiameterRaBridge#peerReady()}
+ * (CER/CEA), never LISTEN-only fiction.
  */
 @ApplicationScoped
 public class CxClient {
@@ -23,6 +25,7 @@ public class CxClient {
 
     @Inject ImsRoleFlags roles;
     @Inject HssLiteService hss;
+    @Inject DiameterRaBridge diameter;
 
     @ConfigProperty(name = "sf.ims.cx.destination-host", defaultValue = "hss.ims.lab")
     String destHost;
@@ -73,6 +76,14 @@ public class CxClient {
     }
 
     private Map<Integer, String> sendSync(int cmd, Map<Integer, String> avps) {
+        // Remote Cx: never short-circuit to HSS-lite when role.hss=false.
+        // Peer truth = CER/CEA ready — not RA bound / LISTEN alone.
+        if (diameter != null && !diameter.peerReady()) {
+            boolean bound = diameter.bound();
+            LOG.warnf("Cx remote refused cmd=%d: peerReady=false bound=%s (LISTEN≠ready)",
+                    cmd, bound);
+            return Map.of(CxCodec.RESULT_CODE, "5012");
+        }
         RaCommandPort port = diameterRa;
         if (port == null) {
             LOG.warn("diameter-ra not bound — Cx remote unavailable");

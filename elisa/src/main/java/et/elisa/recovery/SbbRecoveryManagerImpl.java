@@ -240,10 +240,13 @@ public class SbbRecoveryManagerImpl implements SbbRecoveryManager {
             claimWon.incrementAndGet();
             boolean ok = spawnAndRestore(key, /*failover*/ true);
             if (ok) {
-                // Honest: SIP Send* needs DialogRegistry peers (portable restore attempted).
-                boolean sipReady = sipRa != null && sipRa.hasDialog(key.correlate());
+                // Honest: SIP Send* needs DialogRegistry (portable restore + wire rebuild).
+                boolean sipReady = sipRa != null && hasRestoredWire(key.correlate());
                 if (!sipReady && sipRa != null) {
                     boolean restored = sipRa.restoreDialogFromCluster(key.correlate());
+                    if (!restored) {
+                        restored = restoreDialogFromCheckpoint(key.correlate());
+                    }
                     if (!restored) {
                         blockedSipHa.incrementAndGet();
                         LOG.infof("failover spawn ok callId=%s but SIP HA blocked until wire rebuild",
@@ -497,6 +500,36 @@ public class SbbRecoveryManagerImpl implements SbbRecoveryManager {
         }
         int slash = id.lastIndexOf('/');
         return slash >= 0 ? id.substring(slash + 1) : id;
+    }
+
+    private boolean hasRestoredWire(String callId) {
+        if (sipRa == null || callId == null || !sipRa.hasDialog(callId)) {
+            return false;
+        }
+        var dialog = sipRa.dialogRegistry().find(callId);
+        return dialog != null && dialog.lastRequest() != null;
+    }
+
+    /**
+     * Lab N–N: prime DialogRegistry from Elisa DialogCheckpoint SipDialogHa
+     * (same SoT as CMP — used when RaHaSupport ClusterManager is localOnly).
+     */
+    public boolean restoreDialogFromCheckpoint(String callId) {
+        if (sipRa == null || dialogCmp == null || callId == null) {
+            return false;
+        }
+        Optional<InviteCmpSnapshot> snap = dialogCmp.load(callId);
+        if (snap.isEmpty()) {
+            return false;
+        }
+        InviteCmpSnapshot s = snap.get();
+        if (s.effectiveSipHa().isEmpty()
+                && (s.peer() == null || s.peer().isBlank())
+                && (s.fromUri() == null || s.fromUri().isBlank())) {
+            return false;
+        }
+        var portable = s.effectiveSipHa().toPortable(callId, s.peer(), s.fromUri(), s.toUri());
+        return sipRa.restoreDialog(portable);
     }
 
     private boolean isTerminated(String callId) {

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.microjainslee.ra.sipservlet.command.SendInvite;
+import com.microjainslee.ra.sipservlet.command.SendRegister;
 import com.microjainslee.ra.sipservlet.command.SendResponse;
 import com.microjainslee.ra.sipservlet.events.SipInviteEvent;
 import com.microjainslee.ra.sipservlet.events.SipRegisterEvent;
@@ -113,13 +114,16 @@ class Ts24229InviteRoutingTest {
         }
 
         @Test
-        void register_uarOk_iOnly_503UntilMwForwardExists() {
+        void register_uarOk_iOnly_forwardsMwRegisterToScscf() {
             CapturingRa ra = new CapturingRa();
             StubCx cx = new StubCx(CxCodec.uaaAvps("sip:scscf.ims.lab"), Map.of());
             IcscfRoutingSbb sbb = new IcscfRoutingSbb(ImsTestSupport.roles(false, true, false, false), cx);
             ImsTestSupport.injectRa(sbb, ra);
             sbb.onEvent(new SipRegisterEvent("r1", "sip:a@ims.lab", "sip:a@ims.lab", "sip:a@1", 3600), null);
-            assertEquals(503, ra.ofType(SendResponse.class).getFirst().statusCode());
+            assertTrue(ra.ofType(SendResponse.class).isEmpty(), "I-only must not answer REGISTER after UAR OK");
+            SendRegister fwd = ra.ofType(SendRegister.class).getFirst();
+            assertEquals("sip:scscf.ims.lab", fwd.requestUri());
+            assertEquals("r1", fwd.callId());
         }
 
         @Test
@@ -227,6 +231,7 @@ class Ts24229InviteRoutingTest {
             ImsTestSupport.set(roles, "iscAsUri", as);
             IscAsRouter r = new IscAsRouter();
             ImsTestSupport.set(r, "roles", roles);
+            ImsTestSupport.set(r, "trunks", null);
             ImsTestSupport.set(r, "fallbackTrunk", "sip:fallback@127.0.0.1:5062");
             return r;
         } catch (ReflectiveOperationException e) {

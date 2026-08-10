@@ -3,109 +3,121 @@ package et.elisa.cluster;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import java.util.Optional;
-import java.util.concurrent.TimeUnit;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import org.infinispan.Cache;
-import org.infinispan.configuration.cache.CacheMode;
-import org.infinispan.configuration.cache.ConfigurationBuilder;
-import org.infinispan.configuration.global.GlobalConfigurationBuilder;
-import org.infinispan.manager.DefaultCacheManager;
-import org.infinispan.manager.EmbeddedCacheManager;
 import org.jboss.logging.Logger;
 
 /**
- * C1: Infinispan embedded cache for SIP dialog checkpoints.
+ * C1: Infinispan (shared {@link ElisaInfinispanManager}) for SIP dialog checkpoints.
  * RA {@code DialogRegistry} remains authoritative for in-flight SIP; this store
- * holds recoverable metadata for cluster failover / ops visibility.
- * Default mode LOCAL (lab single-node). Set {@code sf.cluster.infinispan.mode=DIST_SYNC}
- * for multi-node (JGroups).
+ * holds recoverable metadata for cluster failover / CMP restore.
+ * Set {@code sf.cluster.infinispan.mode=DIST_SYNC} for multi-node.
  */
 @ApplicationScoped
 public class DialogCheckpointStore {
 
     private static final Logger LOG = Logger.getLogger(DialogCheckpointStore.class);
-    private static final String CACHE = "elisa-dialog-checkpoints";
 
-    @ConfigProperty(name = "sf.cluster.infinispan.enabled", defaultValue = "true")
-    boolean enabled;
+    @Inject ElisaInfinispanManager cluster;
 
-    @ConfigProperty(name = "sf.cluster.infinispan.ttl-seconds", defaultValue = "7200")
-    long ttlSeconds;
-
-    @ConfigProperty(name = "sf.cluster.infinispan.mode", defaultValue = "LOCAL")
-    String mode;
-
-    @ConfigProperty(name = "sf.cluster.infinispan.cluster-name", defaultValue = "elisa-dialogs")
-    String clusterName;
-
-    private EmbeddedCacheManager manager;
     private Cache<String, DialogCheckpoint> cache;
+    private ConcurrentMap<String, DialogCheckpoint> memory;
+    private volatile boolean useMemory;
+
+    /** Unit-test / cross-node simulation — shared ConcurrentMap backend. */
+    public DialogCheckpointStore memoryBackend() {
+        this.useMemory = true;
+        this.memory = new ConcurrentHashMap<>();
+        this.cluster = null;
+        return this;
+    }
+
+    /** Share an existing memory map (two nodes → one map = DIST_SYNC sim). */
+    public DialogCheckpointStore shareMemory(ConcurrentMap<String, DialogCheckpoint> shared) {
+        this.useMemory = true;
+        this.memory = shared;
+        this.cluster = null;
+        return this;
+    }
 
     @PostConstruct
     void start() {
-        if (!enabled) {
+        if (useMemory) {
+            LOG.info("DialogCheckpointStore memory backend");
+            return;
+        }
+        if (cluster == null || !cluster.enabled()) {
             LOG.info("DialogCheckpointStore disabled");
             return;
         }
-        boolean dist = "DIST_SYNC".equalsIgnoreCase(mode) || "DIST".equalsIgnoreCase(mode);
-        GlobalConfigurationBuilder global = new GlobalConfigurationBuilder();
-        if (dist) {
-            global.transport().defaultTransport().clusterName(clusterName);
-        } else {
-            global.nonClusteredDefault();
-        }
-        ConfigurationBuilder cb = new ConfigurationBuilder();
-        cb.clustering().cacheMode(dist ? CacheMode.DIST_SYNC : CacheMode.LOCAL)
-                .expiration().lifespan(ttlSeconds, TimeUnit.SECONDS)
-                .memory().maxCount(100_000);
-        manager = new DefaultCacheManager(global.build());
-        manager.defineConfiguration(CACHE, cb.build());
-        cache = manager.getCache(CACHE);
-        LOG.infof("DialogCheckpointStore ready cache=%s mode=%s ttl=%ds",
-                CACHE, dist ? "DIST_SYNC" : "LOCAL", ttlSeconds);
+        cache = cluster.cache(ElisaInfinispanManager.CACHE_DIALOGS);
+        LOG.infof("DialogCheckpointStore ready cache=%s mode=%s",
+                ElisaInfinispanManager.CACHE_DIALOGS, cluster.modeLabel());
     }
 
     @PreDestroy
     void stop() {
-        if (manager != null) {
-            manager.stop();
-            manager = null;
-            cache = null;
-        }
+        cache = null;
     }
 
     public void put(DialogCheckpoint cp) {
-        if (cache == null || cp == null || cp.callId() == null) {
+        if (cp == null || cp.callId() == null) {
             return;
         }
-        cache.put(cp.callId(), cp);
+        if (useMemory && memory != null) {
+            memory.put(cp.callId(), cp);
+            return;
+        }
+        if (cache != null) {
+            cache.put(cp.callId(), cp);
+        }
     }
 
     public Optional<DialogCheckpoint> get(String callId) {
-        if (cache == null || callId == null) {
+        if (callId == null) {
+            return Optional.empty();
+        }
+        if (useMemory && memory != null) {
+            return Optional.ofNullable(memory.get(callId));
+        }
+        if (cache == null) {
             return Optional.empty();
         }
         return Optional.ofNullable(cache.get(callId));
     }
 
     public void remove(String callId) {
-        if (cache == null || callId == null) {
+        if (callId == null) {
             return;
         }
-        cache.remove(callId);
+        if (useMemory && memory != null) {
+            memory.remove(callId);
+            return;
+        }
+        if (cache != null) {
+            cache.remove(callId);
+        }
     }
 
     public long size() {
+        if (useMemory && memory != null) {
+            return memory.size();
+        }
         return cache == null ? 0 : cache.size();
     }
 
     public boolean enabled() {
-        return cache != null;
+        return (useMemory && memory != null) || cache != null;
     }
 
     /** Snapshot of live checkpoints (orphan scan / admin). Empty when disabled. */
     public java.util.Collection<DialogCheckpoint> entries() {
+        if (useMemory && memory != null) {
+            return java.util.List.copyOf(memory.values());
+        }
         if (cache == null) {
             return java.util.List.of();
         }

@@ -1,5 +1,6 @@
 package et.elisa.ims.charging;
 
+import et.elisa.ims.config.ImsRoleFlags;
 import et.elisa.persist.SfCdr;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -7,7 +8,8 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 /**
- * Offline dual-write after SfCdr persist: CDRsV1 + Rf ACR stub behind {@code sf.charging.dual-write}.
+ * Offline dual-write after SfCdr persist: CDRsV1 + Rf ACR behind
+ * {@code sf.ims.feature.charging} + {@code sf.charging.dual-write}.
  */
 @ApplicationScoped
 public class ChargingDualWrite {
@@ -18,6 +20,7 @@ public class ChargingDualWrite {
     @Inject CgratesClient cgrates;
     @Inject ChargingAccountResolver accounts;
     @Inject RfAcrEmitter rf;
+    @Inject ImsRoleFlags roles;
 
     public ChargingDualWrite() {}
 
@@ -32,6 +35,9 @@ public class ChargingDualWrite {
     /** Soft-fail wrapper — never rethrows. */
     public void afterCdrPersist(SfCdr row) {
         try {
+            if (roles != null && !roles.featureCharging()) {
+                return;
+            }
             if (config == null || !config.dualWrite()) {
                 return;
             }

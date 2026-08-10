@@ -25,6 +25,9 @@ public final class ImsTestSupport {
             set(flags, "icscfUri", "sip:icscf.ims.lab:5060");
             set(flags, "scscfUri", "sip:scscf.ims.lab:5060");
             set(flags, "iscAsUri", "sip:as@127.0.0.1:5062");
+            set(flags, "featureMmtel", true);
+            set(flags, "featureCharging", false);
+            set(flags, "featureEnum", false);
             return flags;
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException(e);

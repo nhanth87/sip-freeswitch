@@ -1,11 +1,15 @@
 package et.elisa.admin;
 
+import et.elisa.cluster.ElisaInfinispanManager;
 import et.elisa.ims.config.ImsRoleFlags;
 import et.elisa.ims.cx.DiameterRaBridge;
 import et.elisa.ims.hss.HssLiteService;
 import et.elisa.ims.reg.BindingStore;
+import et.elisa.ims.scscf.IscAsRouter;
+import et.elisa.ims.trunk.SipTrunkService;
 import et.elisa.persist.ImsBinding;
 import et.elisa.persist.ImsSubscriber;
+import et.elisa.persist.SipTrunkEntity;
 import et.elisa.profile.ElisaProfileService;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
@@ -29,12 +33,20 @@ public class ImsAdminRoutes {
     @Inject HssLiteService hss;
     @Inject BindingStore bindings;
     @Inject ElisaProfileService sleeProfiles;
+    @Inject SipTrunkService trunks;
+    @Inject IscAsRouter isc;
+    @Inject ElisaInfinispanManager ispn;
+    @Inject et.elisa.esl.FreeSwitchRaBridge fsBridge;
+    @Inject et.elisa.ims.charging.CgratesConfig cgratesConfig;
 
     @ConfigProperty(name = "sf.admin.api-key")
     String apiKey;
 
+    @ConfigProperty(name = "sf.cluster.node-id", defaultValue = "elisa-1")
+    String nodeId;
+
     @GET
-    @Path("/{page: ims|subscribers|bindings}")
+    @Path("/{page: ims|subscribers|bindings|trunks}")
     @Produces(MediaType.TEXT_HTML)
     public Response pages(@PathParam("page") String page,
                           @HeaderParam("Cookie") String cookie,
@@ -55,22 +67,127 @@ public class ImsAdminRoutes {
         requireAdmin(cookie, key, keyQ);
         boolean cxReady = diameter.peerReady();
         boolean cxBound = diameter.bound();
-        String cxTruth = roles.hss()
-                ? "local HSS-lite (Cx peer N/A) <span class=\"badge ok\">OK</span>"
-                : Boolean.toString(cxReady)
-                        + (cxReady ? " <span class=\"badge ok\">UP</span>" : " <span class=\"badge mute\">DOWN</span>");
+        boolean cxConnected = diameter.peerConnected();
+        String cxTruth;
+        if (roles.hss()) {
+            cxTruth = "local HSS-lite (Cx peer N/A) <span class=\"badge ok\">OK</span>";
+        } else if (cxReady) {
+            cxTruth = "true <span class=\"badge ok\">UP</span> (CER/CEA)";
+        } else {
+            cxTruth = "false <span class=\"badge mute\">DOWN</span>"
+                    + (cxBound ? " bound+LISTEN≠ready" : " unbound")
+                    + (cxConnected ? " tcp=up" : " tcp=down");
+        }
+        String ispnMode = ispn == null || !ispn.enabled() ? "off" : ispn.modeLabel();
+        String ispnCluster = ispn == null ? "-" : ispn.clusterName();
+        String resolvedIsc = "(n/a)";
+        try {
+            resolvedIsc = isc != null ? isc.asUri() : trunks.resolveIscOrMrfUri();
+        } catch (RuntimeException ignored) {
+            // ignore
+        }
+        boolean eslLive = fsBridge != null && fsBridge.live();
+        String eslTruth = eslLive
+                ? "true <span class=\"badge ok\">UP</span> (ESL heartbeat)"
+                : "false <span class=\"badge mute\">DOWN</span> (LISTEN≠ready)";
         return "<table><tbody>"
+                + row("nodeId", AdminPageRenderer.esc(nodeId))
                 + row("roles", AdminPageRenderer.esc(roles.summary()))
+                + row("features", AdminPageRenderer.esc(roles.featureSummary()))
                 + row("realm", AdminPageRenderer.esc(roles.realm()))
                 + row("pcscfUri", AdminPageRenderer.esc(roles.pcscfUri()))
                 + row("icscfUri", AdminPageRenderer.esc(roles.icscfUri()))
                 + row("scscfUri", AdminPageRenderer.esc(roles.scscfUri()))
                 + row("iscAsUri", AdminPageRenderer.esc(roles.iscAsUri() == null || roles.iscAsUri().isBlank()
-                        ? "(trunk fallback)" : roles.iscAsUri()))
+                        ? "(prop blank — trunk table/props)" : roles.iscAsUri()))
+                + row("iscResolved", AdminPageRenderer.esc(resolvedIsc))
+                + row("ispnMode", AdminPageRenderer.esc(ispnMode)
+                        + (ispn != null && ispn.distSync()
+                        ? " <span class=\"badge ok\">N–N</span>" : " <span class=\"badge mute\">lab</span>"))
+                + row("ispnCluster", AdminPageRenderer.esc(ispnCluster))
                 + row("cxRaBound", Boolean.toString(cxBound))
+                + row("cxPeerConnected", Boolean.toString(cxConnected))
                 + row("cxPeerReady", cxTruth)
-                + row("hssLite", Boolean.toString(roles.hss()))
+                + row("eslLive", eslTruth)
+                + row("hssLite", Boolean.toString(roles.hss())
+                        + (roles.hss() ? "" : " — remote Cx via ra-diameter"))
+                + row("chargingMaster", Boolean.toString(roles.featureCharging())
+                        + (cgratesConfig == null ? ""
+                        : " dualWrite=" + cgratesConfig.dualWrite()
+                        + " rf=" + cgratesConfig.rfEnabled()
+                        + " sessionS=" + cgratesConfig.sessionSEnabled()
+                        + " ocs=" + cgratesConfig.ocsMode()))
                 + "</tbody></table>";
+    }
+
+    @GET
+    @Path("/partial/trunk-rows")
+    @Produces(MediaType.TEXT_HTML)
+    public String trunkRows(@HeaderParam("Cookie") String cookie,
+                            @HeaderParam("X-SF-Admin-Key") String key,
+                            @QueryParam("key") String keyQ) {
+        requireAdmin(cookie, key, keyQ);
+        List<SipTrunkEntity> list = trunks.listAll();
+        if (list.isEmpty()) {
+            return "<p class=\"hint\">No trunks — Flyway seed or form below. Fallback props: "
+                    + AdminPageRenderer.esc(trunks.fallbackUri()) + "</p>";
+        }
+        StringBuilder sb = new StringBuilder(
+                "<table><thead><tr><th>id</th><th>kind</th><th>prio</th><th>peer</th>"
+                        + "<th>sip_uri</th><th>enabled</th><th>tenant</th></tr></thead><tbody>");
+        for (SipTrunkEntity t : list) {
+            sb.append("<tr><td class=\"mono\">").append(AdminPageRenderer.esc(t.id)).append("</td>")
+                    .append("<td>").append(AdminPageRenderer.esc(t.kind)).append("</td>")
+                    .append("<td>").append(t.priority).append("</td>")
+                    .append("<td class=\"mono\">").append(AdminPageRenderer.esc(t.peerHost))
+                    .append(':').append(t.peerPort).append('/').append(AdminPageRenderer.esc(t.transport))
+                    .append("</td>")
+                    .append("<td class=\"mono\">").append(AdminPageRenderer.esc(t.sipUri)).append("</td>")
+                    .append("<td>").append(t.enabled).append("</td>")
+                    .append("<td class=\"mono\">")
+                    .append(AdminPageRenderer.esc(t.tenantId == null ? "" : t.tenantId))
+                    .append("</td></tr>");
+        }
+        return sb.append("</tbody></table>").toString();
+    }
+
+    @POST
+    @Path("/trunks")
+    @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
+    @Transactional
+    public Response upsertTrunk(@FormParam("id") String id,
+                                @FormParam("name") String name,
+                                @FormParam("peerHost") String peerHost,
+                                @FormParam("peerPort") String peerPort,
+                                @FormParam("transport") String transport,
+                                @FormParam("sipUri") String sipUri,
+                                @FormParam("kind") String kind,
+                                @FormParam("priority") String priority,
+                                @FormParam("tenantId") String tenantId,
+                                @FormParam("enabled") String enabled,
+                                @HeaderParam("Cookie") String cookie,
+                                @HeaderParam("X-SF-Admin-Key") String key,
+                                @QueryParam("key") String keyQ) {
+        requireAdmin(cookie, key, keyQ);
+        int port = 5060;
+        try {
+            if (peerPort != null && !peerPort.isBlank()) {
+                port = Integer.parseInt(peerPort.trim());
+            }
+        } catch (NumberFormatException ignored) {
+            // default
+        }
+        int prio = 100;
+        try {
+            if (priority != null && !priority.isBlank()) {
+                prio = Integer.parseInt(priority.trim());
+            }
+        } catch (NumberFormatException ignored) {
+            // default
+        }
+        boolean on = enabled == null || "true".equalsIgnoreCase(enabled) || "on".equalsIgnoreCase(enabled);
+        trunks.upsert(id, name, peerHost, port, transport, sipUri, on, tenantId, kind, prio);
+        return Response.seeOther(URI.create("/admin/trunks")).build();
     }
 
     @GET

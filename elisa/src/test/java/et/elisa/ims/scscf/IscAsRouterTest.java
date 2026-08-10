@@ -34,6 +34,7 @@ class IscAsRouterTest {
         ImsTestSupport.set(roles, "iscAsUri", "sip:configured@10.1.1.1:5062");
         IscAsRouter r = new IscAsRouter();
         ImsTestSupport.set(r, "roles", roles);
+        ImsTestSupport.set(r, "trunks", null);
         ImsTestSupport.set(r, "fallbackTrunk", "sip:fallback@127.0.0.1:5062");
         assertEquals("sip:configured@10.1.1.1:5062", r.asUri());
     }
@@ -44,6 +45,7 @@ class IscAsRouterTest {
         ImsTestSupport.set(roles, "iscAsUri", "");
         IscAsRouter r = new IscAsRouter();
         ImsTestSupport.set(r, "roles", roles);
+        ImsTestSupport.set(r, "trunks", null);
         ImsTestSupport.set(r, "fallbackTrunk", "sip:1000@127.0.0.1:5062");
         assertEquals("sip:1000@127.0.0.1:5062", r.asUri());
     }
@@ -54,6 +56,7 @@ class IscAsRouterTest {
             ImsTestSupport.set(roles, "iscAsUri", as);
             IscAsRouter r = new IscAsRouter();
             ImsTestSupport.set(r, "roles", roles);
+            ImsTestSupport.set(r, "trunks", null);
             ImsTestSupport.set(r, "fallbackTrunk", "sip:fb@127.0.0.1:5062");
             return r;
         } catch (ReflectiveOperationException e) {

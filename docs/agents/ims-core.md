@@ -31,9 +31,12 @@ All `true` = combined lab node. Split deploy = enable subset — **one image, ma
 - TS 23.228 — NF / ISC
 - TS 24.229 — Gm/Mw REGISTER/INVITE, Path / Service-Route
 - TS 29.228 / 29.229 — Cx UAR/MAR/SAR/LIR
+- TS 32.260 / 32.299 — IMS charging / Diameter Rf/Ro (lab: Rf stub + CGRates; Gx/Gy out)
 - TS 33.203 — IMS AKA
 - RFC 3261 — transaction/dialog SM (`ra-sip-servlet`)
 - 5G access (context only) — TS 23.501 / 23.502 (AMF/SMF/UPF); Elisa does **not** implement 5GC
+
+Cached PDFs + MD: [`../3gpp/`](../3gpp/README.md). Protocol matrix / Clearwater gap: [`ims-protocol-roadmap.md`](ims-protocol-roadmap.md).
 
 ---
 
@@ -279,7 +282,7 @@ sequenceDiagram
 | **OCS down (G3)** | **`sf.ocs.mode=deferred`**: fake-continue + durable pending debit (`icid` / `sipCallId`); reconcile on recover — **not** hard 403. When OCS **UP** + credit fail → SIP/AS **302** later, not UPF |
 | **Never** | PFCP/N4, Gx, Gy, Gx-over-Gy (App-Id 16777225), owning PCRF/PCEF, RTP through Elisa, SBC |
 
-**Improve plan (G1–G5):** [`elisa-improve-plan.md`](elisa-improve-plan.md) — Phase A + B stub + Phase C scaffold landed; SessionS INVITE gate / PG pending / real Rf Diameter = follow-up.
+**Improve plan (G1–G5):** [`elisa-improve-plan.md`](elisa-improve-plan.md) — Phase A–C production-capable behind flags; **Production P0** checklist [`production-p0.md`](production-p0.md). SessionS/Rf **OFF** until `sf.ims.feature.charging=true`. **P0 trunk + N–N CMP/ISPN** landed 2026-08-10 — [`ims-protocol-roadmap.md`](ims-protocol-roadmap.md).
 
 No Rx ⇒ no dedicated-bearer VoLTE QoS claims. Footguns: [`lessons.md`](lessons.md) § PFCP / Gx / Gy + Elisa improve (2026-08-10).
 

@@ -4,7 +4,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 /**
- * CGRates / offline charging knobs (grill G1–G5). Peer live = HTTP evidence, never config-applied.
+ * CGRates / Rf / SessionS knobs (grill G1–G5). Peer live = HTTP or Diameter evidence, never config-applied.
+ * Master plane gate is {@code sf.ims.feature.charging} (checked by callers via {@link et.elisa.ims.config.ImsRoleFlags}).
  */
 @ApplicationScoped
 public class CgratesConfig {
@@ -21,6 +22,10 @@ public class CgratesConfig {
     @ConfigProperty(name = "sf.cgrates.cdrs.enabled", defaultValue = "false")
     boolean cdrsEnabled;
 
+    /** SessionS JSON-RPC path (alias of {@code sf.ocs.session.enabled}). */
+    @ConfigProperty(name = "sf.cgrates.sessions.enabled", defaultValue = "false")
+    boolean cgratesSessionsEnabled;
+
     /** Account key preference: {@code msisdn} (default) or {@code impi}. */
     @ConfigProperty(name = "sf.cgrates.account-key", defaultValue = "msisdn")
     String accountKey;
@@ -28,14 +33,20 @@ public class CgratesConfig {
     @ConfigProperty(name = "sf.cgrates.timeout-ms", defaultValue = "2000")
     int timeoutMs;
 
-    /** Master gate for offline dual-write (CDRsV1 + Rf ACR stub). */
+    /** Master gate for offline dual-write (CDRsV1 + Rf ACR). */
     @ConfigProperty(name = "sf.charging.dual-write", defaultValue = "false")
     boolean dualWrite;
 
     @ConfigProperty(name = "sf.rf.enabled", defaultValue = "false")
     boolean rfEnabled;
 
-    /** {@code deferred} (default) or {@code live} — SessionS gate is Phase C. */
+    @ConfigProperty(name = "sf.rf.destination-host", defaultValue = "ocs.ims.lab")
+    String rfDestinationHost;
+
+    @ConfigProperty(name = "sf.rf.destination-realm", defaultValue = "ims.lab")
+    String rfDestinationRealm;
+
+    /** {@code deferred} (default) or {@code live}. */
     @ConfigProperty(name = "sf.ocs.mode", defaultValue = "deferred")
     String ocsMode;
 
@@ -61,6 +72,10 @@ public class CgratesConfig {
         return cdrsEnabled;
     }
 
+    public boolean cgratesSessionsEnabled() {
+        return cgratesSessionsEnabled;
+    }
+
     public String accountKey() {
         return accountKey == null || accountKey.isBlank() ? "msisdn" : accountKey.trim();
     }
@@ -77,6 +92,14 @@ public class CgratesConfig {
         return rfEnabled;
     }
 
+    public String rfDestinationHost() {
+        return rfDestinationHost == null || rfDestinationHost.isBlank() ? "ocs.ims.lab" : rfDestinationHost.trim();
+    }
+
+    public String rfDestinationRealm() {
+        return rfDestinationRealm == null || rfDestinationRealm.isBlank() ? "ims.lab" : rfDestinationRealm.trim();
+    }
+
     public String ocsMode() {
         return ocsMode == null || ocsMode.isBlank() ? "deferred" : ocsMode.trim();
     }
@@ -89,16 +112,21 @@ public class CgratesConfig {
         return ocsSessionEnabled;
     }
 
+    /** SessionS path on when either OCS or CGRates sessions flag is true. */
+    public boolean sessionSEnabled() {
+        return ocsSessionEnabled || cgratesSessionsEnabled;
+    }
+
     public int pendingSweepIntervalSec() {
         return pendingSweepIntervalSec <= 0 ? 30 : pendingSweepIntervalSec;
     }
 
-    /** Offline CDRsV1 path: dual-write gate + client + cdrs flag. */
+    /** Offline CDRsV1 path: dual-write gate + client + cdrs flag (caller also checks feature.charging). */
     public boolean cdrsDualWriteActive() {
         return dualWrite && enabled && cdrsEnabled;
     }
 
-    /** Offline Rf stub path: dual-write gate + rf flag. */
+    /** Offline Rf path: dual-write gate + rf flag (caller also checks feature.charging). */
     public boolean rfDualWriteActive() {
         return dualWrite && rfEnabled;
     }
@@ -117,7 +145,18 @@ public class CgratesConfig {
         c.timeoutMs = 2000;
         c.ocsMode = "deferred";
         c.ocsSessionEnabled = false;
+        c.cgratesSessionsEnabled = false;
         c.pendingSweepIntervalSec = 30;
+        c.rfDestinationHost = "ocs.ims.lab";
+        c.rfDestinationRealm = "ims.lab";
+        return c;
+    }
+
+    static CgratesConfig forSessionTest(boolean sessionsEnabled, boolean deferred, String url) {
+        CgratesConfig c = forTest(false, true, false, false, url);
+        c.ocsSessionEnabled = sessionsEnabled;
+        c.cgratesSessionsEnabled = sessionsEnabled;
+        c.ocsMode = deferred ? "deferred" : "live";
         return c;
     }
 }

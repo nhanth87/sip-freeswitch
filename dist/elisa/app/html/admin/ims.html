@@ -28,7 +28,9 @@
 <p class="eyebrow">IMS Core</p>
 <div class="ops-section-indent">
   <h1>IMS roles &amp; Cx</h1>
-  <p class="hint">Feature flags + Diameter Cx peer truth (<code>isPeerReady</code>, not LISTEN-only).</p>
+  <p class="hint">Feature flags + Diameter Cx <code>peerReady</code> (CER/CEA) + ESL <code>eslLive</code>
+    (heartbeat — not LISTEN). ISPN mode + resolved ISC trunk. Charging master
+    <code>sf.ims.feature.charging</code> stays off until operator enables.</p>
   <div class="table-wrap" hx-get="/admin/partial/ims-status" hx-trigger="load, every 10s" hx-swap="innerHTML">Loading…</div>
 </div>
     </main>

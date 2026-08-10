@@ -14,6 +14,12 @@ import org.apache.logging.log4j.Logger;
  * Pure ProfileFacility helpers for Elisa ProfileSpecifications.
  * Prefer {@link com.microjainslee.core.MicroSleeContainer#getProfileFacility()} —
  * not the legacy Quarkus {@code ProfileTablePort} stub.
+ *
+ * <p><b>N–N footgun (do not repeat USSDGW ussdUser):</b> default ProfileFacility is
+ * JVM-local ({@code InMemoryProfileFacility}). Live INVITE / mid-dialog identity for
+ * cluster restore is <em>not</em> Profile — it is {@code DialogCmpPersistence}
+ * (ISPN DIST_SYNC → PG {@code sf_dialog_checkpoint}). {@link CallSessionProfile} is a
+ * hot mirror / admin convenience; never the sole SoT for failover.
  */
 public final class ElisaProfiles {
 

@@ -1,6 +1,7 @@
 package et.elisa.cmp;
 
 import et.elisa.cluster.DialogCheckpoint;
+import et.elisa.cluster.SipDialogHa;
 import java.time.Instant;
 
 /**
@@ -19,8 +20,34 @@ public record InviteCmpSnapshot(
         String elisaNodeId,
         String dialogState,
         long startedAtEpochMs,
-        long updatedAtEpochMs
+        long updatedAtEpochMs,
+        SipDialogHa sipHa
 ) {
+    public InviteCmpSnapshot {
+        if (sipHa == null) {
+            sipHa = SipDialogHa.EMPTY;
+        }
+    }
+
+    /** Compat factory without SIP HA block. */
+    public InviteCmpSnapshot(
+            String sipCallId,
+            String fsUuid,
+            String msisdn,
+            String fromUri,
+            String toUri,
+            String trunkUri,
+            String peer,
+            String fsNodeId,
+            String elisaNodeId,
+            String dialogState,
+            long startedAtEpochMs,
+            long updatedAtEpochMs) {
+        this(sipCallId, fsUuid, msisdn, fromUri, toUri, trunkUri, peer,
+                fsNodeId, elisaNodeId, dialogState, startedAtEpochMs, updatedAtEpochMs,
+                SipDialogHa.EMPTY);
+    }
+
     public static InviteCmpSnapshot fromCheckpoint(DialogCheckpoint cp) {
         if (cp == null || cp.callId() == null) {
             return null;
@@ -41,7 +68,8 @@ public record InviteCmpSnapshot(
                 cp.elisaNodeId(),
                 cp.effectiveState(),
                 startedMs,
-                updatedMs);
+                updatedMs,
+                cp.effectiveSipHa());
     }
 
     public DialogCheckpoint toCheckpoint() {
@@ -61,19 +89,39 @@ public record InviteCmpSnapshot(
                 dialogState == null || dialogState.isBlank()
                         ? DialogCheckpoint.STATE_INVITE
                         : dialogState,
-                started);
+                started,
+                sipHa);
     }
 
     public InviteCmpSnapshot withState(String state) {
         return new InviteCmpSnapshot(
                 sipCallId, fsUuid, msisdn, fromUri, toUri, trunkUri, peer,
-                fsNodeId, elisaNodeId, state, startedAtEpochMs, Instant.now().toEpochMilli());
+                fsNodeId, elisaNodeId, state, startedAtEpochMs, Instant.now().toEpochMilli(), sipHa);
     }
 
     public InviteCmpSnapshot withFs(String uuid, String msisdnValue) {
         return new InviteCmpSnapshot(
                 sipCallId, uuid, msisdnValue != null ? msisdnValue : msisdn,
                 fromUri, toUri, trunkUri, peer,
-                fsNodeId, elisaNodeId, dialogState, startedAtEpochMs, Instant.now().toEpochMilli());
+                fsNodeId, elisaNodeId, dialogState, startedAtEpochMs, Instant.now().toEpochMilli(),
+                sipHa);
+    }
+
+    public InviteCmpSnapshot withSipHa(SipDialogHa ha) {
+        return new InviteCmpSnapshot(
+                sipCallId, fsUuid, msisdn, fromUri, toUri, trunkUri, peer,
+                fsNodeId, elisaNodeId, dialogState, startedAtEpochMs, Instant.now().toEpochMilli(),
+                ha != null ? ha : SipDialogHa.EMPTY);
+    }
+
+    public InviteCmpSnapshot withPeer(String peerValue) {
+        return new InviteCmpSnapshot(
+                sipCallId, fsUuid, msisdn, fromUri, toUri, trunkUri, peerValue,
+                fsNodeId, elisaNodeId, dialogState, startedAtEpochMs, Instant.now().toEpochMilli(),
+                sipHa);
+    }
+
+    public SipDialogHa effectiveSipHa() {
+        return sipHa == null ? SipDialogHa.EMPTY : sipHa;
     }
 }
