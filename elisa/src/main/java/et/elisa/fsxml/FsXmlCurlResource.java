@@ -82,7 +82,23 @@ public class FsXmlCurlResource {
     private static String dialplanXml() {
         List<SfDialplanRule> rules = SfDialplanRule.listAll();
         if (rules.isEmpty()) {
-            return notFound("dialplan");
+            // Lab MRF: ISC AS sip:1000@freeswitch answers so INVITE can confirm.
+            return """
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <document type="freeswitch/xml">
+                      <section name="dialplan">
+                        <context name="public">
+                          <extension name="elisa-mrf-1000">
+                            <condition field="destination_number" expression="^(1000|alice)$">
+                              <action application="set" data="bypass_media=false"/>
+                              <action application="answer"/>
+                              <action application="park"/>
+                            </condition>
+                          </extension>
+                        </context>
+                      </section>
+                    </document>
+                    """;
         }
         StringBuilder exts = new StringBuilder();
         for (SfDialplanRule r : rules) {
@@ -102,7 +118,7 @@ public class FsXmlCurlResource {
                 <?xml version="1.0" encoding="UTF-8"?>
                 <document type="freeswitch/xml">
                   <section name="dialplan">
-                    <context name="default">%s</context>
+                    <context name="public">%s</context>
                   </section>
                 </document>
                 """.formatted(exts);

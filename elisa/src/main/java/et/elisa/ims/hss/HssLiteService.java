@@ -28,14 +28,17 @@ public class HssLiteService {
 
     public record PendingAuth(String impi, String impu, byte[] xres, long nextSqn) {}
 
+    @Transactional
     public Optional<ImsSubscriber> findByImpi(String impi) {
         return Optional.ofNullable(ImsSubscriber.find("impi", impi).firstResult());
     }
 
+    @Transactional
     public Optional<ImsSubscriber> findByImpu(String impu) {
         return Optional.ofNullable(ImsSubscriber.find("impu", impu).firstResult());
     }
 
+    @Transactional
     public Optional<ImsSubscriber> findByMsisdn(String msisdn) {
         if (msisdn == null || msisdn.isBlank()) {
             return Optional.empty();
@@ -44,6 +47,7 @@ public class HssLiteService {
     }
 
     /** Resolve profile from SIP URI, bare user, or MSISDN. */
+    @Transactional
     public Optional<ImsSubscriber> resolveIdentity(String raw) {
         if (raw == null || raw.isBlank()) {
             return Optional.empty();
@@ -145,7 +149,7 @@ public class HssLiteService {
         if (b != null && b.expiresAt.isAfter(Instant.now())) {
             return CxCodec.liaAvps(roles.scscfUri());
         }
-        if (findByImpu(impu).isPresent()) {
+        if (findByImpu(impu).isPresent() || resolveIdentity(impu).isPresent()) {
             return CxCodec.liaAvps(roles.scscfUri());
         }
         return Map.of(CxCodec.RESULT_CODE, "5001");

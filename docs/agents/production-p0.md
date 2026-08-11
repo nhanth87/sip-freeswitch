@@ -1,6 +1,13 @@
 # Elisa Production P0 — go-live checklist
 
-**Status:** Production P0 surface (2026-08-10). Not Clearwater parity; not 10k CPS claim; not Digicom-redeployed until prove-artifact.
+**Status:** proven on lab nn (2026-08-11). Packaged `dist/elisa/` + REGISTER 401 + INVITE 200 + `nn-midcall-kill.sh` PASS + `/admin/ims` peer truth. Not Clearwater parity; not 10k CPS; charging stays off; not a Digicom USSDGW host claim.
+
+| Prove | Evidence |
+|-------|----------|
+| REGISTER first hop **401** | [`loadtest/pcaps/p0-register-401.pcap`](../../loadtest/pcaps/p0-register-401.pcap) (`sip.Status-Code==401`) |
+| INVITE **200** + ACK + BYE | [`loadtest/pcaps/p0-invite-200.pcap`](../../loadtest/pcaps/p0-invite-200.pcap) |
+| Mid-call `docker stop scscf` → BYE **200** | [`loadtest/pcaps/nn-midcall-kill-20260811-144106.pcap`](../../loadtest/pcaps/nn-midcall-kill-20260811-144106.pcap) — `./loadtest/scripts/nn-midcall-kill.sh` exit 0 (`bye=2 bye200=2 sipp_rc=0`) |
+| Admin peer truth | `GET /admin/partial/ims-status`: `eslLive=true` (ESL heartbeat), `cxPeerReady=local HSS-lite OK`, `ispnMode=DIST_SYNC` N–N. Never LISTEN-as-UP. |
 
 Ship unit: **`dist/elisa/`** only (`./tools/package-dist.sh` → `run.sh`). JDK **25**. Never clobber host `configs/` casually.
 
@@ -64,7 +71,7 @@ Off until operator enables `sf.ims.feature.charging` **and** peer knobs:
 | Item | Prod expectation |
 |------|------------------|
 | ISPN | **DIST_SYNC** for multi S-CSCF; `LOCAL` = single-node lab only |
-| PG | Dedicated Elisa DB; Flyway through V5 (`sf_pending_charge`) |
+| PG | Dedicated Elisa DB; Flyway through V7 (`sf_pending_charge` + IMS CDR + MMTel) |
 | FS pairs | `sf_fs_pair` + ESL live truth |
 | nginx | L4 SIP VIP + HTTPS admin; RTP/TURN bypass — [`nginx-ingress.md`](nginx-ingress.md) |
 | Pool | `microjainslee.container.sbb-pool-max=40960` |

@@ -21,6 +21,15 @@ x-elisa-db: &elisa-db
   SF_DB_PASSWORD: elisa
   SF_HTML_DIR: /html
   SF_ADMIN_DEV_LOGIN: "true"
+  # Docker + Netty: 0.0.0.0 must be IPv4 or nginx Gm VIP hits a silent IPv6-only :5060
+  JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true"
+  # Packaged Quarkus defaults to profile=prod — lab secrets required (fail-closed otherwise)
+  SF_ADMIN_API_KEY: sf-admin
+  SF_ADMIN_SESSION_HMAC_SECRET: change-me-sf-lab
+  SF_ADMIN_BOOTSTRAP_PASSWORD: admin
+  SF_FS_CONF_DIR: /html
+  # Empty ${VAR:} interpolations fail SmallRye; unused URI is not a product BGCF
+  SF_IMS_BGCF_URI: sip:unused-bgcf.lab:5060
 
 x-elisa-media: &elisa-media
   SF_MEDIA_RTP_REDIRECT: "true"
@@ -43,6 +52,7 @@ services:
   freeswitch:
     volumes:
       - ./freeswitch/conf/autoload_configs/event_socket.conf.xml:/etc/freeswitch/autoload_configs/event_socket.conf.xml:ro
+      - ./freeswitch/conf/autoload_configs/acl.conf.xml:/etc/freeswitch/autoload_configs/acl.conf.xml:ro
       - ./freeswitch/conf/autoload_configs/xml_curl.scscf.conf.xml:/etc/freeswitch/autoload_configs/xml_curl.conf.xml:ro
       - ./freeswitch/conf/sip_profiles/external.xml:/etc/freeswitch/sip_profiles/external.xml:ro
 
@@ -54,6 +64,7 @@ services:
       <<: [*elisa-db, *elisa-media]
       SF_CLUSTER_NODE_ID: elisa-pcscf-1
       SF_CLUSTER_ISPN_MODE: LOCAL
+      SF_IMS_ISC_AS: sip:unused-isc.lab:5060
     volumes: [./app/html:/html:ro]
     expose: ["8088", "5060"]
     depends_on:
@@ -71,6 +82,9 @@ services:
       <<: *elisa-db
       SF_CLUSTER_NODE_ID: elisa-icscf-1
       SF_CLUSTER_ISPN_MODE: LOCAL
+      SF_IMS_ISC_AS: sip:unused-isc.lab:5060
+      # Shared-PG HSS-lite until Diameter RA dials hss:3868 (LISTEN≠peer)
+      SF_IMS_HSS: "true"
     volumes: [./app/html:/html:ro]
     expose: ["8088", "5060"]
     depends_on:
@@ -91,6 +105,8 @@ services:
       SF_CLUSTER_NODE_ID: elisa-scscf-1
       SF_CLUSTER_ISPN_MODE: DIST_SYNC
       SF_CLUSTER_ISPN_NAME: elisa-cluster
+      SF_IMS_ISC_AS: sip:1000@freeswitch:5060
+      SF_IMS_HSS: "true"
     volumes: [./app/html:/html:ro]
     expose: ["8088", "5060"]
     depends_on:
@@ -116,6 +132,8 @@ services:
       SF_CLUSTER_ISPN_MODE: DIST_SYNC
       SF_CLUSTER_ISPN_NAME: elisa-cluster
       SF_IMS_SCSCF_URI: sip:scscf-2:5060
+      SF_IMS_ISC_AS: sip:1000@freeswitch-2:5060
+      SF_IMS_HSS: "true"
     volumes: [./app/html:/html:ro]
     expose: ["8088", "5060"]
     depends_on:
@@ -137,6 +155,7 @@ services:
         condition: service_started
     volumes:
       - ./freeswitch/conf/autoload_configs/event_socket.conf.xml:/etc/freeswitch/autoload_configs/event_socket.conf.xml:ro
+      - ./freeswitch/conf/autoload_configs/acl.conf.xml:/etc/freeswitch/autoload_configs/acl.conf.xml:ro
       - ./freeswitch/conf/autoload_configs/xml_curl.scscf-2.conf.xml:/etc/freeswitch/autoload_configs/xml_curl.conf.xml:ro
       - ./freeswitch/conf/sip_profiles/external.xml:/etc/freeswitch/sip_profiles/external.xml:ro
     # ESL/SIP on sf-net only (no host port clash with freeswitch). RTP via Docker net + coturn.
@@ -157,6 +176,7 @@ services:
       <<: *elisa-db
       SF_CLUSTER_NODE_ID: elisa-hss-1
       SF_CLUSTER_ISPN_MODE: LOCAL
+      SF_IMS_ISC_AS: sip:unused-isc.lab:5060
     volumes: [./app/html:/html:ro]
     expose: ["8088", "3868"]
     depends_on:

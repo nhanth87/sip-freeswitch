@@ -56,6 +56,7 @@ services:
         condition: service_started
     volumes:
       - ./freeswitch/conf/autoload_configs/event_socket.conf.xml:/etc/freeswitch/autoload_configs/event_socket.conf.xml:ro
+      - ./freeswitch/conf/autoload_configs/acl.conf.xml:/etc/freeswitch/autoload_configs/acl.conf.xml:ro
       # 1-node lab: xml_curl → elisa:8088 (services overlay remaps to scscf)
       - ./freeswitch/conf/autoload_configs/xml_curl.conf.xml:/etc/freeswitch/autoload_configs/xml_curl.conf.xml:ro
       - ./freeswitch/conf/sip_profiles/external.xml:/etc/freeswitch/sip_profiles/external.xml:ro
@@ -112,6 +113,7 @@ services:
       SF_ADMIN_API_KEY: sf-admin
       SF_ADMIN_SESSION_HMAC_SECRET: change-me-sf-lab
       SF_ADMIN_BOOTSTRAP_PASSWORD: admin
+      JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true"
       SF_FS_CONF_DIR: /html
       SF_IMS_ISC_AS: sip:1000@freeswitch:5060
     volumes:

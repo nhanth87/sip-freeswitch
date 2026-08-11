@@ -31,6 +31,10 @@ public class ImsRoleFlags {
     @ConfigProperty(name = "sf.ims.scscf-uri", defaultValue = "sip:scscf.ims.lab:5060")
     String scscfUri;
 
+    /** N–N peer S-CSCF for Mw retarget after home S stop (lab kill-test). */
+    @ConfigProperty(name = "sf.ims.scscf.peer-uri", defaultValue = "sip:scscf-2:5060")
+    String scscfPeerUri;
+
     @ConfigProperty(name = "sf.ims.icscf-uri", defaultValue = "sip:icscf.ims.lab:5060")
     String icscfUri;
 
@@ -60,6 +64,7 @@ public class ImsRoleFlags {
     public boolean anyCscf() { return pcscf() || icscf() || scscf(); }
     public String realm() { return realm; }
     public String scscfUri() { return scscfUri; }
+    public String scscfPeerUri() { return scscfPeerUri; }
     public String icscfUri() { return icscfUri; }
     public String pcscfUri() { return pcscfUri; }
     public String iscAsUri() { return iscAsUri; }

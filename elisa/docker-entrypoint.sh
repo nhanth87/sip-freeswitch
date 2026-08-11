@@ -26,5 +26,11 @@ if [ -n "$JDBC_URL" ]; then
   fi
 fi
 
+# Prefer IPv4 so sip.ra.host=0.0.0.0 is reachable from nginx stream VIP (not IPv6-only :5060).
+if [ -z "${JAVA_TOOL_OPTIONS:-}" ] || ! printf '%s' "${JAVA_TOOL_OPTIONS}" | grep -q preferIPv4Stack; then
+  JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+$JAVA_TOOL_OPTIONS }-Djava.net.preferIPv4Stack=true"
+  export JAVA_TOOL_OPTIONS
+fi
+
 echo "[elisa] ESL soft-fail: SF_ESL_HOST=${SF_ESL_HOST:-unset} (eslLive=false until FS up)"
 exec "$@"

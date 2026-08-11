@@ -173,22 +173,32 @@ public final class FreeSwitchResourceAdaptor {
 
     private void eventReadLoop(String events) {
         while (active.get()) {
-            try (EslSession session = newSession()) {
+            try (EslSession session = newEventSession()) {
                 eventSession = session;
                 session.connect();
                 session.subscribe(events);
                 live = true;
                 LOG.info("[ra-freeswitch] event socket subscribed: {}", events);
                 while (active.get()) {
-                    Map<String, String> msg = session.readNextMessage();
-                    if (msg == null || msg.isEmpty()) {
-                        break;
+                    try {
+                        Map<String, String> msg = session.readNextMessage();
+                        if (msg == null || msg.isEmpty()) {
+                            break;
+                        }
+                        dispatchInbound(msg);
+                    } catch (java.net.SocketTimeoutException timeout) {
+                        // HEARTBEAT is ~20s; SO_TIMEOUT must not flip eslLive.
+                        live = true;
                     }
-                    dispatchInbound(msg);
                 }
             } catch (IOException ex) {
+                boolean wasLive = live;
                 live = false;
-                LOG.debug("[ra-freeswitch] event socket: {}", ex.getMessage());
+                if (wasLive) {
+                    LOG.warn("[ra-freeswitch] event socket lost: {}", ex.getMessage());
+                } else {
+                    LOG.debug("[ra-freeswitch] event socket: {}", ex.getMessage());
+                }
                 if (!active.get()) {
                     break;
                 }
@@ -343,6 +353,13 @@ public final class FreeSwitchResourceAdaptor {
     private EslSession newSession() {
         return new EslSession(config.host(), config.port(), config.password(),
                 config.connectTimeoutMs(), config.readTimeoutMs());
+    }
+
+    /** Event socket waits past FS HEARTBEAT (~20s); apiSync keeps the short timeout. */
+    private EslSession newEventSession() {
+        int readMs = Math.max(config.readTimeoutMs(), 30_000);
+        return new EslSession(config.host(), config.port(), config.password(),
+                config.connectTimeoutMs(), readMs);
     }
 
     /**

@@ -5,7 +5,9 @@ import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.util.concurrent.TimeUnit;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import com.microjainslee.cluster.MarshallingAllowList;
 import org.infinispan.Cache;
+import org.infinispan.commons.marshall.JavaSerializationMarshaller;
 import org.infinispan.configuration.cache.CacheMode;
 import org.infinispan.configuration.cache.ConfigurationBuilder;
 import org.infinispan.configuration.global.GlobalConfigurationBuilder;
@@ -65,6 +67,14 @@ public class ElisaInfinispanManager {
             global.transport().nodeName(logical);
             global.cacheManagerName("elisa-" + logical);
         }
+        // Same as ClusterManager: ISPN 15 ProtoStream cannot store RaDialogOwner.
+        var allow = global.serialization()
+                .marshaller(new JavaSerializationMarshaller())
+                .allowList();
+        for (String regexp : MarshallingAllowList.REGEXPS) {
+            allow.addRegexp(regexp);
+        }
+        allow.addRegexp("et\\.elisa\\..*");
         manager = new DefaultCacheManager(global.build());
         defineCache(CACHE_DIALOGS, 100_000);
         defineCache(CACHE_CALL_SESSIONS, 200_000);

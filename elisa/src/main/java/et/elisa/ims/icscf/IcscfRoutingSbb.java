@@ -6,10 +6,14 @@ import com.microjainslee.api.Sbb;
 import com.microjainslee.api.SleeEvent;
 import com.microjainslee.api.SleeEventHandler;
 import com.microjainslee.api.annotations.InjectRa;
+import com.microjainslee.ra.sipservlet.command.SendAck;
+import com.microjainslee.ra.sipservlet.command.SendBye;
 import com.microjainslee.ra.sipservlet.command.SendInvite;
 import com.microjainslee.ra.sipservlet.command.SendRegister;
 import com.microjainslee.ra.sipservlet.command.SendResponse;
 import com.microjainslee.ra.sipservlet.command.SipOutboundCommand;
+import com.microjainslee.ra.sipservlet.events.SipAckEvent;
+import com.microjainslee.ra.sipservlet.events.SipByeEvent;
 import com.microjainslee.ra.sipservlet.events.SipInviteEvent;
 import com.microjainslee.ra.sipservlet.events.SipRegisterEvent;
 import com.microjainslee.ra.sipservlet.events.SipResponseEvent;
@@ -53,6 +57,8 @@ public final class IcscfRoutingSbb implements Sbb, SleeEventHandler {
         switch (event) {
             case SipRegisterEvent e -> onRegister(e);
             case SipInviteEvent e -> onInvite(e);
+            case SipAckEvent e -> onAck(e);
+            case SipByeEvent e -> onBye(e);
             case SipResponseEvent e -> onResponse(e);
             default -> {}
         }
@@ -103,7 +109,47 @@ public final class IcscfRoutingSbb implements Sbb, SleeEventHandler {
             Map<String, List<String>> ims = PChargingVectors.copyIms(e.imsHeaders());
             // Preserve UE/P vector; mint only if P hop skipped (direct to I).
             PChargingVectors.ensureInvite(ims, e.callId(), roles.realm());
-            send(new SendInvite(e.callId(), scscf, e.fromUri(), e.sdpBody(), ims));
+            send(new SendInvite(e.callId(), e.toUri(), e.fromUri(), e.sdpBody(), ims, scscf));
+        }
+    }
+
+    void onAck(SipAckEvent e) {
+        if (roles == null || !roles.icscf() || roles.scscf()) {
+            return;
+        }
+        send(new SendAck(e.callId()));
+    }
+
+    void onBye(SipByeEvent e) {
+        if (roles == null || !roles.icscf() || roles.scscf()) {
+            return;
+        }
+        send(new SendBye(e.callId()));
+        String home = roles.scscfUri();
+        String peer = roles.scscfPeerUri();
+        if (peer != null && !peer.isBlank() && !sipHopReachable(home)) {
+            send(new SendBye(e.callId(), peer));
+        }
+    }
+
+    /** Lab Mw retarget: TCP probe of S-CSCF listen (not SIP transaction). */
+    static boolean sipHopReachable(String sipUri) {
+        if (sipUri == null || sipUri.isBlank()) {
+            return false;
+        }
+        try {
+            java.net.URI u = java.net.URI.create(sipUri.trim());
+            String host = u.getHost();
+            int port = u.getPort() > 0 ? u.getPort() : 5060;
+            if (host == null) {
+                return false;
+            }
+            try (java.net.Socket s = new java.net.Socket()) {
+                s.connect(new java.net.InetSocketAddress(host, port), 200);
+                return true;
+            }
+        } catch (Exception ignored) {
+            return false;
         }
     }
 

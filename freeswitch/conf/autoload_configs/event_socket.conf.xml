@@ -1,1 +1,9 @@
-<configuration name="event_socket.conf" description="ESL"><settings><param name="listen-ip" value="0.0.0.0"/><param name="listen-port" value="8021"/><param name="password" value="ClueCon"/></settings></configuration>
+<configuration name="event_socket.conf" description="ESL">
+  <settings>
+    <param name="listen-ip" value="0.0.0.0"/>
+    <param name="listen-port" value="8021"/>
+    <param name="password" value="ClueCon"/>
+    <!-- FS 1.10+ defaults to loopback-only when unset → rude-rejection from scscf. -->
+    <param name="apply-inbound-acl" value="esl_lab"/>
+  </settings>
+</configuration>

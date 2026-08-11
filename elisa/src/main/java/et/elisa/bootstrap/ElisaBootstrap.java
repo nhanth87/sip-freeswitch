@@ -16,6 +16,8 @@ import com.microjainslee.ra.sipservlet.SipServletResourceAdaptor;
 import com.microjainslee.ra.sipservlet.events.IceCandidateEvent;
 import com.microjainslee.ra.sipservlet.events.IceCompletedEvent;
 import com.microjainslee.ra.sipservlet.events.IceFailedEvent;
+import com.microjainslee.ra.sipservlet.events.SipAckEvent;
+import com.microjainslee.ra.sipservlet.events.SipByeEvent;
 import com.microjainslee.ra.sipservlet.events.SipInviteEvent;
 import com.microjainslee.ra.sipservlet.events.SipRegisterEvent;
 import com.microjainslee.ra.sipservlet.events.SipResponseEvent;
@@ -207,7 +209,7 @@ final class ElisaBootstrap {
         config.setTcpPort(tcpPort);
         config.setSctpPort(0);
         config.setNettyBossThreads(1L);
-        config.setNettyWorkerThreads(0L);
+        config.setNettyWorkerThreads(2L);
         config.setNettySoBacklog(1024L);
         config.setNettyTcpNoDelay(true);
         config.setNettySoKeepAlive(true);
@@ -401,14 +403,20 @@ final class ElisaBootstrap {
         if (imsRoles.scscf()) {
             container.mapEventToSbb(SipRegisterEvent.class, "ScscfRegisterSbb");
             container.mapEventToSbb(SipInviteEvent.class, "ScscfInviteSbb");
+            container.mapEventToSbb(SipAckEvent.class, "ScscfInviteSbb");
+            container.mapEventToSbb(SipByeEvent.class, "ScscfInviteSbb");
             container.mapEventToSbb(SipResponseEvent.class, "ScscfInviteSbb");
         } else if (imsRoles.pcscf()) {
             container.mapEventToSbb(SipRegisterEvent.class, "PcscfProxySbb");
             container.mapEventToSbb(SipInviteEvent.class, "PcscfProxySbb");
+            container.mapEventToSbb(SipAckEvent.class, "PcscfProxySbb");
+            container.mapEventToSbb(SipByeEvent.class, "PcscfProxySbb");
             container.mapEventToSbb(SipResponseEvent.class, "PcscfProxySbb");
         } else if (imsRoles.icscf()) {
             container.mapEventToSbb(SipRegisterEvent.class, "IcscfRoutingSbb");
             container.mapEventToSbb(SipInviteEvent.class, "IcscfRoutingSbb");
+            container.mapEventToSbb(SipAckEvent.class, "IcscfRoutingSbb");
+            container.mapEventToSbb(SipByeEvent.class, "IcscfRoutingSbb");
             container.mapEventToSbb(SipResponseEvent.class, "IcscfRoutingSbb");
         } else if (needsSipPlane()) {
             container.mapEventToSbb(SipInviteEvent.class, "ProxySbb");

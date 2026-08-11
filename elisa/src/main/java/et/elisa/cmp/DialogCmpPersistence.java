@@ -118,6 +118,7 @@ public class DialogCmpPersistence {
         }
     }
 
+    @Transactional
     public Optional<InviteCmpSnapshot> load(String sipCallId) {
         if (sipCallId == null || sipCallId.isBlank()) {
             return Optional.empty();

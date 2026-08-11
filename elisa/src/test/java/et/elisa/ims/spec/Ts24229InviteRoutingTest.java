@@ -47,7 +47,8 @@ class Ts24229InviteRoutingTest {
             ImsTestSupport.injectRa(sbb, ra);
             sbb.onEvent(invite("c1", "sip:a@ims.lab", "sip:b@ims.lab"), null);
             SendInvite inv = ra.ofType(SendInvite.class).getFirst();
-            assertEquals("sip:icscf.ims.lab:5060", inv.toUri());
+            assertEquals("sip:b@ims.lab", inv.toUri());
+            assertEquals("sip:icscf.ims.lab:5060", inv.nextHopUri());
             assertEquals("sip:a@ims.lab", inv.extensionHeaders().get("P-Asserted-Identity").getFirst());
             assertTrue(inv.extensionHeaders().get("Route").getFirst().contains("icscf"));
         }
@@ -100,7 +101,8 @@ class Ts24229InviteRoutingTest {
             ImsTestSupport.injectRa(sbb, ra);
             sbb.onEvent(invite("mt1", "sip:ext@other", "sip:bob@ims.lab"), null);
             SendInvite inv = ra.ofType(SendInvite.class).getFirst();
-            assertTrue(inv.toUri().contains("scscf-home"));
+            assertEquals("sip:bob@ims.lab", inv.toUri());
+            assertTrue(inv.nextHopUri().contains("scscf-home"));
         }
 
         @Test

@@ -6,10 +6,14 @@ import com.microjainslee.api.Sbb;
 import com.microjainslee.api.SleeEvent;
 import com.microjainslee.api.SleeEventHandler;
 import com.microjainslee.api.annotations.InjectRa;
+import com.microjainslee.ra.sipservlet.command.SendAck;
+import com.microjainslee.ra.sipservlet.command.SendBye;
 import com.microjainslee.ra.sipservlet.command.SendInvite;
 import com.microjainslee.ra.sipservlet.command.SendRegister;
 import com.microjainslee.ra.sipservlet.command.SendResponse;
 import com.microjainslee.ra.sipservlet.command.SipOutboundCommand;
+import com.microjainslee.ra.sipservlet.events.SipAckEvent;
+import com.microjainslee.ra.sipservlet.events.SipByeEvent;
 import com.microjainslee.ra.sipservlet.events.SipInviteEvent;
 import com.microjainslee.ra.sipservlet.events.SipRegisterEvent;
 import com.microjainslee.ra.sipservlet.events.SipResponseEvent;
@@ -51,6 +55,8 @@ public final class PcscfProxySbb implements Sbb, SleeEventHandler {
         switch (event) {
             case SipRegisterEvent e -> onRegister(e);
             case SipInviteEvent e -> onInvite(e);
+            case SipAckEvent e -> onAck(e);
+            case SipByeEvent e -> onBye(e);
             case SipResponseEvent e -> onResponse(e);
             default -> {}
         }
@@ -96,7 +102,22 @@ public final class PcscfProxySbb implements Sbb, SleeEventHandler {
         PChargingVectors.ensureInvite(ims, e.callId(), roles.realm());
         String next = roles.icscfUri();
         LOG.debug("[P-CSCF] INVITE -> {} callId={}", next, e.callId());
-        send(new SendInvite(e.callId(), next, e.fromUri(), e.sdpBody(), ims));
+        send(new SendInvite(e.callId(), e.toUri(), e.fromUri(), e.sdpBody(), ims, next));
+    }
+
+    void onAck(SipAckEvent e) {
+        if (roles == null || !roles.pcscf() || roles.scscf() || roles.icscf()) {
+            return;
+        }
+        send(new SendAck(e.callId()));
+    }
+
+    void onBye(SipByeEvent e) {
+        if (roles == null || !roles.pcscf() || roles.scscf() || roles.icscf()) {
+            return;
+        }
+        send(new SendBye(e.callId()));
+        send(new SendResponse(e.callId(), 200, "OK"));
     }
 
     void onResponse(SipResponseEvent e) {

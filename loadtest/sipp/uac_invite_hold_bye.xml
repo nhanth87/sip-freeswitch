@@ -4,10 +4,10 @@
 <scenario name="uac_invite_hold_bye">
   <send retrans="500">
     <![CDATA[
-      INVITE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      INVITE sip:[service]@ims.lab SIP/2.0
       Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
       From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[pid]SIPpTag00[call_number]
-      To: sut <sip:[service]@[remote_ip]:[remote_port]>
+      To: sut <sip:[service]@ims.lab>
       Call-ID: [call_id]
       CSeq: 1 INVITE
       Contact: sip:sipp@[local_ip]:[local_port]
@@ -32,7 +32,7 @@
 
   <send>
     <![CDATA[
-      ACK sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      ACK sip:[service]@ims.lab SIP/2.0
       Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
       From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[pid]SIPpTag00[call_number]
       To: sut <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]
@@ -44,11 +44,12 @@
     ]]>
   </send>
 
+  <nop/>
   <pause milliseconds="12000"/>
 
   <send retrans="500">
     <![CDATA[
-      BYE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      BYE sip:[service]@ims.lab SIP/2.0
       Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
       From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[pid]SIPpTag00[call_number]
       To: sut <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]

@@ -8,11 +8,13 @@ import com.microjainslee.api.annotations.CmpField;
 import com.microjainslee.api.annotations.InjectRa;
 import com.microjainslee.api.annotations.SbbAnnotation;
 import com.microjainslee.core.CmpBackedSbb;
+import com.microjainslee.ra.sipservlet.command.SendAck;
 import com.microjainslee.ra.sipservlet.command.SendBye;
 import com.microjainslee.ra.sipservlet.command.SendInvite;
 import com.microjainslee.ra.sipservlet.command.SendResponse;
 import com.microjainslee.ra.sipservlet.command.SendSdpUpdate;
 import com.microjainslee.ra.sipservlet.command.SipOutboundCommand;
+import com.microjainslee.ra.sipservlet.events.SipAckEvent;
 import com.microjainslee.ra.sipservlet.events.SipByeEvent;
 import com.microjainslee.ra.sipservlet.events.SipInviteEvent;
 import com.microjainslee.ra.sipservlet.events.SipResponseEvent;
@@ -215,6 +217,7 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
         try {
             switch (event) {
                 case SipInviteEvent e -> onInvite(e);
+                case SipAckEvent e -> onAck(e);
                 case SipByeEvent e -> onBye(e);
                 case SipResponseEvent e -> onResponse(e);
                 default -> {}
@@ -316,6 +319,10 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
         send(new SendInvite(e.callId(), target, e.fromUri(), e.sdpBody(), ims));
     }
 
+    void onAck(SipAckEvent e) {
+        send(new SendAck(e.callId()));
+    }
+
     void onBye(SipByeEvent e) {
         ensureCmpLoaded(e.callId());
         if (metrics != null) {
@@ -336,8 +343,8 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
             cmpStore.remove(e.callId());
         }
         clearLocalCmp();
-        send(new SendBye(e.callId()));
         send(new SendResponse(e.callId(), 200, "OK"));
+        send(new SendBye(e.callId()));
     }
 
     private void emitSipDialogCdr(String callId, Integer dur) {
@@ -542,7 +549,9 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
         RaCommandPort p = sipRa;
         if (p != null) {
             p.sendCommand(cmd);
+            return;
         }
+        LOG.warn("[S-CSCF] sipRa not injected — dropped {}", cmd.getClass().getSimpleName());
     }
 
     // ── $Concrete (micro-jainslee CMP pattern) ──────────────────────────
