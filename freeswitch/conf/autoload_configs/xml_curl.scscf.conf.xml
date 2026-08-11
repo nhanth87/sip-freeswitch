@@ -1,0 +1,9 @@
+<configuration name="xml_curl.conf" description="XML CURL">
+  <bindings>
+    <binding name="elisa-scscf">
+      <!-- N–N / split: FS-1 → S-CSCF-1 on sf-net (not localhost, not nginx VIP) -->
+      <param name="gateway-url" value="http://scscf:8088/fs/xml"/>
+      <param name="bindings" value="directory|dialplan"/>
+    </binding>
+  </bindings>
+</configuration>

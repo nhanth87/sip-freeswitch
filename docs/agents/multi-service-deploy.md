@@ -1,17 +1,17 @@
 # Multi-service deploy — one code, N–N by role
 
-**Lock:** same Elisa artifact (`elisa` image / `dist/elisa/`) for every CSCF/HSS process. Role plane is **config only** (`SF_IMS_*`). N Elisa + N FreeSWITCH via C1/C2/C3.
+**Lock:** same Elisa artifact (`elisa` image / `dist/elisa/`) for every CSCF/HSS process. Role plane is **config only** (`SF_IMS_*`). N Elisa + **N FreeSWITCH (essential, 1:1 with S-CSCF)** via C1/C2/C3. Soft-fail ESL when a FS peer is down is OK; omitting FS from compose/profiles for full voice IMS is **unsupported**.
 
 ## One codebase → many services
 
 | Service (compose) | Image | Role flags | Planes |
 |-------------------|-------|------------|--------|
-| `elisa` (lab default) | elisa | P+I+S+HSS | SIP + ESL + Cx + admin |
+| `elisa` (lab default) | elisa | P+I+S+HSS | SIP + ESL + Cx + admin (`depends_on` `freeswitch`) |
 | `pcscf` | **same** | P only | SIP Gm → Mw to I |
 | `icscf` | **same** | I only | SIP Mw + Cx client → S |
-| `scscf` (×N) | **same** | S (+ optional HSS) | SIP Mw/ISC + ESL + Cx |
+| `scscf` (×N) | **same** | S (+ optional HSS) | SIP Mw/ISC + ESL + Cx (`depends_on` paired FS) |
 | `hss` | **same** | HSS only | Diameter Cx (no SIP/ESL) |
-| `freeswitch` (×N) | FS image | n/a | MRF/AS + ESL |
+| `freeswitch` (×N) | FS image | n/a | **Essential** MRF/AS + ESL — always paired with S |
 | `nginx` | edge | n/a | VIP SIP + admin HTTP |
 
 ```text
@@ -86,7 +86,7 @@ See [`cluster-c2-vip-affinity.md`](cluster-c2-vip-affinity.md), [`ims-core.md`](
 | Plane | When wired |
 |-------|------------|
 | SIP RA | any CSCF **or** IMS disabled (legacy edge) |
-| FreeSWITCH RA + `CallSessionSbb` | S-CSCF **or** IMS disabled |
+| FreeSWITCH RA + `CallSessionSbb` | S-CSCF **or** IMS disabled — **RA stays in tree**; FS peer is **essential** for live voice (soft-fail ESL ≠ omit FS) |
 | Diameter Cx | I / S / HSS when `sf.ims.cx.enabled` |
 
 ## Mw path (split)
@@ -119,7 +119,7 @@ INVITE: P stamps PAI + Route → I LIR → S ISC → paired FreeSWITCH.
 | Gm VIP | nginx `stream` → **P-CSCF pool** (`hash $remote_addr`) — Path/Contact = VIP hostname (N6) |
 | Mw | P → I (config `SF_IMS_ICSCF_URI`) → home **S** (Cx UAR/LIR `SERVER_NAME` / `SF_IMS_SCSCF_URI`) |
 | Sticky S | `ims_binding.home_scscf_node` + ISPN `RegistrationHomeStore`; Service-Route on 200 |
-| ISC + ESL | S node-id → `sf_fs_pair` primary FS; trunk URI = paired Sofia (`SipTrunkService` PG / per-node env) — prefer **1:1**, failover list OK |
+| ISC + ESL | S node-id → `sf_fs_pair` primary FS; trunk URI = paired Sofia (`SipTrunkService` PG / per-node env) — **1:1 S↔FS required** (failover list OK as backup, not as “no FS”) |
 | Shared SoT | Postgres (bindings, trunks, CMP durable); ISPN `DIST_SYNC` only among **S-CSCF** peers sharing `sf.cluster.infinispan.cluster-name` |
 | Not on VIP | ESL `:8021`, Diameter Cx, ISC Elisa→FS, RTP/TURN |
 

@@ -1,0 +1,5 @@
+# Keep directory; ignore captured blobs (often multi-MB). Tiny samples may be force-added.
+*
+!.gitignore
+!.gitkeep
+!README.md

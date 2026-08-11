@@ -8,11 +8,13 @@ Living checklist vs lab IMS Core. Deploy shape: [`multi-service-deploy.md`](mult
 | Role flags / split services | **Lab** | `sf.ims.role.*` + compose overlay |
 | HSS-lite + AKA + Cx | **Lab** | local HSS or Diameter RA |
 | REGISTER / INVITE MO–MT | **Lab** | TS 24.229 unit tests |
-| ISC → FreeSWITCH | **Lab** | iFC-lite + `sf_sip_trunk` / `IscAsRouter` |
+| ISC → FreeSWITCH | **Lab (essential)** | iFC-lite + `sf_sip_trunk` / `IscAsRouter` — FS MRF/AS mandatory for full voice |
+| FreeSWITCH ESL (`ra-freeswitch`) | **Lab (essential)** | Soft-fail ESL OK; omit FS from compose = unsupported |
 | SIP trunk registry | **Lab** | Flyway V3 `sf_sip_trunk`; `/admin/trunks`; props fallback |
 | Call session dual-write | **Lab** | ISPN + `sf_call_session` + Profile mirror |
-| CMP / N–N ISPN | **Lab** | Shared `ElisaInfinispanManager`; DIST_SYNC knobs; CMP = live INVITE SoT |
-| JAINSLEE Profile | **Lab (JVM-local)** | `ImsSubscriberProfile` / `CallSessionProfile` — not failover SoT |
+| CMP / N–N ISPN | **Lab (P0 critical)** | Shared `ElisaInfinispanManager`; DIST_SYNC; view-change → failoverSpawn; CMP = live INVITE SoT |
+| JAINSLEE Profile | **Lab (JVM-local)** | `ImsSubscriberProfile` / `CallSessionProfile` — **not** failover SoT |
+| SIP RA ClusterManager | **Lab (DIST_SYNC S)** | `ClusterManager.adopt` same cache manager; sticky forward on |
 | CDR RestComm-shaped | **Lab** | + `sip_call_id` / `msisdn` / `icid` |
 | Charging / Rf / Ro / Gx | **Lab (flagged)** | Master `sf.ims.feature.charging` OFF; SessionS + Rf + dual-write ready; Gx/Gy/PFCP **No** — [`production-p0.md`](production-p0.md) |
 | C1–C3 HA | **Lab** | Shared ISPN cluster-name + VIP + FS pair |

@@ -1,8 +1,8 @@
 # CMP recovery — SBB die → ISPN/PG → continue call
 
-**Status:** lab implemented (app-level CMP + dual write).  
+**Status:** lab P0 wired (view-change + ClusterManager adopt + SipDialogHa restore + soft-hang + kill-test).  
 **Related:** [`jainslee-profile.md`](jainslee-profile.md) (shared ProfileFacility), [`datastore.md`](datastore.md), micro-jainslee `CmpBackedSbb` / `@CmpField`.  
-**Orchestrator:** [`sbb-recovery-manager.md`](sbb-recovery-manager.md) — **PARTIAL** (local respawn + fencing + portable DialogRegistry peers **+ lab synthetic wire restore**).
+**Orchestrator:** [`sbb-recovery-manager.md`](sbb-recovery-manager.md) — view-change + same-JVM respawn + fence; **not** Chronos. ProfileFacility is **not** failover SoT.
 
 ---
 
@@ -119,15 +119,13 @@ sequenceDiagram
 | Fail over to **other S-CSCF** with DIST_SYNC checkpoint + SipDialogHa | Yes | **Lab yes** (synthetic wire from tags/contacts) |
 | Checkpoint without tags (pre-enrich / early INVITE only) | Yes | Peers only — Send* still needs first recovered inbound |
 
-Honest limits: not Clearwater Chronos; no full NIST dialog SM; TCP connection affinity still needs L4/VIP for mid-dialog *inbound* to the new owner; ProfileFacility remains JVM-local.
+**Critical P0 (wired):** ISPN `@ViewChanged` → `onClusterViewChange`; `ClusterManager.adopt` shares Elisa `DefaultCacheManager` (one JGroups view) + `jainslee.ra.sticky.forward=true` on DIST_SYNC S-CSCF; every spawn restores `SipDialogHa` before Send*; `SBB_SELF_REMOVE` waits 50ms and only respawns EARLY/CONFIRMED; `SoftHangWatchdog` calls `onEntitySuspect` on stale local CMP.
 
-### Follow-up
+Honest limits: not Clearwater Chronos; no full NIST dialog SM; TCP mid-dialog inbound still prefers L4/VIP; ProfileFacility remains JVM-local; R9 ESL remap to home FS is P1.
 
-1. Wire shared `ClusterManager` into SIP RA so sticky FORWARD_REMOTE / RaSessionMeta matches Elisa ISPN membership.
-2. IES Call-ID convergence + container `CmpFieldStore` dual-write.
-3. Soft-hang heartbeat (R8 P2).
+Kill-test (fail-closed): [`loadtest/scripts/nn-midcall-kill.sh`](../../loadtest/scripts/nn-midcall-kill.sh) — see [`docker-lab.md`](docker-lab.md).
 
-Until tags are checkpointed, sticky L4 affinity remains the safety net — see [`cluster-c2-vip-affinity.md`](cluster-c2-vip-affinity.md).
+Until tags are checkpointed on every re-INVITE, sticky L4 affinity remains the safety net — see [`cluster-c2-vip-affinity.md`](cluster-c2-vip-affinity.md).
 
 ---
 

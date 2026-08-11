@@ -76,7 +76,7 @@ public final class ScscfRegisterSbb implements Sbb, SleeEventHandler {
         String contact = e.contactUri();
         int expires = e.expires();
 
-        if (e.authorization() == null || e.authorization().isBlank()) {
+        if (!hasUsableAuthorization(e.authorization())) {
             Map<Integer, String> uaa = cx.uar(impi, impu);
             if (!"2001".equals(uaa.get(CxCodec.RESULT_CODE))) {
                 send(SendResponse.of(e.callId(), 403, "Forbidden"));
@@ -149,6 +149,19 @@ public final class ScscfRegisterSbb implements Sbb, SleeEventHandler {
             return from.replaceFirst("(?i)^sip:", "");
         }
         return impu == null ? "" : impu.replaceFirst("(?i)^sip:", "");
+    }
+
+    /**
+     * True when Authorization carries a non-empty Digest response (second REGISTER).
+     * Lab SIPp often sends {@code Authorization: … response=""} on the first hop —
+     * treat that as unauthenticated so we issue 401, not 403.
+     */
+    static boolean hasUsableAuthorization(String authorization) {
+        if (authorization == null || authorization.isBlank()) {
+            return false;
+        }
+        byte[] res = AkaMd5.extractResFromAuthorization(authorization);
+        return res != null && res.length > 0;
     }
 
     /** AUTN = SQN(6) || AMF(2) || MAC-A(8) — SQN is the value embedded in the challenge. */

@@ -20,10 +20,11 @@ dist/elisa/
   configs/application.properties
 ```
 
-Docker lab:
+Docker lab (1-node + N–N): [`docker-lab.md`](docker-lab.md).
 
 ```bash
+./tools/build-all.sh
 docker compose up -d --build
 ```
 
-Services: `postgres`, `freeswitch`, `elisa` on `sf-net`.
+Services: `postgres`, `coturn`, **`freeswitch` (essential MRF/AS)**, `elisa`, `nginx` on `sf-net`. Elisa without FS is incomplete — see [`docker-lab.md`](docker-lab.md).

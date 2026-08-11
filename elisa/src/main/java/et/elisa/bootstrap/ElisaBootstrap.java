@@ -1,5 +1,7 @@
 package et.elisa.bootstrap;
 
+import com.microjainslee.cluster.ClusterManager;
+import com.microjainslee.cluster.RaHaSupport;
 import com.microjainslee.core.MicroSleeContainer;
 import com.microjainslee.ra.diameter.DiameterRaConfig;
 import com.microjainslee.ra.diameter.DiameterRaEndpoint;
@@ -23,6 +25,8 @@ import com.microjainslee.telemetry.TelemetryPort;
 import com.microjainslee.telemetry.TelemetryRaObserver;
 import et.elisa.acl.SipIngressAclService;
 import et.elisa.cluster.DialogCheckpointStore;
+import et.elisa.cluster.ElisaClusterViewBridge;
+import et.elisa.cluster.ElisaInfinispanManager;
 import et.elisa.cluster.FsPairRegistry;
 import et.elisa.cmp.DialogCmpPersistence;
 import et.elisa.esl.FreeSwitchRaBridge;
@@ -38,6 +42,8 @@ import et.elisa.ims.reg.BindingStore;
 import et.elisa.ims.scscf.IscAsRouter;
 import et.elisa.ims.scscf.IscThirdPartyRegister;
 import et.elisa.ims.scscf.ScscfInviteSbb;
+import et.elisa.ims.mmtel.MmtelService;
+import et.elisa.cdr.CdrIngestService;
 import et.elisa.ims.scscf.ScscfRegisterSbb;
 import et.elisa.media.MediaIceTurnPolicy;
 import et.elisa.metrics.SipCpsMetrics;
@@ -93,8 +99,12 @@ final class ElisaBootstrap {
     @Inject CallSessionService callSessionService;
     @Inject ElisaProfileService elisaProfiles;
     @Inject SbbRecoveryManagerImpl sbbRecovery;
+    @Inject ElisaInfinispanManager elisaIspn;
+    @Inject ElisaClusterViewBridge clusterViewBridge;
     @Inject et.elisa.ims.charging.OnlineChargingService onlineCharging;
     @Inject et.elisa.ims.charging.DiameterRfAcrEmitter rfAcrEmitter;
+    @Inject MmtelService mmtelService;
+    @Inject CdrIngestService cdrIngest;
 
     @ConfigProperty(name = "sip.ra.host", defaultValue = "0.0.0.0") String sipHost;
     @ConfigProperty(name = "sip.ra.udp-port", defaultValue = "5060") int udpPort;
@@ -220,6 +230,14 @@ final class ElisaBootstrap {
             config.setTurnCredential(mediaPolicy.turnCredential());
         }
         SipServletResourceAdaptor ra = new SipServletResourceAdaptor();
+        if (elisaIspn != null && elisaIspn.enabled() && elisaIspn.distSync() && elisaIspn.manager() != null) {
+            System.setProperty(RaHaSupport.PROP_STICKY_FORWARD, "true");
+            ClusterManager cm = ClusterManager.adopt(
+                    elisaIspn.manager(), fsPairRegistry.nodeId(), true);
+            ra.setClusterManager(cm);
+            LOG.info("SIP RA ClusterManager adopted node={} cluster={}",
+                    fsPairRegistry.nodeId(), elisaIspn.clusterName());
+        }
         sipEndpoint = new SipServletRaEndpoint(ra);
         sipEndpoint.setConfig(config);
         container.registerRa(sipEndpoint, sipEndpoint);
@@ -256,7 +274,10 @@ final class ElisaBootstrap {
         sbbRecovery.bindSessionRecovery(recovery);
         container.getEventRouter().bindSessionRecoveryService(recovery);
         sbbRecovery.attachToContainer();
-        LOG.info("SbbRecoveryManager wired (EntityRemovalBus + SessionRecovery Gap-SR-1)");
+        if (clusterViewBridge != null) {
+            clusterViewBridge.attach();
+        }
+        LOG.info("SbbRecoveryManager wired (EntityRemovalBus + SessionRecovery Gap-SR-1 + view-change)");
     }
 
     private void wireFreeSwitchRa() {
@@ -359,7 +380,7 @@ final class ElisaBootstrap {
             DialogCmpPersistence cmp = dialogCmp;
             container.registerSbbType(ScscfInviteSbb.class,
                     () -> new ScscfInviteSbb.$Concrete(imsRoles, iscAsRouter, bindingStore, cmp, metrics, hssLite,
-                            onlineCharging,
+                            onlineCharging, mmtelService, cdrIngest,
                             nodeId,
                             freeSwitchRaBridge.activeFsNodeId() != null
                                     ? freeSwitchRaBridge.activeFsNodeId() : "fallback"));

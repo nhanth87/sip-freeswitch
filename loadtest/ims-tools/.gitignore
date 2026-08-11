@@ -1,0 +1,21 @@
+# Local third-party clones — never commit as gitlinks
+/clearwater-live-test/
+/docker_open5gs/
+/free5gc/
+/open5gs/
+/pyhss/
+/quaff/
+/sipp/
+
+# Build / binary noise (keep sources)
+sipp/build/
+**/CMakeCache.txt
+**/CMakeFiles/
+**/*.o
+**/*.a
+free5gc/**/bin/
+open5gs/build/
+open5gs/install/
+# Huge captures — keep under loadtest/pcaps with its own ignore
+**/*.pcap
+**/*.pcapng

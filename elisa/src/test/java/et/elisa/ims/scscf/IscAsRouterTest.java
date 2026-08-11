@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import et.elisa.ims.config.ImsRoleFlags;
 import et.elisa.ims.support.ImsTestSupport;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class IscAsRouterTest {
@@ -25,7 +26,24 @@ class IscAsRouterTest {
         assertTrue(r.shouldInvokeAs("MRF-conference"));
         assertTrue(r.shouldInvokeAs("mmtel"));
         assertFalse(r.shouldInvokeAs("{\"skip\":true}"),
-                "BUG?: unknown ifc JSON silently skips AS — may strand MO calls");
+                "skip:true must not invoke AS");
+    }
+
+    @Test
+    void asChain_parsesArrayAndSingle() {
+        assertEquals(List.of("sip:as1@fs", "sip:as2@fs"),
+                IscAsRouter.parseAsChain("{\"as\":[\"sip:as1@fs\",\"sip:as2@fs\"]}"));
+        assertEquals(List.of("sip:only@fs"),
+                IscAsRouter.parseAsChain("{\"as\":\"sip:only@fs\"}"));
+        assertEquals(List.of("sip:c1", "sip:c2"),
+                IscAsRouter.parseAsChain("{\"chain\":[{\"as\":\"sip:c1\"},{\"as\":\"sip:c2\"}]}"));
+    }
+
+    @Test
+    void asChain_blankIfcUsesDefaultAs() throws Exception {
+        IscAsRouter r = routerWithAs("sip:default@fs");
+        assertEquals(List.of("sip:default@fs"), r.asChain(null));
+        assertEquals("sip:default@fs", r.firstAsUri(""));
     }
 
     @Test
@@ -54,10 +72,12 @@ class IscAsRouterTest {
         try {
             ImsRoleFlags roles = ImsTestSupport.roles(true, true, true, true);
             ImsTestSupport.set(roles, "iscAsUri", as);
+            ImsTestSupport.set(roles, "featureMmtel", true);
             IscAsRouter r = new IscAsRouter();
             ImsTestSupport.set(r, "roles", roles);
             ImsTestSupport.set(r, "trunks", null);
             ImsTestSupport.set(r, "fallbackTrunk", "sip:fb@127.0.0.1:5062");
+            ImsTestSupport.set(r, "bgcfUri", "");
             return r;
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException(e);

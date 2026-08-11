@@ -1,6 +1,6 @@
 # SbbRecoveryManager — dead SBB detect + respawn
 
-**Status:** PARTIAL IMPLEMENTATION (2026-08-10) — Elisa manager + fencing + local respawn + DialogRegistry portable peer **and** lab synthetic wire restore from `SipDialogHa` / sticky attrs; not Clearwater Chronos.  
+**Status:** P0 WIRED (2026-08-11) — view-change listener + `ClusterManager.adopt` (one ISPN view) + SipDialogHa restore on every spawn + BYE self-remove race guard + soft-hang watchdog + nn kill-test script. Not Clearwater Chronos. ProfileFacility is **not** failover SoT.  
 **Product context:** Elisa lab IMS Core + FreeSWITCH MRF/AS; N–N cluster **C1** (Infinispan) / **C2** (VIP affinity) / **C3** (FS pair); target **10 000 INVITE/s** on `ra-sip-servlet`; host **JDK 25** micro-jainslee.  
 **Related:** [`cmp-recovery.md`](cmp-recovery.md) (app CMP dual-write), [`jainslee-profile.md`](jainslee-profile.md), [`cluster-c2-vip-affinity.md`](cluster-c2-vip-affinity.md), [`ims-core.md`](ims-core.md) (I7 sticky), jain-slee ADR [`0002-ra-sticky-ha-fabric.md`](../../../../jain-slee/jain-slee/docs/adr/0002-ra-sticky-ha-fabric.md), `SessionRecoveryService` (Gap-SR-1), `DistributedSbbEntityPool`.
 
@@ -32,9 +32,9 @@ Detection → Decision (home sticky / fence) → Restore (ISPN→PG→Profile) �
 | CDI impl | `et.elisa.recovery.SbbRecoveryManagerImpl` | **done** — EntityRemovalBus async + Gap-SR-1 bind |
 | Decision policy | `RecoveryDecisionPolicy` (R1/R2/R6) | **done** + unit tests |
 | Ownership fence | `DialogOwner` + `DialogOwnerStore` (ISPN CAS gen) | **done** — dual-write from `DialogCmpPersistence.save` |
-| Bootstrap wire | `ElisaBootstrap.wireSbbRecovery` | **done** — removal bus + `SessionRecoveryServiceImpl` |
+| Bootstrap wire | `ElisaBootstrap.wireSbbRecovery` | **done** — removal bus + Gap-SR-1 + `ElisaClusterViewBridge` + `ClusterManager.adopt` |
 | RA portable peers + wire | `DialogRegistry.PortableDialogMeta` + `restorePortable` / `restoreDialog` / `restoreDialogFromCheckpoint` | **done** — peers+cseq+URI/tags; synthetic lastRequest/lastResponse for lab Send* |
-| Soft-hang heartbeat | `onEntitySuspect` | stub (P2) |
+| Soft-hang heartbeat | `onEntitySuspect` | **wired** — `SoftHangWatchdog` (stale local EARLY/CONFIRMED) |
 | Admin orphan HTMX | — | not in this pass |
 | Full SIP TX HA | Chronos-class dialog SM | **gap** — lab synthetic rebuild only; TCP affinity / first inbound still preferred |
 
@@ -49,7 +49,7 @@ Detection → Decision (home sticky / fence) → Restore (ISPN→PG→Profile) �
 | R5 stable entity id | **yes** — `ScscfInviteSbb/{callId}` |
 | R6 TERMINATED no respawn | **yes** |
 | R7 checkpoint cadence | app write-through + RA Gate A (existing) |
-| R8 off INVITE path | async VT executor on removal |
+| R8 off INVITE path | async VT executor on removal + `@ViewChanged` async listener |
 | R9 FS pair | noted; no auto ESL remap yet |
 | R10 rehydrate guard | `RECOVERING` ThreadLocal + SessionRecovery REHYDRATING |
 
@@ -103,7 +103,8 @@ RA DialogRegistry + RaSessionMeta
                               load CMP ISPN→PG + Profile
                               acquireEntity(ScscfInviteSbb/callId)
                               recoverAfterFailure
-                              RA.restoreDialogFromCluster (peers only)
+                              restoreDialogFromCheckpoint (SipDialogHa)
+                              then restoreDialogFromCluster if ClusterManager bound
                               metric blocked_sip_ha if no lastRequest
          │
          │  mid-dialog BYE (C2 VIP may land on B)
@@ -137,12 +138,11 @@ void onEntitySuspect(String sbbId, long lastBeatEpochMs);
 
 ## 5. Remaining gaps
 
-1. **SIP `lastRequest` / `lastResponse` objects** — not portable; remote SendResponse before wire rebuild still blocked (`sbb_recovery_blocked_sip_ha`).
-2. **Automatic ISPN view → `onClusterViewChange`** — API ready; Elisa does not yet subscribe a shared ClusterManager view listener (call from ops / future C1 glue).
-3. **C3 FS pair ESL remap** on failover — not automatic (R9).
-4. **P2 soft-hang heartbeat** — stub only.
-5. **Admin HTMX orphan list** — not shipped.
-6. **Kernel `SbbEntitySnapshot` prefer-newer merge** — app CMP is primary restore path today.
+1. **SIP `lastRequest` / `lastResponse` objects** — synthetic rebuild from SipDialogHa; early INVITE without tags still blocked (`blockedSipHa`).
+2. **C3 FS pair ESL remap** on failover — not automatic (R9 / P1). Media stays on home FS.
+3. **Admin HTMX orphan list** — not shipped.
+4. **Kernel `SbbEntitySnapshot` prefer-newer merge** — app CMP is primary restore path today.
+5. **Chronos-class dialog SM** — no.
 
 ---
 

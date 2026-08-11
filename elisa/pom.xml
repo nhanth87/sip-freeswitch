@@ -68,6 +68,11 @@
     </dependency>
     <dependency>
       <groupId>com.microjainslee</groupId>
+      <artifactId>jainslee-cluster</artifactId>
+      <version>${microjainslee.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.microjainslee</groupId>
       <artifactId>jainslee-api</artifactId>
       <version>${microjainslee.version}</version>
     </dependency>

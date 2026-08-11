@@ -90,6 +90,21 @@ public class SfCdr extends PanacheEntityBase {
     @Column(length = 64)
     public String icid;
 
+    /** Raw P-Charging-Vector (Clearwater-CCF-equivalent correlate). */
+    @Column(name = "charging_vector", length = 512)
+    public String chargingVector;
+    @Column(length = 255)
+    public String impi;
+    @Column(length = 255)
+    public String impu;
+    /** Lab CSCF role that authored the dialog CDR: P | I | S. */
+    @Column(name = "cscf_role", length = 16)
+    public String cscfRole;
+    @Column(name = "orig_ioi", length = 160)
+    public String origIoi;
+    @Column(name = "term_ioi", length = 160)
+    public String termIoi;
+
     @Column(columnDefinition = "text")
     public String payload;
     @Column(name = "created_at")

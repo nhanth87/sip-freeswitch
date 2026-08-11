@@ -242,12 +242,15 @@ public class AdminRoutes {
                         + "</td><td class=\"mono\">" + esc(c.callUuid) + "</td><td>" + esc(c.sender)
                         + "</td><td>" + esc(c.recipient) + "</td><td>" + esc(String.valueOf(c.duration))
                         + "</td><td>" + esc(c.hangupCause != null ? c.hangupCause : c.status)
+                        + "</td><td class=\"mono\">" + esc(c.sipCallId)
+                        + "</td><td class=\"mono\">" + esc(c.icid)
+                        + "</td><td class=\"mono\">" + esc(c.msisdn)
                         + "</td><td class=\"mono\">" + esc(c.tenantId) + "</td></tr>")
                 .collect(Collectors.joining());
         if (body.isBlank()) {
             return "<p class=\"hint\">No CDR rows</p>";
         }
-        return rows(body, "time|uuid|caller|callee|duration|hangup|tenant");
+        return rows(body, "time|uuid|caller|callee|duration|hangup|sip_call_id|icid|msisdn|tenant");
     }
 
     @GET

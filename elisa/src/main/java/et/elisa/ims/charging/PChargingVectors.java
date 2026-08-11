@@ -56,15 +56,37 @@ public final class PChargingVectors {
     }
 
     public static String extractIcidValue(String pChargingVector) {
-        if (pChargingVector == null || pChargingVector.isBlank()) {
+        return extractParam(pChargingVector, "icid-value=");
+    }
+
+    public static String extractOrigIoi(String pChargingVector) {
+        return extractParam(pChargingVector, "orig-ioi=");
+    }
+
+    public static String extractTermIoi(String pChargingVector) {
+        return extractParam(pChargingVector, "term-ioi=");
+    }
+
+    /** Public for CDR when FS omit P-Charging-Vector but Call-ID is known. */
+    public static String synthesizeIcid(String sipCallId) {
+        if (sipCallId != null && !sipCallId.isBlank()) {
+            // Stable per Call-ID so P and S agree without shared store on retry.
+            UUID u = UUID.nameUUIDFromBytes(sipCallId.getBytes(StandardCharsets.UTF_8));
+            return u.toString().replace("-", "");
+        }
+        return UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private static String extractParam(String header, String keyEq) {
+        if (header == null || header.isBlank()) {
             return null;
         }
-        String s = pChargingVector.trim();
-        int idx = indexOfIgnoreCase(s, "icid-value=");
+        String s = header.trim();
+        int idx = indexOfIgnoreCase(s, keyEq);
         if (idx < 0) {
             return null;
         }
-        int start = idx + "icid-value=".length();
+        int start = idx + keyEq.length();
         if (start < s.length() && s.charAt(start) == '"') {
             int end = s.indexOf('"', start + 1);
             return end > start ? s.substring(start + 1, end).trim() : null;
@@ -72,15 +94,6 @@ public final class PChargingVectors {
         int end = s.indexOf(';', start);
         String token = (end < 0 ? s.substring(start) : s.substring(start, end)).trim();
         return token.isEmpty() ? null : token;
-    }
-
-    static String synthesizeIcid(String sipCallId) {
-        if (sipCallId != null && !sipCallId.isBlank()) {
-            // Stable per Call-ID so P and S agree without shared store on retry.
-            UUID u = UUID.nameUUIDFromBytes(sipCallId.getBytes(StandardCharsets.UTF_8));
-            return u.toString().replace("-", "");
-        }
-        return UUID.randomUUID().toString().replace("-", "");
     }
 
     private static String appendOrigIoi(String existing, String origIoi) {

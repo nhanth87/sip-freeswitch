@@ -76,6 +76,56 @@ class SbbRecoveryManagerLocalTest {
     }
 
     @Test
+    void selfRemoveAfterByeDoesNotRespawn() {
+        long now = System.currentTimeMillis();
+        cmp.save(new InviteCmpSnapshot(
+                "cid-bye-rm", null, null, "sip:a@x", "sip:b@x", null, "10.0.0.1:5060",
+                null, "elisa-1", DialogCheckpoint.STATE_CONFIRMED, now, now));
+        cmp.save(new InviteCmpSnapshot(
+                "cid-bye-rm", null, null, "sip:a@x", "sip:b@x", null, "10.0.0.1:5060",
+                null, "elisa-1", DialogCheckpoint.STATE_TERMINATED, now, now));
+        var ev = new com.microjainslee.core.removal.EntityRemovalEvent(
+                "ScscfInviteSbb/cid-bye-rm", "cid-bye-rm",
+                com.microjainslee.core.removal.EntityRemovalEvent.RemovalReason.SBB_SELF_REMOVE,
+                now);
+        mgr.handleRemoval(ev);
+        assertEquals(0L, mgr.localOk());
+    }
+
+    @Test
+    void selfRemoveMidConfirmedRespawns() {
+        long now = System.currentTimeMillis();
+        cmp.save(new InviteCmpSnapshot(
+                "cid-live-rm", "fs-1", "2519", "sip:a@x", "sip:b@x", null, "10.0.0.1:5060",
+                "fs-a", "elisa-1", DialogCheckpoint.STATE_CONFIRMED, now, now));
+        var ev = new com.microjainslee.core.removal.EntityRemovalEvent(
+                "ScscfInviteSbb/cid-live-rm", "cid-live-rm",
+                com.microjainslee.core.removal.EntityRemovalEvent.RemovalReason.SBB_SELF_REMOVE,
+                now);
+        mgr.handleRemoval(ev);
+        assertEquals(1L, mgr.localOk());
+    }
+
+    @Test
+    void viewChangeClaimsOrphansOfDepartedHome() {
+        long now = System.currentTimeMillis();
+        InviteCmpSnapshot snap = new InviteCmpSnapshot(
+                "cid-view", "fs-9", "2519", "sip:a@x", "sip:b@x", null,
+                "10.0.0.1:5060", "fs-a", "elisa-scscf-1", DialogCheckpoint.STATE_CONFIRMED, now, now);
+        cmp.save(snap);
+        assertEquals("elisa-scscf-1", owners.get("cid-view").orElseThrow().ownerNodeId());
+
+        ClusterView view = new ClusterView(
+                "elisa-1",
+                java.util.Set.of("elisa-1"),
+                java.util.List.of("elisa-scscf-1"),
+                true);
+        mgr.onClusterViewChange(view);
+        assertEquals(1L, mgr.failoverClaimWon());
+        assertEquals("elisa-1", owners.get("cid-view").orElseThrow().ownerNodeId());
+    }
+
+    @Test
     void decideLocalWhenHomeIsUs() {
         long now = System.currentTimeMillis();
         cmp.save(new InviteCmpSnapshot(

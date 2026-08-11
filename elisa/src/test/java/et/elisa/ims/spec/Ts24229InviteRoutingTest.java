@@ -233,6 +233,7 @@ class Ts24229InviteRoutingTest {
             ImsTestSupport.set(r, "roles", roles);
             ImsTestSupport.set(r, "trunks", null);
             ImsTestSupport.set(r, "fallbackTrunk", "sip:fallback@127.0.0.1:5062");
+            ImsTestSupport.set(r, "bgcfUri", "");
             return r;
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException(e);

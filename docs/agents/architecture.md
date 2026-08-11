@@ -2,7 +2,7 @@
 
 ## Locked shape (IMS Core pivot — grill I1–I8)
 
-**SIP/IMS signaling only — not an SBC.** Elisa runs feature-flagged P/I/S-CSCF (+ optional HSS-lite); FreeSWITCH is MRF/AS media. RTP never hairpins through Elisa.
+**SIP/IMS signaling only — not an SBC.** Elisa runs feature-flagged P/I/S-CSCF (+ optional HSS-lite). **FreeSWITCH is an essential MRF/AS + ESL control-plane component** (voice / ICE / TURN / ISC AS / xml_curl) — Elisa without FS is an **incomplete** lab; never document “run Elisa without FreeSWITCH” as a supported full-IMS path. Soft-fail ESL when FS is down is OK; compose must still include FS (1:1 with each S-CSCF in N–N). RTP never hairpins through Elisa.
 
 ```mermaid
 flowchart LR
@@ -25,8 +25,8 @@ flowchart LR
 | Component | Owns |
 |-----------|------|
 | **nginx** | Edge VIP: HTTPS → `:8088`; SIP L4 stream → `:5060` — [`nginx-ingress.md`](nginx-ingress.md) |
-| **elisa** | CSCF roles (flags), Cx, HSS-lite, HTMX admin, ESL, xml_curl, CDR, ACL |
-| **freeswitch** | MRF/AS dialplan, media, Sofia |
+| **elisa** | CSCF roles (flags), Cx, HSS-lite, HTMX admin, ESL client, xml_curl, CDR, ACL |
+| **freeswitch** | **Essential** MRF/AS dialplan, media, Sofia, ESL peer — mandatory in every full voice lab / N–N pair |
 | **coturn / ICE** | **rtp_redirect** — not Elisa/nginx RTP |
 | **postgres** | Config, tenants, IMS profiles/bindings, call sessions, CDR |
 | **Infinispan** | Dialog + registration + call-session (C1/P2) |

@@ -167,14 +167,15 @@ class Ts24229RegisterFlowTest {
         }
 
         @Test
-        void emptyResponseParam_forbidden() {
+        void emptyResponseParam_issuesChallengeNotForbidden() {
             CapturingRa ra = new CapturingRa();
             RecordingHss hss = new RecordingHss();
-            hss.seed(CALL, IMPI, IMPU, XRES, 3);
-            ScscfRegisterSbb sbb = sbb(ra, new StubCx(), hss, new RecordingBindings(), null);
+            StubCx cx = StubCx.okMar(RAND_AUTN, AkaMd5.toHex(XRES));
+            ScscfRegisterSbb sbb = sbb(ra, cx, hss, new RecordingBindings(), null);
             sbb.onEvent(new SipRegisterEvent(CALL, "sip:" + IMPI, IMPU, CONTACT, 3600,
                     "Digest response=\"\"", null), null);
-            assertEquals(403, ra.ofType(SendResponse.class).getFirst().statusCode());
+            assertEquals(401, ra.ofType(SendResponse.class).getFirst().statusCode(),
+                    "empty Digest response=\"\" is initial REGISTER (lab SIPp) — challenge, do not 403");
         }
 
         @Test

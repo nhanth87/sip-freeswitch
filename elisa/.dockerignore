@@ -1,0 +1,7 @@
+# Keep Docker context small; COPY only needs target/quarkus-app (after ./tools/build-all.sh).
+*
+!Dockerfile
+!docker-entrypoint.sh
+!target/
+!target/quarkus-app/
+!target/quarkus-app/**

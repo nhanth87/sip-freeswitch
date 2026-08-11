@@ -137,8 +137,7 @@ public class SbbRecoveryManagerImpl implements SbbRecoveryManager {
                 return;
             }
             if (event.reason() == EntityRemovalEvent.RemovalReason.SBB_SELF_REMOVE) {
-                // R6 — intentional teardown; only respawn if checkpoint still live (rare race).
-                // Defer check async.
+                // R6 — intentional teardown; handleRemoval re-checks TERMINATED / EARLY|CONFIRMED.
             }
             if (async != null) {
                 async.execute(() -> handleRemoval(event));
@@ -161,11 +160,21 @@ public class SbbRecoveryManagerImpl implements SbbRecoveryManager {
         if (correlate == null || correlate.isBlank()) {
             return;
         }
+        if (reason == EntityRemovalEvent.RemovalReason.SBB_SELF_REMOVE) {
+            // CMP TERMINATED write may lag sbbRemove on BYE — re-check before respawn.
+            try {
+                Thread.sleep(50L);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            if (isTerminated(correlate) || !isRecoverableDialog(correlate)) {
+                return;
+            }
+        }
         if (isTerminated(correlate)) {
             return; // R6 — TERMINATED / BYE self-remove
         }
-        // R6: intentional self-remove after teardown already filtered by isTerminated.
-        // Accidental self-remove mid-dialog still has a live checkpoint → respawn.
         RecoveryCause cause = reason == EntityRemovalEvent.RemovalReason.EXCEPTION_ROLLBACK
                 ? RecoveryCause.EXCEPTION_ROLLBACK
                 : RecoveryCause.UNEXPECTED_REMOVE;
@@ -239,22 +248,12 @@ public class SbbRecoveryManagerImpl implements SbbRecoveryManager {
             }
             claimWon.incrementAndGet();
             boolean ok = spawnAndRestore(key, /*failover*/ true);
-            if (ok) {
-                // Honest: SIP Send* needs DialogRegistry (portable restore + wire rebuild).
-                boolean sipReady = sipRa != null && hasRestoredWire(key.correlate());
-                if (!sipReady && sipRa != null) {
-                    boolean restored = sipRa.restoreDialogFromCluster(key.correlate());
-                    if (!restored) {
-                        restored = restoreDialogFromCheckpoint(key.correlate());
-                    }
-                    if (!restored) {
-                        blockedSipHa.incrementAndGet();
-                        LOG.infof("failover spawn ok callId=%s but SIP HA blocked until wire rebuild",
-                                key.correlate());
-                    }
-                } else if (!sipReady) {
-                    blockedSipHa.incrementAndGet();
-                }
+            if (ok && sipRa != null && !hasRestoredWire(key.correlate())) {
+                blockedSipHa.incrementAndGet();
+                LOG.infof("failover spawn ok callId=%s but SIP HA blocked until wire rebuild",
+                        key.correlate());
+            } else if (ok && sipRa == null) {
+                blockedSipHa.incrementAndGet();
             }
             return ok;
         } finally {
@@ -363,6 +362,13 @@ public class SbbRecoveryManagerImpl implements SbbRecoveryManager {
         }
         if (DialogCheckpoint.STATE_TERMINATED.equals(snap.get().dialogState())) {
             return false;
+        }
+        // Prime DialogRegistry from CMP SipDialogHa before recover / Send* (peer + local).
+        if (sipRa != null) {
+            boolean fromCluster = sipRa.restoreDialogFromCluster(callId);
+            if (!fromCluster && !hasRestoredWire(callId)) {
+                restoreDialogFromCheckpoint(callId);
+            }
         }
         // Ensure ownership recorded (local path).
         if (!failover && owners != null) {
@@ -539,6 +545,21 @@ public class SbbRecoveryManagerImpl implements SbbRecoveryManager {
         return dialogCmp.load(callId)
                 .map(s -> DialogCheckpoint.STATE_TERMINATED.equals(s.dialogState()))
                 .orElse(true); // no checkpoint → NOOP (R6 spirit)
+    }
+
+    private boolean isRecoverableDialog(String callId) {
+        if (dialogCmp == null || callId == null) {
+            return false;
+        }
+        return dialogCmp.load(callId)
+                .map(s -> isRecoverableDialogState(s.dialogState()))
+                .orElse(false);
+    }
+
+    /** EARLY / CONFIRMED — mid-call; not INVITE-only or TERMINATED. */
+    public static boolean isRecoverableDialogState(String dialogState) {
+        return DialogCheckpoint.STATE_EARLY.equals(dialogState)
+                || DialogCheckpoint.STATE_CONFIRMED.equals(dialogState);
     }
 
     private String homeNodeFor(String callId) {

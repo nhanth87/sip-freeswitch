@@ -2,6 +2,8 @@
 
 JAINSLEE **internal RA** (sip-freeswitch module) for Elisa ↔ FreeSWITCH **control plane** (ESL). SIP stays on `ra-sip-servlet`.
 
+**Hard lock:** FreeSWITCH is an **essential** lab/product component (MRF/AS + media/ICE/TURN). This RA must **not** be dropped, and “full IMS” must **not** treat FS as an optional feature flag. Soft-fail when ESL is down (`eslLive=false`) is lifecycle honesty — not permission to omit FS from compose (always `depends_on` for S-CSCF / combined Elisa; N–N = 1:1 S↔FS).
+
 ## Grill locks
 
 | Q | Decision |
@@ -52,9 +54,10 @@ sequenceDiagram
 
 ## Non-goals
 
-- Not an SBC / not RTP
+- Not an SBC / not RTP (media plane stays on FreeSWITCH — which remains **mandatory**)
 - Not a second SIP stack toward FS (trunk = `ra-sip-servlet`)
 - xml_curl stays Quarkus REST
+- Do **not** remove this RA or gate “full IMS” behind FS-off flags
 
 ## Replace
 

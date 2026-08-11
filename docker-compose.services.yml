@@ -1,38 +1,66 @@
-# Overlay: one elisa image, deploy by IMS service (+ optional N–N S/FS).
+# Overlay: one elisa image, deploy by IMS service (+ N–N S/FS pairs).
+# FreeSWITCH is essential: scscf depends_on freeswitch; scscf-2 depends_on freeswitch-2 (1:1).
+# Soft-fail ESL when FS down ≠ permission to omit FS from compose.
 #
 # Lab all-in-one (unchanged):
-#   docker compose up -d --build
+#   ./tools/build-all.sh && docker compose up -d --build
 #
 # Split services (scale down combined elisa + default nginx):
 #   docker compose -f docker-compose.yml -f docker-compose.services.yml \
 #     --profile services up -d --build --scale elisa=0 --scale nginx=0
 #
-# N–N second S-CSCF + FS:
-#   ... --profile services --profile nn up -d --build --scale elisa=0 --scale nginx=0
+# N–N second S-CSCF + FS pair (shared PG + coturn; VIP → P-CSCF):
+#   docker compose -f docker-compose.yml -f docker-compose.services.yml \
+#     --profile services --profile nn up -d --build --scale elisa=0 --scale nginx=0
+#
+# Pairing (C2/C3): scscf ESL→freeswitch, scscf-2 ESL→freeswitch-2; same SF_CLUSTER_ISPN_NAME.
+
+x-elisa-db: &elisa-db
+  SF_JDBC_URL: jdbc:postgresql://postgres:5432/elisa
+  SF_DB_USER: elisa
+  SF_DB_PASSWORD: elisa
+  SF_HTML_DIR: /html
+  SF_ADMIN_DEV_LOGIN: "true"
+
+x-elisa-media: &elisa-media
+  SF_MEDIA_RTP_REDIRECT: "true"
+  SF_MEDIA_REQUIRE_TURN: "true"
+  SF_MEDIA_ICE_REQUIRED: "true"
+  SF_MEDIA_TURN_URI: turn:coturn:3478
+  SF_MEDIA_TURN_USERNAME: elisa
+  SF_MEDIA_TURN_CREDENTIAL: elisaturn
+  SF_MEDIA_STUN_URI: stun:coturn:3478
+  SIP_RA_ICE_ENABLED: "true"
+  SIP_RA_STUN_SERVER: coturn
+  SIP_RA_STUN_PORT: "3478"
+
+x-elisa-esl: &elisa-esl
+  SF_ESL_PORT: "8021"
+  SF_ESL_PASSWORD: ClueCon
 
 services:
+  # Remap FS-1 xml_curl → scscf (combined elisa is scaled to 0 in split mode)
+  freeswitch:
+    volumes:
+      - ./freeswitch/conf/autoload_configs/event_socket.conf.xml:/etc/freeswitch/autoload_configs/event_socket.conf.xml:ro
+      - ./freeswitch/conf/autoload_configs/xml_curl.scscf.conf.xml:/etc/freeswitch/autoload_configs/xml_curl.conf.xml:ro
+      - ./freeswitch/conf/sip_profiles/external.xml:/etc/freeswitch/sip_profiles/external.xml:ro
+
   pcscf:
     profiles: ["services"]
     build: ./elisa
     env_file: [./deploy/elisa/roles/pcscf.env]
     environment:
-      SF_JDBC_URL: jdbc:postgresql://postgres:5432/elisa
-      SF_DB_USER: elisa
-      SF_DB_PASSWORD: elisa
-      SF_HTML_DIR: /html
-      SF_MEDIA_RTP_REDIRECT: "true"
-      SF_MEDIA_REQUIRE_TURN: "true"
-      SF_MEDIA_ICE_REQUIRED: "true"
-      SF_MEDIA_TURN_URI: turn:coturn:3478
-      SF_MEDIA_TURN_USERNAME: elisa
-      SF_MEDIA_TURN_CREDENTIAL: elisaturn
-      SF_MEDIA_STUN_URI: stun:coturn:3478
-      SIP_RA_ICE_ENABLED: "true"
-      SIP_RA_STUN_SERVER: coturn
-      SIP_RA_STUN_PORT: "3478"
+      <<: [*elisa-db, *elisa-media]
+      SF_CLUSTER_NODE_ID: elisa-pcscf-1
+      SF_CLUSTER_ISPN_MODE: LOCAL
     volumes: [./app/html:/html:ro]
     expose: ["8088", "5060"]
-    depends_on: [postgres, coturn]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      coturn:
+        condition: service_started
     networks: [sf-net]
 
   icscf:
@@ -40,13 +68,16 @@ services:
     build: ./elisa
     env_file: [./deploy/elisa/roles/icscf.env]
     environment:
-      SF_JDBC_URL: jdbc:postgresql://postgres:5432/elisa
-      SF_DB_USER: elisa
-      SF_DB_PASSWORD: elisa
-      SF_HTML_DIR: /html
+      <<: *elisa-db
+      SF_CLUSTER_NODE_ID: elisa-icscf-1
+      SF_CLUSTER_ISPN_MODE: LOCAL
     volumes: [./app/html:/html:ro]
     expose: ["8088", "5060"]
-    depends_on: [postgres, hss]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      hss:
+        condition: service_started
     networks: [sf-net]
 
   scscf:
@@ -54,24 +85,23 @@ services:
     build: ./elisa
     env_file: [./deploy/elisa/roles/scscf.env]
     environment:
-      SF_JDBC_URL: jdbc:postgresql://postgres:5432/elisa
-      SF_DB_USER: elisa
-      SF_DB_PASSWORD: elisa
-      SF_HTML_DIR: /html
+      <<: [*elisa-db, *elisa-media, *elisa-esl]
       SF_ESL_HOST: freeswitch
       SF_TRUNK_FREESWITCH_URI: sip:1000@freeswitch:5060
       SF_CLUSTER_NODE_ID: elisa-scscf-1
       SF_CLUSTER_ISPN_MODE: DIST_SYNC
-      SF_MEDIA_RTP_REDIRECT: "true"
-      SF_MEDIA_REQUIRE_TURN: "true"
-      SF_MEDIA_ICE_REQUIRED: "true"
-      SF_MEDIA_TURN_URI: turn:coturn:3478
-      SF_MEDIA_TURN_USERNAME: elisa
-      SF_MEDIA_TURN_CREDENTIAL: elisaturn
-      SF_MEDIA_STUN_URI: stun:coturn:3478
+      SF_CLUSTER_ISPN_NAME: elisa-cluster
     volumes: [./app/html:/html:ro]
     expose: ["8088", "5060"]
-    depends_on: [postgres, freeswitch, hss, coturn]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      freeswitch:
+        condition: service_started
+      hss:
+        condition: service_started
+      coturn:
+        condition: service_started
     networks: [sf-net]
 
   scscf-2:
@@ -79,28 +109,44 @@ services:
     build: ./elisa
     env_file: [./deploy/elisa/roles/scscf.env]
     environment:
-      SF_JDBC_URL: jdbc:postgresql://postgres:5432/elisa
-      SF_DB_USER: elisa
-      SF_DB_PASSWORD: elisa
-      SF_HTML_DIR: /html
+      <<: [*elisa-db, *elisa-media, *elisa-esl]
       SF_ESL_HOST: freeswitch-2
       SF_TRUNK_FREESWITCH_URI: sip:1000@freeswitch-2:5060
       SF_CLUSTER_NODE_ID: elisa-scscf-2
       SF_CLUSTER_ISPN_MODE: DIST_SYNC
+      SF_CLUSTER_ISPN_NAME: elisa-cluster
       SF_IMS_SCSCF_URI: sip:scscf-2:5060
     volumes: [./app/html:/html:ro]
     expose: ["8088", "5060"]
-    depends_on: [postgres, freeswitch-2, hss]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      freeswitch-2:
+        condition: service_started
+      hss:
+        condition: service_started
+      coturn:
+        condition: service_started
     networks: [sf-net]
 
   freeswitch-2:
     profiles: ["services", "nn"]
     image: safarov/freeswitch:latest
+    depends_on:
+      coturn:
+        condition: service_started
     volumes:
       - ./freeswitch/conf/autoload_configs/event_socket.conf.xml:/etc/freeswitch/autoload_configs/event_socket.conf.xml:ro
-      - ./freeswitch/conf/autoload_configs/xml_curl.conf.xml:/etc/freeswitch/autoload_configs/xml_curl.conf.xml:ro
+      - ./freeswitch/conf/autoload_configs/xml_curl.scscf-2.conf.xml:/etc/freeswitch/autoload_configs/xml_curl.conf.xml:ro
       - ./freeswitch/conf/sip_profiles/external.xml:/etc/freeswitch/sip_profiles/external.xml:ro
+    # ESL/SIP on sf-net only (no host port clash with freeswitch). RTP via Docker net + coturn.
     expose: ["5060", "8021"]
+    healthcheck:
+      test: ["CMD-SHELL", "fs_cli -x status 2>/dev/null | grep -q UP || (command -v nc >/dev/null && nc -z 127.0.0.1 8021)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     networks: [sf-net]
 
   hss:
@@ -108,13 +154,14 @@ services:
     build: ./elisa
     env_file: [./deploy/elisa/roles/hss.env]
     environment:
-      SF_JDBC_URL: jdbc:postgresql://postgres:5432/elisa
-      SF_DB_USER: elisa
-      SF_DB_PASSWORD: elisa
-      SF_HTML_DIR: /html
+      <<: *elisa-db
+      SF_CLUSTER_NODE_ID: elisa-hss-1
+      SF_CLUSTER_ISPN_MODE: LOCAL
     volumes: [./app/html:/html:ro]
     expose: ["8088", "3868"]
-    depends_on: [postgres]
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks: [sf-net]
 
   nginx-services:
@@ -127,7 +174,17 @@ services:
       - "8443:8443"
       - "5060:5060/tcp"
       - "5060:5060/udp"
-    depends_on: [pcscf, icscf, scscf, hss]
+    depends_on:
+      pcscf:
+        condition: service_started
+      icscf:
+        condition: service_started
+      scscf:
+        condition: service_started
+      freeswitch:
+        condition: service_started
+      hss:
+        condition: service_started
     networks: [sf-net]
 
   # Optional CGRates sidecar (grill G4). Without profile, set sf.cgrates.url to an external OCS.

@@ -37,4 +37,11 @@ class PChargingVectorsTest {
         assertEquals("abc", PChargingVectors.extractIcidValue("icid-value=\"abc\";orig-ioi=x"));
         assertEquals("abc", PChargingVectors.extractIcidValue("icid-value=abc;orig-ioi=x"));
     }
+
+    @Test
+    void extract_origAndTermIoi() {
+        String v = "icid-value=deadbeef;orig-ioi=home.net;term-ioi=visited.net";
+        assertEquals("home.net", PChargingVectors.extractOrigIoi(v));
+        assertEquals("visited.net", PChargingVectors.extractTermIoi(v));
+    }
 }

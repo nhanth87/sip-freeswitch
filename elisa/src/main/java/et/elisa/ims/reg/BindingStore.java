@@ -50,6 +50,26 @@ public class BindingStore {
         return all.stream().filter(b -> b.expiresAt.isAfter(now)).findFirst();
     }
 
+    /** Remove expired bindings (re-REGISTER timer / Chronos-lite). */
+    @Transactional
+    public int purgeExpired() {
+        Instant now = Instant.now();
+        List<ImsBinding> expired = ImsBinding.list("expiresAt < ?1", now);
+        int n = 0;
+        for (ImsBinding b : expired) {
+            String impu = b.impu;
+            b.delete();
+            n++;
+            // Drop home sticky when no live binding remains for IMPU.
+            List<ImsBinding> remain = ImsBinding.list("impu", impu);
+            boolean anyLive = remain.stream().anyMatch(x -> x.expiresAt.isAfter(now));
+            if (!anyLive) {
+                regHome.remove(impu);
+            }
+        }
+        return n;
+    }
+
     @Transactional
     public List<ImsBinding> listAll() {
         return ImsBinding.listAll();

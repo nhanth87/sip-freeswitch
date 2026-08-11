@@ -41,6 +41,9 @@ public class ElisaInfinispanManager {
     @ConfigProperty(name = "sf.cluster.infinispan.cluster-name", defaultValue = "elisa-cluster")
     String clusterName;
 
+    @ConfigProperty(name = "sf.cluster.node-id", defaultValue = "elisa-1")
+    String nodeId;
+
     private EmbeddedCacheManager manager;
     private boolean dist;
 
@@ -52,10 +55,15 @@ public class ElisaInfinispanManager {
         }
         dist = "DIST_SYNC".equalsIgnoreCase(mode) || "DIST".equalsIgnoreCase(mode);
         GlobalConfigurationBuilder global = new GlobalConfigurationBuilder();
+        String logical = (nodeId == null || nodeId.isBlank()) ? "elisa-1" : nodeId;
+        global.transport().nodeName(logical);
+        global.cacheManagerName("elisa-" + logical);
         if (dist) {
-            global.transport().defaultTransport().clusterName(clusterName);
+            global.transport().defaultTransport().clusterName(clusterName).nodeName(logical);
         } else {
             global.nonClusteredDefault();
+            global.transport().nodeName(logical);
+            global.cacheManagerName("elisa-" + logical);
         }
         manager = new DefaultCacheManager(global.build());
         defineCache(CACHE_DIALOGS, 100_000);
@@ -95,6 +103,10 @@ public class ElisaInfinispanManager {
 
     public String clusterName() {
         return clusterName;
+    }
+
+    public String nodeId() {
+        return nodeId == null || nodeId.isBlank() ? "elisa-1" : nodeId;
     }
 
     public String modeLabel() {

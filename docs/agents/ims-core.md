@@ -1,6 +1,6 @@
 # Elisa IMS Core (grill I1–I8)
 
-Lab IMS Core in one Quarkus/micro-jainslee process. Roles enabled per deploy via flags. FreeSWITCH = MRF/AS media only. Elisa is **not** an SBC (no RTP).
+Lab IMS Core in one Quarkus/micro-jainslee process. Roles enabled per deploy via flags. **FreeSWITCH = essential MRF/AS** (media + ESL control) — not optional for full IMS voice. Elisa is **not** an SBC (no RTP).
 
 ## Locks
 
@@ -10,9 +10,9 @@ Lab IMS Core in one Quarkus/micro-jainslee process. Roles enabled per deploy via
 | **I2** | Combined P/I/S-CSCF + HSS-lite in one tree; `sf.ims.role.*` feature flags |
 | **I3** | Auth = IMS AKA + Diameter Cx |
 | **I4** | HSS-lite in-tree when `sf.ims.role.hss=true`; else Cx client to external/sim HSS |
-| **I5** | Bare FreeSWITCH as MRF/AS (ISC + ESL); FreePBX GUI out of Phase 1 |
+| **I5** | **FreeSWITCH essential** as bare MRF/AS (ISC + ESL + ICE/TURN path); FreePBX GUI out of Phase 1. Soft-fail ESL OK; omit FS from compose = **unsupported**. Do not drop `ra-freeswitch` or feature-flag FS off for “full IMS” |
 | **I6** | No RTP through Elisa |
-| **I7** | N–N: C1 Infinispan + C2 VIP + C3 FS pair; registration home S-CSCF sticky |
+| **I7** | N–N: C1 Infinispan + C2 VIP + C3 FS pair (**1:1 S-CSCF ↔ FreeSWITCH**); registration home S-CSCF sticky |
 | **I8** | JDK 25, Log4j2, OTA dist, HTMX admin |
 
 ## Role flags
@@ -59,9 +59,9 @@ UE ──N1/N2──► AMF ──► SMF/UPF          (5GC: attach, PDU / IMS D
 | 5GC N1/N2/N4, PDU | AMF/SMF/UPF (external / future 5GC stack) | **No** |
 | SIP Gm / Mw / ISC | CSCF SBBs + `ra-sip-servlet` | **Yes** |
 | Cx | `CxClient` / `HssLiteService` | **Yes** (lab) |
-| Dialplan / directory | FreeSWITCH + `xml_curl` → Elisa HTTP | FS + Elisa REST |
-| ESL control | `ra-freeswitch` / ESL client | **Yes** (control only) |
-| RTP / ICE / TURN | FreeSWITCH + coturn (`rtp_redirect`) | **No RTP** |
+| Dialplan / directory | FreeSWITCH + `xml_curl` → Elisa HTTP | FS + Elisa REST (**FS mandatory**) |
+| ESL control | `ra-freeswitch` / ESL client | **Yes** (control only; FS peer required for live voice) |
+| RTP / ICE / TURN | FreeSWITCH + coturn (`rtp_redirect`) | **No RTP** (FS still essential) |
 
 **Ingress (locked):** nginx **http** → admin `:8088`; nginx **stream** L4 VIP → SIP `:5060` with src-IP affinity — [`nginx-ingress.md`](nginx-ingress.md) (N1–N8) · [`cluster-c2-vip-affinity.md`](cluster-c2-vip-affinity.md). Nginx is **not** a P-CSCF and does **not** carry RTP.
 
@@ -296,3 +296,4 @@ No Rx ⇒ no dedicated-bearer VoLTE QoS claims. Footguns: [`lessons.md`](lessons
 - User profile + FS call correlate: [`user-profile.md`](user-profile.md)
 - JAIN SLEE ProfileFacility: [`jainslee-profile.md`](jainslee-profile.md)
 - Charging / CGRates improve (G1–G5): [`elisa-improve-plan.md`](elisa-improve-plan.md)
+- Clearwater / Alianza parity (gap + CDR + MMTel): [`clearwater-parity.md`](clearwater-parity.md)

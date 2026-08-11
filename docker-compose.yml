@@ -1,3 +1,9 @@
+# Lab all-in-one: 1× Elisa (P+I+S+HSS) + 1× FreeSWITCH (essential MRF/AS) + Postgres + coturn + nginx VIP.
+# FreeSWITCH is mandatory — elisa depends_on freeswitch. Soft-fail ESL ≠ omit FS.
+# N–N overlay: docker-compose.services.yml (+ profiles services / nn) — see docs/agents/docker-lab.md
+#
+#   ./tools/build-all.sh && docker compose up -d --build
+
 services:
   postgres:
     image: postgres:16
@@ -6,10 +12,16 @@ services:
       POSTGRES_USER: elisa
       POSTGRES_PASSWORD: elisa
     volumes: [sf-postgres:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U elisa -d elisa"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
     networks: [sf-net]
 
   # TURN/STUN for media — UAs must use relay when sf.media.require-turn=true
-  # RTP/TURN bypass nginx (N4)
+  # RTP/TURN bypass nginx (N4). Shared by all FS / UEs (1-node and N–N).
   coturn:
     image: coturn/coturn:4.6.2
     command:
@@ -28,29 +40,59 @@ services:
     ports:
       - "3478:3478/udp"
       - "3478:3478/tcp"
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep turnserver >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
     networks: [sf-net]
 
   freeswitch:
+    # Essential MRF/AS — never omit from full voice lab; elisa depends_on this service.
     image: safarov/freeswitch:latest
-    depends_on: [coturn]
+    depends_on:
+      coturn:
+        condition: service_started
     volumes:
       - ./freeswitch/conf/autoload_configs/event_socket.conf.xml:/etc/freeswitch/autoload_configs/event_socket.conf.xml:ro
+      # 1-node lab: xml_curl → elisa:8088 (services overlay remaps to scscf)
       - ./freeswitch/conf/autoload_configs/xml_curl.conf.xml:/etc/freeswitch/autoload_configs/xml_curl.conf.xml:ro
       - ./freeswitch/conf/sip_profiles/external.xml:/etc/freeswitch/sip_profiles/external.xml:ro
-    # ESL + RTP published; SIP trunk stays on sf-net (Elisa→FS). xml_curl → elisa:8088 internal.
+    # ESL + RTP published; SIP trunk stays on sf-net (Elisa→FS). ESL password = ClueCon.
     ports: ["5062:5060/udp", "5062:5060/tcp", "8021:8021", "16384-16484:16384-16484/udp"]
+    expose: ["5060", "8021"]
+    healthcheck:
+      test: ["CMD-SHELL", "fs_cli -x status 2>/dev/null | grep -q UP || (command -v nc >/dev/null && nc -z 127.0.0.1 8021)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     networks: [sf-net]
 
   elisa:
     build: ./elisa
-    depends_on: [postgres, freeswitch, coturn]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      freeswitch:
+        condition: service_started
+      coturn:
+        condition: service_started
     environment:
       SF_JDBC_URL: jdbc:postgresql://postgres:5432/elisa
       SF_DB_USER: elisa
       SF_DB_PASSWORD: elisa
+      # ESL → FreeSWITCH (soft-fail: eslLive=false until FS ESL up; password matches event_socket.conf.xml)
       SF_ESL_HOST: freeswitch
+      SF_ESL_PORT: "8021"
+      SF_ESL_PASSWORD: ClueCon
       SF_TRUNK_FREESWITCH_URI: sip:1000@freeswitch:5060
       SF_HTML_DIR: /html
+      SF_CLUSTER_NODE_ID: elisa-1
+      SF_CLUSTER_ISPN_MODE: LOCAL
+      SF_CLUSTER_ISPN_NAME: elisa-cluster
+      # ICE / TURN / rtp_redirect (docs/agents/media-ice-turn.md)
       SF_MEDIA_RTP_REDIRECT: "true"
       SF_MEDIA_REQUIRE_TURN: "true"
       SF_MEDIA_ICE_REQUIRED: "true"
@@ -65,6 +107,13 @@ services:
       SF_IMS_PCSCF_URI: sip:pcscf.ims.lab:5060
       SF_IMS_ICSCF_URI: sip:pcscf.ims.lab:5060
       SF_IMS_SCSCF_URI: sip:pcscf.ims.lab:5060
+      SF_ADMIN_DEV_LOGIN: "true"
+      # Lab secrets (prod profile fails closed without these)
+      SF_ADMIN_API_KEY: sf-admin
+      SF_ADMIN_SESSION_HMAC_SECRET: change-me-sf-lab
+      SF_ADMIN_BOOTSTRAP_PASSWORD: admin
+      SF_FS_CONF_DIR: /html
+      SF_IMS_ISC_AS: sip:1000@freeswitch:5060
     volumes:
       - ./app/html:/html:ro
     # SIP + admin only on sf-net; public edge is nginx (N1)
@@ -75,7 +124,9 @@ services:
 
   nginx:
     build: ./deploy/nginx
-    depends_on: [elisa]
+    depends_on:
+      elisa:
+        condition: service_healthy
     ports:
       - "8080:8080"           # admin HTTP lab
       - "8443:8443"           # admin HTTPS

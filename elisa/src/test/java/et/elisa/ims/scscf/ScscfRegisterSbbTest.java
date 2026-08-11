@@ -22,6 +22,29 @@ import org.junit.jupiter.api.Test;
 class ScscfRegisterSbbTest {
 
     @Test
+    void challenge_whenAuthorizationHasEmptyResponse() {
+        CapturingRa ra = new CapturingRa();
+        StubCx cx = new StubCx();
+        cx.uar = CxCodec.uaaAvps("sip:scscf.ims.lab:5060");
+        cx.mar = CxCodec.maaAvps("u@ims.lab", "ab".repeat(32), "cd".repeat(8), "ef".repeat(16), "01".repeat(16));
+        ScscfRegisterSbb sbb = new ScscfRegisterSbb(ImsTestSupport.roles(true, true, true, true),
+                cx, new StubHss(), new StubBindings(), null);
+        ImsTestSupport.injectRa(sbb, ra);
+
+        // Open5GS lab SIPp uac_register_challenge.xml ships empty Digest response=""
+        String emptyAuth = "Digest username=\"u@ims.lab\", realm=\"ims.lab\", uri=\"sip:ims.lab\", "
+                + "nonce=\"\", response=\"\", algorithm=AKAv1-MD5";
+        sbb.onRegister(new SipRegisterEvent("c-empty-auth", "sip:u@ims.lab", "sip:u@ims.lab",
+                "sip:u@10.0.0.1:5060", 3600, emptyAuth, null));
+
+        SendResponse r = ra.ofType(SendResponse.class).getFirst();
+        assertEquals(401, r.statusCode(),
+                "empty Authorization response must challenge (401), not authenticate-fail 403");
+        assertEquals(1, cx.uarCalls.get());
+        assertEquals(1, cx.marCalls.get());
+    }
+
+    @Test
     void challenge_whenNoAuthorization() {
         CapturingRa ra = new CapturingRa();
         StubCx cx = new StubCx();
