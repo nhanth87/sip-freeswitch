@@ -1,6 +1,7 @@
 package et.elisa.bootstrap;
 
 import com.microjainslee.cluster.ClusterManager;
+import com.microjainslee.cluster.DistributedSbbEntityPool;
 import com.microjainslee.cluster.RaHaSupport;
 import com.microjainslee.core.MicroSleeContainer;
 import com.microjainslee.ra.diameter.DiameterRaConfig;
@@ -49,12 +50,12 @@ import et.elisa.cdr.CdrIngestService;
 import et.elisa.ims.scscf.ScscfRegisterSbb;
 import et.elisa.media.MediaIceTurnPolicy;
 import et.elisa.metrics.SipCpsMetrics;
-import et.elisa.ra.freeswitch.FreeSwitchRaConfig;
-import et.elisa.ra.freeswitch.FreeSwitchRaEndpoint;
-import et.elisa.ra.freeswitch.FreeSwitchResourceAdaptor;
-import et.elisa.ra.freeswitch.events.FsApiResponseEvent;
-import et.elisa.ra.freeswitch.events.FsChannelEvent;
-import et.elisa.ra.freeswitch.events.FsHeartbeatEvent;
+import com.microjainslee.ra.freeswitch.FreeSwitchRaConfig;
+import com.microjainslee.ra.freeswitch.FreeSwitchRaEndpoint;
+import com.microjainslee.ra.freeswitch.FreeSwitchResourceAdaptor;
+import com.microjainslee.ra.freeswitch.events.FsApiResponseEvent;
+import com.microjainslee.ra.freeswitch.events.FsChannelEvent;
+import com.microjainslee.ra.freeswitch.events.FsHeartbeatEvent;
 import et.elisa.sbbs.FreeSwitchMonitorSbb;
 import et.elisa.sbbs.IceNegotiationSbb;
 import et.elisa.sbbs.ProxySbb;
@@ -124,6 +125,8 @@ final class ElisaBootstrap {
     @ConfigProperty(name = "sf.ims.cx.listen-port", defaultValue = "3868") int cxPort;
     @ConfigProperty(name = "sf.ims.cx.origin-host", defaultValue = "elisa.ims.lab") String cxOriginHost;
     @ConfigProperty(name = "sf.ims.cx.origin-realm", defaultValue = "ims.lab") String cxOriginRealm;
+    @ConfigProperty(name = "microjainslee.container.sbb-pool-min", defaultValue = "16") int sbbPoolMin;
+    @ConfigProperty(name = "microjainslee.container.sbb-pool-max", defaultValue = "40960") int sbbPoolMax;
     @ConfigProperty(name = "sf.ims.cx.enabled", defaultValue = "true") boolean cxEnabled;
 
     private volatile SipServletRaEndpoint sipEndpoint;
@@ -141,7 +144,14 @@ final class ElisaBootstrap {
         if (container.getState() != MicroSleeContainer.State.STARTED) {
             container.start();
         }
+        bindDistributedSbbPool();
         elisaProfiles.provisionTables();
+        try {
+            int warmed = elisaProfiles.warmSubscribers(hssLite.listSubscribers());
+            LOG.info("SLEE Profile warm ImsSubscriber count={}", warmed);
+        } catch (RuntimeException ex) {
+            LOG.warn("SLEE Profile warm skipped (DB not ready?): {}", ex.toString());
+        }
         try {
             sipTrunks.ensureDefaultIfEmpty();
         } catch (RuntimeException ex) {
@@ -171,6 +181,28 @@ final class ElisaBootstrap {
                 needsFsPlane() ? (primary != null ? primary.port() : eslPort) : 0,
                 fsPairRegistry.nodeId(),
                 diameterRaBridge.peerReady());
+    }
+
+    /**
+     * Gate A: {@code checkpointSbbEntity} is a no-op until this pool is bound.
+     * Snapshot cache is {@code REPL_ASYNC} (best-effort); Postgres dual-write remains SoT.
+     */
+    private void bindDistributedSbbPool() {
+        if (elisaIspn == null || !elisaIspn.enabled() || elisaIspn.manager() == null) {
+            LOG.info("DistributedSbbEntityPool skipped (Infinispan off)");
+            return;
+        }
+        if (!elisaIspn.distSync()) {
+            LOG.info("DistributedSbbEntityPool skipped (ISPN LOCAL — clustered sbb-entity-state needs DIST_SYNC)");
+            return;
+        }
+        ClusterManager cm = ClusterManager.adopt(
+                elisaIspn.manager(), fsPairRegistry.nodeId(), elisaIspn.distSync());
+        DistributedSbbEntityPool pool = new DistributedSbbEntityPool(
+                Math.max(0, sbbPoolMin), Math.max(1, sbbPoolMax), true, cm);
+        container.bindDistributedSbbPool(pool);
+        LOG.info("Bound DistributedSbbEntityPool node={} sbb-entity-state=REPL_ASYNC (best-effort; PG is SoT)",
+                fsPairRegistry.nodeId());
     }
 
     /** Gm/Mw/ISC SIP plane — any CSCF, or legacy non-IMS edge. */
@@ -388,13 +420,13 @@ final class ElisaBootstrap {
                                     ? freeSwitchRaBridge.activeFsNodeId() : "fallback"));
         }
         if (imsRoles.pcscf()) {
-            container.registerSbbType(PcscfProxySbb.class, () -> new PcscfProxySbb(imsRoles));
+            container.registerSbbType(PcscfProxySbb.class, () -> new PcscfProxySbb(imsRoles, cpsMetrics));
         }
         if (imsRoles.icscf()) {
             container.registerSbbType(IcscfRoutingSbb.class, () -> new IcscfRoutingSbb(imsRoles, cxClient));
         }
         if (cxEnabled && (imsRoles.hss() || imsRoles.icscf() || imsRoles.scscf())) {
-            container.registerSbbType(DiameterCxSbb.class, () -> new DiameterCxSbb(cxServer, cxClient));
+            container.registerSbbType(DiameterCxSbb.class, () -> new DiameterCxSbb.$Concrete(cxServer, cxClient));
         }
         LOG.info("SBB types registered IMS={}", imsRoles.summary());
     }

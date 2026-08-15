@@ -4,6 +4,7 @@ import et.elisa.cluster.ElisaInfinispanManager;
 import et.elisa.ims.config.ImsRoleFlags;
 import et.elisa.ims.cx.DiameterRaBridge;
 import et.elisa.ims.hss.HssLiteService;
+import et.elisa.ims.hss.ImsIdentityKeys;
 import et.elisa.ims.reg.BindingStore;
 import et.elisa.ims.scscf.IscAsRouter;
 import et.elisa.ims.trunk.SipTrunkService;
@@ -11,6 +12,7 @@ import et.elisa.persist.ImsBinding;
 import et.elisa.persist.ImsSubscriber;
 import et.elisa.persist.SipTrunkEntity;
 import et.elisa.profile.ElisaProfileService;
+import et.elisa.security.SipDigestHasher;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import jakarta.ws.rs.*;
@@ -199,13 +201,27 @@ public class ImsAdminRoutes {
         requireAdmin(cookie, key, keyQ);
         List<ImsSubscriber> list = hss.listSubscribers();
         if (list.isEmpty()) {
-            return "<p class=\"hint\">No IMS subscribers — provision IMPI/IMPU/Ki/OPc.</p>";
+            return "<p class=\"hint\">No SIP users yet — create User A and User B above, then register two SIP clients.</p>";
         }
-        StringBuilder sb = new StringBuilder("<table><thead><tr><th>IMPI</th><th>IMPU</th><th>SQN</th><th>enabled</th></tr></thead><tbody>");
+        java.util.HashSet<String> liveImpu = new java.util.HashSet<>();
+        Instant now = Instant.now();
+        for (ImsBinding b : bindings.listAll()) {
+            if (b.impu != null && b.expiresAt != null && b.expiresAt.isAfter(now)) {
+                liveImpu.add(b.impu);
+            }
+        }
+        StringBuilder sb = new StringBuilder(
+                "<table><thead><tr><th>SIP user</th><th>IMPU</th><th>digest</th><th>registered</th><th>enabled</th></tr></thead><tbody>");
+        String realm = roles.realm();
         for (ImsSubscriber s : list) {
-            sb.append("<tr><td class=\"mono\">").append(AdminPageRenderer.esc(s.impi)).append("</td>")
+            String user = s.directoryUserId();
+            boolean digest = s.fsA1Hash != null && !s.fsA1Hash.isBlank();
+            boolean live = (s.impu != null && liveImpu.contains(s.impu))
+                    || (user != null && liveImpu.contains(ImsIdentityKeys.impu(user, realm)));
+            sb.append("<tr><td class=\"mono\">").append(AdminPageRenderer.esc(user)).append("</td>")
                     .append("<td class=\"mono\">").append(AdminPageRenderer.esc(s.impu)).append("</td>")
-                    .append("<td>").append(s.sqn).append("</td>")
+                    .append("<td>").append(digest ? "MD5" : "AKA").append("</td>")
+                    .append("<td>").append(live ? "<span class=\"badge ok\">yes</span>" : "<span class=\"badge mute\">no</span>").append("</td>")
                     .append("<td>").append(s.enabled).append("</td></tr>");
         }
         return sb.append("</tbody></table>").toString();
@@ -215,7 +231,11 @@ public class ImsAdminRoutes {
     @Path("/subscribers")
     @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
     @Transactional
-    public Response createSubscriber(@FormParam("impi") String impi,
+    public Response createSubscriber(@FormParam("sipUser") String sipUser,
+                                     @FormParam("sipPassword") String sipPassword,
+                                     @FormParam("displayName") String displayName,
+                                     @FormParam("msisdn") String msisdn,
+                                     @FormParam("impi") String impi,
                                      @FormParam("impu") String impu,
                                      @FormParam("ki") String ki,
                                      @FormParam("opc") String opc,
@@ -225,21 +245,49 @@ public class ImsAdminRoutes {
                                      @HeaderParam("X-SF-Admin-Key") String key,
                                      @QueryParam("key") String keyQ) {
         requireAdmin(cookie, key, keyQ);
+        saveSipUser(sipUser, sipPassword, displayName, msisdn, impi, impu, ki, opc, amf, ifcJson);
+        return Response.seeOther(URI.create("/admin/subscribers")).build();
+    }
+
+    @POST
+    @Path("/subscribers/lab-pair")
+    @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
+    @Transactional
+    public Response createLabPair(@HeaderParam("Cookie") String cookie,
+                                  @HeaderParam("X-SF-Admin-Key") String key,
+                                  @QueryParam("key") String keyQ) {
+        requireAdmin(cookie, key, keyQ);
+        saveSipUser("alice", "alice", "User A", null, null, null, null, null, null, "{\"skip\":true}");
+        saveSipUser("bob", "bob", "User B", null, null, null, null, null, null, "{\"skip\":true}");
+        return Response.seeOther(URI.create("/admin/subscribers")).build();
+    }
+
+    private void saveSipUser(String sipUser, String sipPassword, String displayName, String msisdn,
+                             String impi, String impu, String ki, String opc, String amf, String ifcJson) {
+        String realm = roles.realm() != null ? roles.realm() : "ims.lab";
+        String user = sipUser != null && !sipUser.isBlank()
+                ? sipUser.trim()
+                : ImsIdentityKeys.userPart(impu != null && !impu.isBlank() ? impu : impi);
+        if (user == null || user.isBlank()) {
+            throw new WebApplicationException("SIP user required", Response.Status.BAD_REQUEST);
+        }
         ImsSubscriber s = new ImsSubscriber();
-        s.impi = impi.trim();
-        s.impu = impu.trim();
+        s.impi = impi != null && !impi.isBlank() ? impi.trim() : ImsIdentityKeys.impi(user, realm);
+        s.impu = impu != null && !impu.isBlank() ? impu.trim() : ImsIdentityKeys.impu(user, realm);
+        s.displayName = displayName == null || displayName.isBlank() ? user : displayName.trim();
+        s.msisdn = msisdn == null || msisdn.isBlank() ? null : msisdn.trim();
         s.ki = ki == null || ki.isBlank() ? "00112233445566778899aabbccddeeff" : ki.trim();
         s.opc = opc == null || opc.isBlank() ? "000102030405060708090a0b0c0d0e0f" : opc.trim();
         s.amf = amf == null || amf.isBlank() ? "8000" : amf.trim();
-        s.ifcJson = ifcJson;
+        s.ifcJson = ifcJson == null || ifcJson.isBlank() ? "{\"skip\":true}" : ifcJson;
         s.enabled = true;
-        s.createdAt = Instant.now();
-        s.updatedAt = Instant.now();
-        s.persist();
-        if (sleeProfiles != null) {
-            sleeProfiles.upsertSubscriber(s);
+        if (sipPassword != null && !sipPassword.isBlank()) {
+            s.fsA1Hash = SipDigestHasher.a1Hash(user, realm, sipPassword);
         }
-        return Response.seeOther(URI.create("/admin/subscribers")).build();
+        ImsSubscriber saved = hss.upsert(s);
+        if (sleeProfiles != null) {
+            sleeProfiles.upsertSubscriber(saved);
+        }
     }
 
     @GET

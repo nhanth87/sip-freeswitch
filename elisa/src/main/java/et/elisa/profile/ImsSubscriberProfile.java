@@ -36,6 +36,15 @@ public final class ImsSubscriberProfile extends ProfileAbstractCmp {
         ProfileAccessorInvoker.setValue(this, findSetter("impu", String.class), impu);
     }
 
+    /** Sofia / xml_curl user id (MSISDN or IMPU user-part). Indexed for 10k lookups. */
+    public String getDirectoryUserId() {
+        return (String) ProfileAccessorInvoker.getValue(this, findGetter("directoryUserId"));
+    }
+
+    public void setDirectoryUserId(String directoryUserId) {
+        ProfileAccessorInvoker.setValue(this, findSetter("directoryUserId", String.class), directoryUserId);
+    }
+
     public String getTenantId() {
         return (String) ProfileAccessorInvoker.getValue(this, findGetter("tenantId"));
     }

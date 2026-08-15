@@ -44,7 +44,8 @@ class PcscfProxySbbTest {
         sbb.onInvite(new SipInviteEvent("c2", "sip:a@ims.lab", "sip:b@ims.lab", "sip:a@1",
                 List.of(), List.of(), List.of(), "v=0", "application/sdp", Map.of()));
         SendInvite inv = ra.ofType(SendInvite.class).getFirst();
-        assertTrue(inv.toUri().contains("icscf"));
+        assertEquals("sip:b@ims.lab", inv.toUri());
+        assertTrue(inv.nextHopUri().contains("icscf"));
         assertEquals("sip:a@ims.lab", inv.extensionHeaders().get("P-Asserted-Identity").getFirst());
         assertTrue(inv.extensionHeaders().get("Route").getFirst().contains("icscf"));
         assertTrue(inv.extensionHeaders().get("P-Charging-Vector").getFirst().contains("icid-value="));

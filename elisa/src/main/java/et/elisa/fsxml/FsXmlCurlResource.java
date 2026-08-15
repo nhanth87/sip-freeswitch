@@ -1,15 +1,25 @@
 package et.elisa.fsxml;
 
-import et.elisa.persist.ImsSubscriber;
+import et.elisa.ims.hss.HssLiteService;
 import et.elisa.persist.SfDialplanRule;
 import et.elisa.persist.SfExtension;
+import et.elisa.profile.ElisaProfileService;
+import et.elisa.profile.ImsSubscriberProfile;
+import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import java.util.List;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 /** FreeSWITCH mod_xml_curl — IMS-first directory (P1), extension fallback. */
 @Path("/fs/xml")
 public class FsXmlCurlResource {
+
+    @Inject HssLiteService hss;
+    @Inject ElisaProfileService sleeProfiles;
+
+    @ConfigProperty(name = "sf.ims.realm", defaultValue = "ims.lab")
+    String realm;
 
     @POST
     @Consumes({MediaType.APPLICATION_XML, MediaType.TEXT_XML, MediaType.APPLICATION_FORM_URLENCODED,
@@ -27,29 +37,29 @@ public class FsXmlCurlResource {
         };
     }
 
-    private static String directoryXml(String user) {
+    private String directoryXml(String user) {
+        if (user == null || user.isBlank()) {
+            // 10k/server: never dump the directory. FS xml_curl per REGISTER/INVITE sends user=.
+            return notFound("directory");
+        }
+        String key = user.trim();
         StringBuilder users = new StringBuilder();
-        List<ImsSubscriber> profiles = ImsSubscriber.listAll();
-        for (ImsSubscriber s : profiles) {
-            if (!s.enabled) {
-                continue;
-            }
-            String uid = s.directoryUserId();
-            if (user != null && !user.isBlank() && !user.equals(uid) && !user.equals(s.msisdn)) {
-                continue;
-            }
-            users.append(userXml(uid, s.fsA1Hash, uid));
+        if (sleeProfiles != null) {
+            sleeProfiles.getSubscriber(key)
+                    .or(() -> sleeProfiles.findByDirectoryUserId(key))
+                    .ifPresent(p -> appendProfileUser(users, p));
+        }
+        if (users.isEmpty() && hss != null) {
+            hss.resolveIdentity(key).ifPresent(s -> {
+                if (s.enabled) {
+                    String uid = s.directoryUserId();
+                    users.append(userXml(uid, s.fsA1Hash, uid));
+                }
+            });
         }
         if (users.isEmpty()) {
-            // Legacy fallback when no IMS profiles
-            List<SfExtension> all = SfExtension.listAll();
-            for (SfExtension e : all) {
-                if (!e.enabled) {
-                    continue;
-                }
-                if (user != null && !user.isBlank() && !user.equals(e.extension)) {
-                    continue;
-                }
+            SfExtension e = SfExtension.find("extension", key).firstResult();
+            if (e != null && e.enabled) {
                 users.append(userXml(e.extension, e.passwordHash, e.extension));
             }
         }
@@ -60,10 +70,24 @@ public class FsXmlCurlResource {
                 <?xml version="1.0" encoding="UTF-8"?>
                 <document type="freeswitch/xml">
                   <section name="directory">
-                    <domain name="freeswitch.lab">%s</domain>
+                    <domain name="%s">%s</domain>
                   </section>
                 </document>
-                """.formatted(users);
+                """.formatted(esc(realm == null || realm.isBlank() ? "ims.lab" : realm), users);
+    }
+
+    private static void appendProfileUser(StringBuilder users, ImsSubscriberProfile p) {
+        if (p == null || "false".equalsIgnoreCase(p.getEnabled())) {
+            return;
+        }
+        String uid = p.getDirectoryUserId();
+        if (uid == null || uid.isBlank()) {
+            uid = p.getMsisdn();
+        }
+        if (uid == null || uid.isBlank()) {
+            return;
+        }
+        users.append(userXml(uid, p.getFsA1Hash(), uid));
     }
 
     private static String userXml(String id, String secretOrHash, String fallbackSecret) {
@@ -82,17 +106,19 @@ public class FsXmlCurlResource {
     private static String dialplanXml() {
         List<SfDialplanRule> rules = SfDialplanRule.listAll();
         if (rules.isEmpty()) {
-            // Lab MRF: ISC AS sip:1000@freeswitch answers so INVITE can confirm.
+            // Lab MRF: ISC AS sip:1000@freeswitch answers and plays tone so RTP
+            // actually traverses FreeSWITCH (park keeps the channel but sends no audio).
             return """
                     <?xml version="1.0" encoding="UTF-8"?>
                     <document type="freeswitch/xml">
                       <section name="dialplan">
                         <context name="public">
                           <extension name="elisa-mrf-1000">
-                            <condition field="destination_number" expression="^(1000|alice)$">
+                            <condition field="destination_number" expression="^1000$">
+                              <action application="set" data="absolute_codec_string=OPUS,G722,PCMA,PCMU"/>
                               <action application="set" data="bypass_media=false"/>
                               <action application="answer"/>
-                              <action application="park"/>
+                              <action application="playback" data="tone_stream://%(1000,0,350,440);loops=-1"/>
                             </condition>
                           </extension>
                         </context>
@@ -108,6 +134,7 @@ public class FsXmlCurlResource {
             exts.append("<extension name=\"").append(esc(r.name)).append("\">")
                     .append("<condition field=\"destination_number\" expression=\"")
                     .append(esc(r.destination)).append("\">")
+                    .append("<action application=\"set\" data=\"absolute_codec_string=OPUS,G722,PCMA,PCMU\"/>")
                     .append("<action application=\"set\" data=\"bypass_media=false\"/>")
                     .append("<action application=\"export\" data=\"nolocal:bypass_media=false\"/>")
                     .append("<action application=\"set\" data=\"elisa_rtp_redirect=true\"/>")

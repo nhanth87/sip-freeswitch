@@ -42,9 +42,10 @@ S-CSCF SBBs ──► ra-freeswitch ──ESL :8021──► FreeSWITCH
 
 | RA | Name (inject) | Plane | Spec |
 |----|---------------|-------|------|
-| **`ra-sip-servlet`** | `sip-servlet-ra` | SIP Gm/Mw/ISC | Vendor RA; never break SIP transaction SM |
-| **`ra-diameter`** | `diameter-ra` | Diameter Cx | micro-jainslee vendor RA |
-| **`ra-freeswitch`** | `freeswitch-ra` | FreeSWITCH ESL control | Internal RA — JAINSLEE 3-port |
+| **`ra-sip-servlet`** | `sip-servlet-ra` | SIP Gm/Mw/ISC | Vendor RA; never break SIP transaction SM. **Elisa only — not epc-host.** |
+| **`ra-diameter`** | `diameter-ra` | Diameter Cx **and** S6a/Gx/Gy | Vendor RA; `isPeerReady()` = CER/CEA. No second Diameter stack. |
+| **`ra-freeswitch`** | `freeswitch-ra` | FreeSWITCH ESL control | Vendor RA — JAINSLEE 3-port |
+| **`gtpv2c-ra` / `pfcp-ra`** | vendor `ra-gtpv2c` / `ra-pfcp` | GTPv2-C / PFCP | EPC CP only; GTP-U stays non-JVM |
 
 ### `ra-freeswitch` — mandatory shape (do not invent outside this)
 
@@ -53,7 +54,7 @@ S-CSCF SBBs ──► ra-freeswitch ──ESL :8021──► FreeSWITCH
 - **Inbound events:** e.g. `FsChannelEvent`, `FsHeartbeatEvent`, `FsApiResponseEvent` — RA → SLEE via `RaBootstrapPort.fireEvent`.
 - **Transport:** ESL (Event Socket) to FreeSWITCH `:8021`. Soft-fail when FS down (`eslLive=false`); never fake REGED. **FS itself remains mandatory in compose** — soft-fail ≠ optional component.
 - **Not in this RA:** SIP INVITE/BYE (stays `ra-sip-servlet`); RTP; xml_curl HTTP (stays Quarkus REST unless grill moves it).
-- **Home (grill A=1):** implement under sip-freeswitch as **internal module** [`ra-freeswitch/`](ra-freeswitch/); promote to `jain-slee/vendor-ras/ra-freeswitch` when stable.
+- **Home:** `jain-slee/vendor-ras/ra-freeswitch` (`com.microjainslee:ra-freeswitch`). Elisa depends on the vendor artifact.
 - **Phase 1 surface (grill B=1+2):**
   1. ESL sync — `FsApi` / `FsBgapi` + `FsApiResponseEvent` (replace ad-hoc `EslClient`)
   2. ESL inbound events — subscribe `HEARTBEAT` + `CHANNEL_*` → `FsHeartbeatEvent` / `FsChannelEvent`
@@ -63,30 +64,27 @@ S-CSCF SBBs ──► ra-freeswitch ──ESL :8021──► FreeSWITCH
 - **Not in Phase 1:** `FsOriginate` / hangup helpers (grill later); xml_curl stays Quarkus HTTP.
 - **JDK 25 only.** Hot-path: no INFO dumps of full ESL bodies.
 
-### Migration
+### Home
 
-1. Scaffold `ra-freeswitch` (endpoint + config + ESL transport + sealed command/event).
-2. Wire in `ElisaBootstrap` next to SIP RA; `@InjectRa(name = "freeswitch-ra")` in status/admin SBBs or services adapted to SBB/command style.
-3. Delete / thin `et.elisa.esl.EslClient` once admin/ESL tabs use the RA.
-4. Document in `docs/agents/ra-freeswitch.md` + sequence diagrams for command/event flows.
+Shipped as vendor `jain-slee/vendor-ras/ra-freeswitch`. Elisa wires it in `ElisaBootstrap` next to SIP RA (`@InjectRa(name = "freeswitch-ra")`). Thin `et.elisa.esl.EslClient` as admin/ESL tabs use the RA.
 
 ## Capacity target
 
-**10 000 INVITE/s (CPS)** on the **Elisa** SIP edge (`ra-sip-servlet`). FreeSWITCH = dialplan/media (not CPS plane).
-`ra-freeswitch` is **control plane** — not counted in CPS.
-Do not claim 10k until SIPp green — [`docs/agents/capacity-acceptance.md`](docs/agents/capacity-acceptance.md).
+**10 000 INVITE/s (CPS)** on the **Elisa** SIP edge (`ra-sip-servlet`) is the **per-node claim gate** — do not claim 10k until SIPp green ([`docs/agents/capacity-acceptance.md`](docs/agents/capacity-acceptance.md)).
+**1 000 000 SIP TPS** is a **cluster horizon** (many P-CSCF + sharded S-CSCF), not one JVM and not RTP — [`docs/agents/capacity-1m.md`](docs/agents/capacity-1m.md). Do not claim 1M.
+FreeSWITCH = dialplan/media (not CPS plane). `ra-freeswitch` is **control plane** — not counted in CPS.
 
 ## Layout
 
 | # | Dir | Role |
 |---|-----|------|
-| **1** | [`elisa/`](elisa/) | Quarkus + micro-jainslee + `ra-sip-servlet` — SIP edge + HTMX admin |
-| **1b** | [`ra-freeswitch/`](ra-freeswitch/) | Internal JAINSLEE RA — ESL control (`freeswitch-ra`) |
+| **1** | [`elisa/`](elisa/) | Quarkus + micro-jainslee + vendor RAs (`ra-sip-servlet`, `ra-freeswitch`, `ra-diameter`) |
+| **1c** | [`epc/`](epc/) | 4G Full MVNO EPC (HSS/SGW-C/PGW-C) — **separate process**, same git repo. GTP/PFCP RAs are vendor `ra-gtpv2c` / `ra-pfcp`. |
 | **2** | [`freeswitch/`](freeswitch/) | FreeSWITCH conf overlays + lab |
 | **3** | [`app/html/`](app/html/) | Disk admin UI ({{TOKEN}}, HTMX) |
 | **4** | [`loadtest/`](loadtest/) | SIPp CPS harness |
 | **5** | [`docs/agents/`](docs/agents/) | architecture, multi-service-deploy (1 code → P/I/S/HSS + N–N), ra-freeswitch, … |
-| **6** | [`tools/`](tools/) | build-all, smoke, bench-cps, package-dist |
+| **6** | [`tools/`](tools/) | build-all, smoke, bench-cps, package-dist, package-dist-epc |
 
 ```bash
 docker compose up -d --build   # postgres + freeswitch + elisa
@@ -130,3 +128,4 @@ Do not merge. Do not wire ChipChipVoice TTS → FreeSWITCH playback.
 - **FreeSWITCH essential** — always in compose (`depends_on` for `elisa` / `scscf`); N–N = 1:1 S↔FS. Soft-fail ESL OK; omitting FS is **not** a supported production/lab path. → [`docker-lab.md`](docs/agents/docker-lab.md) · [`ra-freeswitch.md`](docs/agents/ra-freeswitch.md)
 - **Not an SBC**; SIP only; nginx edge VIP — [`docs/agents/nginx-ingress.md`](docs/agents/nginx-ingress.md) · [`docs/agents/architecture.md`](docs/agents/architecture.md).
 - **RA split:** `ra-sip-servlet` = SIP; **`ra-freeswitch`** = ESL/control (JAINSLEE 3-port) — **do not drop**. See Planned RA split above + [`docs/agents/ra-freeswitch.md`](docs/agents/ra-freeswitch.md).
+- **EPC is a sibling process, not Elisa.** [`epc/`](epc/) owns HSS/AuC (S6a + production Cx), SGW-C/PGW-C (GTPv2-C + PFCP), Linux GTP UP. Never put GTP-U / S11 / S6a / PFCP / PCEF inside the Elisa JVM. Cluster name `epc-cluster` must not join `elisa-cluster`. Dist: `./tools/package-dist-epc.sh` → `dist/epc/`. Compose profile `epc`. Detail: [`epc/AGENTS.md`](epc/AGENTS.md) · [`docs/agents/epc.md`](docs/agents/epc.md).

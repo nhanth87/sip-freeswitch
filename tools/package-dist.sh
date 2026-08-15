@@ -159,8 +159,7 @@ PY
 }
 
 echo "Packaging Elisa Quarkus fast-jar (non-uber) -> ${DIST_ROOT}"
-# ra-freeswitch must be installed first (elisa depends on it).
-( cd "${ROOT}/ra-freeswitch" && mvn -B -ntp -Dmaven.test.skip=true install )
+# ra-freeswitch lives in micro-jainslee vendor-ras (com.microjainslee:ra-freeswitch).
 ( cd "${APP_DIR}" && mvn -B -ntp package -Dquarkus.build.skip=false -Dmaven.test.skip=true \
     -Dquarkus.package.jar.type=fast-jar )
 

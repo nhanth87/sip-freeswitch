@@ -9,7 +9,7 @@ import et.elisa.cluster.CallSession;
 import et.elisa.cluster.DialogCheckpoint;
 import et.elisa.ims.scscf.ScscfInviteSbb;
 import et.elisa.ims.support.ImsTestSupport;
-import et.elisa.ra.freeswitch.events.FsChannelEvent;
+import com.microjainslee.ra.freeswitch.events.FsChannelEvent;
 import et.elisa.session.CallSessionSbb;
 import et.elisa.session.CallSessionService;
 import java.time.Instant;
@@ -36,6 +36,18 @@ class InviteCmpRoundTripTest {
         assertEquals("251911", loaded.get().msisdn());
         assertEquals(DialogCheckpoint.STATE_INVITE, loaded.get().dialogState());
         assertEquals("sip:as@fs", loaded.get().trunkUri());
+    }
+
+    @Test
+    void encodedSofiaCallIdLoadsCanonicalCmp() {
+        DialogCmpPersistence store = new DialogCmpPersistence().withoutPg();
+        long now = Instant.now().toEpochMilli();
+        store.save(new InviteCmpSnapshot(
+                "1-9@127.0.0.1", "fs-u", "alice", "sip:alice@ims.lab", "sip:alice@ims.lab",
+                "sip:1000@freeswitch:5060", null, "fs-1", "elisa-1",
+                DialogCheckpoint.STATE_CONFIRMED, now, now));
+        assertTrue(store.load("1-9%40127.0.0.1").isPresent());
+        assertEquals("fs-u", store.load("1-9%40127.0.0.1").orElseThrow().fsUuid());
     }
 
     @Test

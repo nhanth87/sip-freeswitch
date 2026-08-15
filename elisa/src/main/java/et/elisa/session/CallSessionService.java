@@ -5,6 +5,7 @@ import et.elisa.cluster.CallSessionStore;
 import et.elisa.cluster.DialogCheckpoint;
 import et.elisa.cmp.DialogCmpPersistence;
 import et.elisa.cmp.InviteCmpSnapshot;
+import et.elisa.cmp.SipCallIds;
 import et.elisa.ims.hss.HssLiteService;
 import et.elisa.persist.ImsSubscriber;
 import et.elisa.persist.SfCallSession;
@@ -48,7 +49,7 @@ public class CallSessionService {
         CallSession existing = hot != null ? hot.byFsUuid(fsUuid).orElse(null) : null;
         Instant started = existing != null ? existing.startedAt() : now;
         String sip = sipCallId != null && !sipCallId.isBlank()
-                ? sipCallId
+                ? SipCallIds.canonical(sipCallId)
                 : (existing != null ? existing.sipCallId() : null);
         CallSession session = new CallSession(
                 fsUuid, sip, profileId, msisdn, tenantId,
@@ -132,14 +133,18 @@ public class CallSessionService {
         if (sipCallId == null) {
             return Optional.empty();
         }
+        String canon = SipCallIds.canonical(sipCallId);
         if (hot != null) {
-            Optional<CallSession> hit = hot.bySipCallId(sipCallId);
+            Optional<CallSession> hit = hot.bySipCallId(canon);
             if (hit.isPresent()) {
                 return hit;
             }
         }
         try {
-            SfCallSession row = SfCallSession.find("sipCallId", sipCallId).firstResult();
+            SfCallSession row = SfCallSession.find("sipCallId", canon).firstResult();
+            if (row == null && !canon.equals(sipCallId)) {
+                row = SfCallSession.find("sipCallId", sipCallId).firstResult();
+            }
             return row == null ? Optional.empty() : Optional.of(toHot(row));
         } catch (RuntimeException ex) {
             return Optional.empty();

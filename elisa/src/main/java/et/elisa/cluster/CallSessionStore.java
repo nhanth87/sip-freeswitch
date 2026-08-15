@@ -1,11 +1,11 @@
 package et.elisa.cluster;
 
+import et.elisa.cmp.SipCallIds;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.infinispan.Cache;
@@ -56,7 +56,15 @@ public class CallSessionStore {
         if (cache == null || sipCallId == null) {
             return Optional.empty();
         }
-        return Optional.ofNullable(cache.get("sip:" + sipCallId));
+        String canon = SipCallIds.canonical(sipCallId);
+        CallSession hit = cache.get("sip:" + canon);
+        if (hit != null) {
+            return Optional.of(hit);
+        }
+        if (!canon.equals(sipCallId)) {
+            return Optional.ofNullable(cache.get("sip:" + sipCallId));
+        }
+        return Optional.empty();
     }
 
     public void remove(CallSession session) {
@@ -75,21 +83,13 @@ public class CallSessionStore {
         if (cache == null) {
             return List.of();
         }
-        Collection<CallSession> values = cache.values();
+        java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<>();
         List<CallSession> out = new ArrayList<>();
-        for (CallSession s : values) {
-            if (s != null && s.fsUuid() != null) {
-                boolean seen = false;
-                for (CallSession e : out) {
-                    if (s.fsUuid().equals(e.fsUuid())) {
-                        seen = true;
-                        break;
-                    }
-                }
-                if (!seen) {
-                    out.add(s);
-                }
+        for (CallSession s : cache.values()) {
+            if (s == null || s.fsUuid() == null || !seen.add(s.fsUuid())) {
+                continue;
             }
+            out.add(s);
         }
         return out;
     }

@@ -11,6 +11,7 @@ import com.microjainslee.ra.sipservlet.command.SendBye;
 import com.microjainslee.ra.sipservlet.command.SendInvite;
 import com.microjainslee.ra.sipservlet.command.SendRegister;
 import com.microjainslee.ra.sipservlet.command.SendResponse;
+import com.microjainslee.ra.sipservlet.command.SendSdpUpdate;
 import com.microjainslee.ra.sipservlet.command.SipOutboundCommand;
 import com.microjainslee.ra.sipservlet.events.SipAckEvent;
 import com.microjainslee.ra.sipservlet.events.SipByeEvent;
@@ -19,6 +20,8 @@ import com.microjainslee.ra.sipservlet.events.SipRegisterEvent;
 import com.microjainslee.ra.sipservlet.events.SipResponseEvent;
 import et.elisa.ims.charging.PChargingVectors;
 import et.elisa.ims.config.ImsRoleFlags;
+import et.elisa.logging.SleeEventTrace;
+import et.elisa.metrics.SipCpsMetrics;
 import java.util.List;
 import java.util.Map;
 import org.apache.logging.log4j.LogManager;
@@ -33,16 +36,22 @@ public final class PcscfProxySbb implements Sbb, SleeEventHandler {
     private static final Logger LOG = LogManager.getLogger(PcscfProxySbb.class);
 
     private final ImsRoleFlags roles;
+    private final SipCpsMetrics metrics;
 
     @InjectRa(name = "sip-servlet-ra")
     private volatile RaCommandPort sipRa;
 
     public PcscfProxySbb() {
-        this(null);
+        this(null, null);
     }
 
     public PcscfProxySbb(ImsRoleFlags roles) {
+        this(roles, null);
+    }
+
+    public PcscfProxySbb(ImsRoleFlags roles, SipCpsMetrics metrics) {
         this.roles = roles;
+        this.metrics = metrics;
     }
 
     @Override public void sbbCreate() {}
@@ -52,13 +61,20 @@ public final class PcscfProxySbb implements Sbb, SleeEventHandler {
 
     @Override
     public void onEvent(SleeEvent event, ActivityContextInterface aci) {
-        switch (event) {
-            case SipRegisterEvent e -> onRegister(e);
-            case SipInviteEvent e -> onInvite(e);
-            case SipAckEvent e -> onAck(e);
-            case SipByeEvent e -> onBye(e);
-            case SipResponseEvent e -> onResponse(e);
-            default -> {}
+        try {
+            SleeEventTrace.inSbb("PcscfProxySbb", event);
+            switch (event) {
+                case SipRegisterEvent e -> onRegister(e);
+                case SipInviteEvent e -> onInvite(e);
+                case SipAckEvent e -> onAck(e);
+                case SipByeEvent e -> onBye(e);
+                case SipResponseEvent e -> onResponse(e);
+                default -> {}
+            }
+            SleeEventTrace.outSbb("PcscfProxySbb", event, null);
+        } catch (Throwable t) {
+            LOG.error("[P-CSCF] onEvent failed: {}", t.toString(), t);
+            SleeEventTrace.outSbb("PcscfProxySbb", event, "error=" + t.getClass().getSimpleName());
         }
     }
 
@@ -73,6 +89,7 @@ public final class PcscfProxySbb implements Sbb, SleeEventHandler {
             return;
         }
         // P-only service deploy: Mw REGISTER → I-CSCF (same Call-ID; relay responses).
+        countSip();
         String next = roles.icscfUri();
         Map<String, List<String>> ext = new java.util.LinkedHashMap<>();
         ext.put("Path", List.of(path));
@@ -96,12 +113,16 @@ public final class PcscfProxySbb implements Sbb, SleeEventHandler {
             LOG.debug("[P-CSCF] INVITE observed (co-located) callId={}", e.callId());
             return;
         }
+        if (metrics != null) {
+            metrics.onInvite();
+        }
         Map<String, List<String>> ims = PChargingVectors.copyIms(e.imsHeaders());
         ims.put("P-Asserted-Identity", List.of(e.fromUri()));
         ims.put("Route", List.of("<" + roles.icscfUri() + ";lr>"));
         PChargingVectors.ensureInvite(ims, e.callId(), roles.realm());
         String next = roles.icscfUri();
-        LOG.debug("[P-CSCF] INVITE -> {} callId={}", next, e.callId());
+        LOG.debug("[P-CSCF] INVITE callId={} to={} next={}", e.callId(), e.toUri(), next);
+        send(SendResponse.of(e.callId(), 100, "Trying"));
         send(new SendInvite(e.callId(), e.toUri(), e.fromUri(), e.sdpBody(), ims, next));
     }
 
@@ -109,6 +130,7 @@ public final class PcscfProxySbb implements Sbb, SleeEventHandler {
         if (roles == null || !roles.pcscf() || roles.scscf() || roles.icscf()) {
             return;
         }
+        countSip();
         send(new SendAck(e.callId()));
     }
 
@@ -116,6 +138,7 @@ public final class PcscfProxySbb implements Sbb, SleeEventHandler {
         if (roles == null || !roles.pcscf() || roles.scscf() || roles.icscf()) {
             return;
         }
+        countSip();
         send(new SendBye(e.callId()));
         send(new SendResponse(e.callId(), 200, "OK"));
     }
@@ -127,7 +150,18 @@ public final class PcscfProxySbb implements Sbb, SleeEventHandler {
         if (roles.scscf() || roles.icscf()) {
             return;
         }
-        send(SendResponse.of(e.callId(), e.statusCode(), e.reasonPhrase()));
+        countSip();
+        if (e.isSuccess() && e.sdpBody() != null && !e.sdpBody().isBlank()) {
+            send(new SendSdpUpdate(e.callId(), e.sdpBody()));
+            return;
+        }
+        send(SendResponse.withHeaders(e.callId(), e.statusCode(), e.reasonPhrase(), e.extraHeaders()));
+    }
+
+    private void countSip() {
+        if (metrics != null) {
+            metrics.onSipMessage();
+        }
     }
 
     private void send(SipOutboundCommand cmd) {

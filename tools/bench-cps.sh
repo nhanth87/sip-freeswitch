@@ -36,3 +36,4 @@ for rate in 100 500 1000 2500 5000 7500 10000; do
 done
 
 echo "Record max green CPS from SIPp stats; claim 10k only per capacity-acceptance.md"
+echo "1M SIP TPS is cluster-scale (many generators + many P-CSCF) — docs/agents/capacity-1m.md"

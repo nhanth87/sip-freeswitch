@@ -1,6 +1,6 @@
 package et.elisa.esl;
 
-import et.elisa.ra.freeswitch.FreeSwitchResourceAdaptor;
+import com.microjainslee.ra.freeswitch.FreeSwitchResourceAdaptor;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 

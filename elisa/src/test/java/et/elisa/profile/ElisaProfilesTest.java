@@ -72,6 +72,8 @@ class ElisaProfilesTest {
         ImsSubscriberProfile sub = ElisaProfiles.upsertSubscriber(pf, row).orElseThrow();
         assertEquals("user@ims.lab", ElisaProfiles.subscriberKey(row));
         assertEquals("false", sub.getEnabled());
+        assertEquals("user", sub.getDirectoryUserId());
+        assertEquals(1, ElisaProfiles.findByDirectoryUserId(pf, "user").size());
         assertNotNull(pf.getProfile(new ProfileID(ImsSubscriberProfile.TABLE, "user@ims.lab")));
     }
 
@@ -87,6 +89,10 @@ class ElisaProfilesTest {
         Collection<ProfileLocalObject> bySip =
                 ElisaProfiles.findBySipCallId(pf, "sip-call-abc");
         assertEquals(1, bySip.size());
+        ElisaProfiles.upsertCallSession(
+                pf, "fs-uuid-enc", "ab10%40127.0.0.1", "alice", null,
+                "elisa-1", "fs-a", "inbound", "ANSWERED", now, now);
+        assertEquals(1, ElisaProfiles.findBySipCallId(pf, "ab10@127.0.0.1").size());
 
         ElisaProfiles.endCallSession(pf, "fs-uuid-1", "HANGUP");
         assertFalse(pf.profileExists(new ProfileID(CallSessionProfile.TABLE, "fs-uuid-1")));

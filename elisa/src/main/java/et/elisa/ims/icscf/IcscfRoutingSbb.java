@@ -11,6 +11,7 @@ import com.microjainslee.ra.sipservlet.command.SendBye;
 import com.microjainslee.ra.sipservlet.command.SendInvite;
 import com.microjainslee.ra.sipservlet.command.SendRegister;
 import com.microjainslee.ra.sipservlet.command.SendResponse;
+import com.microjainslee.ra.sipservlet.command.SendSdpUpdate;
 import com.microjainslee.ra.sipservlet.command.SipOutboundCommand;
 import com.microjainslee.ra.sipservlet.events.SipAckEvent;
 import com.microjainslee.ra.sipservlet.events.SipByeEvent;
@@ -54,13 +55,17 @@ public final class IcscfRoutingSbb implements Sbb, SleeEventHandler {
 
     @Override
     public void onEvent(SleeEvent event, ActivityContextInterface aci) {
-        switch (event) {
-            case SipRegisterEvent e -> onRegister(e);
-            case SipInviteEvent e -> onInvite(e);
-            case SipAckEvent e -> onAck(e);
-            case SipByeEvent e -> onBye(e);
-            case SipResponseEvent e -> onResponse(e);
-            default -> {}
+        try {
+            switch (event) {
+                case SipRegisterEvent e -> onRegister(e);
+                case SipInviteEvent e -> onInvite(e);
+                case SipAckEvent e -> onAck(e);
+                case SipByeEvent e -> onBye(e);
+                case SipResponseEvent e -> onResponse(e);
+                default -> {}
+            }
+        } catch (Throwable t) {
+            LOG.error("[I-CSCF] onEvent failed: {}", t.toString(), t);
         }
     }
 
@@ -72,6 +77,7 @@ public final class IcscfRoutingSbb implements Sbb, SleeEventHandler {
         String impi = e.fromUri() == null ? impu : e.fromUri().replaceFirst("(?i)^sip:", "");
         Map<Integer, String> uaa = cx.uar(impi, impu);
         if (!"2001".equals(uaa.get(CxCodec.RESULT_CODE))) {
+            LOG.warn("[I-CSCF] UAR rejected impi={} impu={} result={}", impi, impu, uaa.get(CxCodec.RESULT_CODE));
             send(new SendResponse(e.callId(), 403, "Forbidden"));
             return;
         }
@@ -99,6 +105,8 @@ public final class IcscfRoutingSbb implements Sbb, SleeEventHandler {
             return;
         }
         Map<Integer, String> lia = cx.lir(e.toUri());
+        LOG.debug("[I-CSCF] INVITE LIR impu={} result={} callId={}", e.toUri(),
+                lia.get(CxCodec.RESULT_CODE), e.callId());
         if (!"2001".equals(lia.get(CxCodec.RESULT_CODE))) {
             send(new SendResponse(e.callId(), 404, "Not Found"));
             return;
@@ -157,8 +165,12 @@ public final class IcscfRoutingSbb implements Sbb, SleeEventHandler {
         if (roles == null || !roles.icscf() || roles.scscf()) {
             return;
         }
-        // Relay Mw responses (401/200 REGISTER, INVITE forwards) toward P / previous hop.
-        send(SendResponse.of(e.callId(), e.statusCode(), e.reasonPhrase()));
+        // Relay Mw responses (401/200 REGISTER, INVITE 200+SDP) toward P / previous hop.
+        if (e.isSuccess() && e.sdpBody() != null && !e.sdpBody().isBlank()) {
+            send(new SendSdpUpdate(e.callId(), e.sdpBody()));
+            return;
+        }
+        send(SendResponse.withHeaders(e.callId(), e.statusCode(), e.reasonPhrase(), e.extraHeaders()));
     }
 
     private void send(SipOutboundCommand cmd) {

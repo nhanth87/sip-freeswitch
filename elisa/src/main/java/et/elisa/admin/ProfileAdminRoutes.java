@@ -1,10 +1,12 @@
 package et.elisa.admin;
 
 import et.elisa.ims.hss.HssLiteService;
+import et.elisa.ims.hss.ImsIdentityKeys;
 import et.elisa.persist.ImsSubscriber;
 import et.elisa.persist.SfCallSession;
 import et.elisa.persist.SfTenant;
 import et.elisa.profile.ElisaProfileService;
+import et.elisa.security.SipDigestHasher;
 import et.elisa.session.CallSessionService;
 import et.elisa.cluster.CallSession;
 import jakarta.inject.Inject;
@@ -13,7 +15,6 @@ import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.net.URI;
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -31,6 +32,9 @@ public class ProfileAdminRoutes {
 
     @ConfigProperty(name = "sf.admin.api-key")
     String apiKey;
+
+    @ConfigProperty(name = "sf.ims.realm", defaultValue = "ims.lab")
+    String realm;
 
     @GET
     @Path("/{page: profiles|sessions}")
@@ -73,6 +77,8 @@ public class ProfileAdminRoutes {
     @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
     @Transactional
     public Response createProfile(@FormParam("tenantId") String tenantId,
+                                  @FormParam("sipUser") String sipUser,
+                                  @FormParam("sipPassword") String sipPassword,
                                   @FormParam("msisdn") String msisdn,
                                   @FormParam("impi") String impi,
                                   @FormParam("impu") String impu,
@@ -86,7 +92,16 @@ public class ProfileAdminRoutes {
                                   @HeaderParam("X-SF-Admin-Key") String key,
                                   @QueryParam("key") String keyQ) {
         PortalAuthService.Session session = requireSession(cookie, key, keyQ);
-        if (impi == null || impi.isBlank() || impu == null || impu.isBlank()) {
+        String user = sipUser != null && !sipUser.isBlank()
+                ? sipUser.trim()
+                : ImsIdentityKeys.userPart(impu != null && !impu.isBlank() ? impu : impi);
+        String resolvedImpi = impi != null && !impi.isBlank()
+                ? impi.trim()
+                : (user == null ? null : ImsIdentityKeys.impi(user, realm));
+        String resolvedImpu = impu != null && !impu.isBlank()
+                ? impu.trim()
+                : (user == null ? null : ImsIdentityKeys.impu(user, realm));
+        if (resolvedImpi == null || resolvedImpu == null) {
             return Response.seeOther(URI.create("/admin/profiles?error=fields")).build();
         }
         String tid = resolveTenantId(session, tenantId);
@@ -94,22 +109,24 @@ public class ProfileAdminRoutes {
             return Response.seeOther(URI.create("/admin/profiles?error=tenant")).build();
         }
         ImsSubscriber s = new ImsSubscriber();
-        s.impi = impi.trim();
-        s.impu = impu.trim();
+        s.impi = resolvedImpi;
+        s.impu = resolvedImpu;
         s.msisdn = blankToNull(msisdn);
         s.tenantId = blankToNull(tid);
         s.displayName = blankToNull(displayName);
         s.ki = ki == null || ki.isBlank() ? "00112233445566778899aabbccddeeff" : ki.trim();
         s.opc = opc == null || opc.isBlank() ? "000102030405060708090a0b0c0d0e0f" : opc.trim();
         s.amf = amf == null || amf.isBlank() ? "8000" : amf.trim();
-        s.fsA1Hash = blankToNull(fsA1Hash);
-        s.ifcJson = ifcJson == null || ifcJson.isBlank() ? "{\"as\":\"mrf\"}" : ifcJson;
+        if (sipPassword != null && !sipPassword.isBlank() && user != null) {
+            s.fsA1Hash = SipDigestHasher.a1Hash(user, realm, sipPassword);
+        } else {
+            s.fsA1Hash = blankToNull(fsA1Hash);
+        }
+        s.ifcJson = ifcJson == null || ifcJson.isBlank() ? "{\"skip\":true}" : ifcJson;
         s.enabled = true;
-        s.createdAt = Instant.now();
-        s.updatedAt = Instant.now();
-        s.persist();
+        ImsSubscriber saved = hss.upsert(s);
         if (sleeProfiles != null) {
-            sleeProfiles.upsertSubscriber(s);
+            sleeProfiles.upsertSubscriber(saved);
         }
         return Response.seeOther(URI.create("/admin/profiles")).build();
     }

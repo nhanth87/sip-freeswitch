@@ -1,6 +1,7 @@
 package et.elisa.ims.reg;
 
 import et.elisa.cluster.RegistrationHomeStore;
+import et.elisa.ims.hss.ImsIdentityKeys;
 import et.elisa.persist.ImsBinding;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -21,13 +22,26 @@ public class BindingStore {
     @Transactional
     public void upsert(String impu, String contact, String path, String callId, int expiresSec) {
         Instant exp = Instant.now().plusSeconds(Math.max(0, expiresSec));
-        ImsBinding b = ImsBinding.find("impu = ?1 and contact = ?2", impu, contact).firstResult();
         if (expiresSec == 0) {
+            ImsBinding b = ImsBinding.find("impu = ?1 and contact = ?2", impu, contact).firstResult();
             if (b != null) {
                 b.delete();
             }
-            regHome.remove(impu);
+            List<ImsBinding> remain = ImsBinding.list("impu", impu);
+            if (remain.isEmpty()) {
+                regHome.remove(impu);
+            }
             return;
+        }
+        // Lab: one live Contact per IMPU (Linphone / dashboard A-B). Drop stale devices.
+        List<ImsBinding> existing = ImsBinding.list("impu", impu);
+        ImsBinding b = null;
+        for (ImsBinding row : existing) {
+            if (contact.equals(row.contact)) {
+                b = row;
+            } else {
+                row.delete();
+            }
         }
         if (b == null) {
             b = new ImsBinding();
@@ -45,9 +59,20 @@ public class BindingStore {
 
     @Transactional
     public Optional<ImsBinding> findLive(String impu) {
-        List<ImsBinding> all = ImsBinding.list("impu", impu);
+        if (impu == null || impu.isBlank()) {
+            return Optional.empty();
+        }
         Instant now = Instant.now();
-        return all.stream().filter(b -> b.expiresAt.isAfter(now)).findFirst();
+        for (String key : ImsIdentityKeys.bindingKeys(impu)) {
+            List<ImsBinding> all = ImsBinding.list("impu", key);
+            Optional<ImsBinding> hit = all.stream()
+                    .filter(b -> b.expiresAt != null && b.expiresAt.isAfter(now))
+                    .max(java.util.Comparator.comparing(b -> b.expiresAt));
+            if (hit.isPresent()) {
+                return hit;
+            }
+        }
+        return Optional.empty();
     }
 
     /** Remove expired bindings (re-REGISTER timer / Chronos-lite). */

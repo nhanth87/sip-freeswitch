@@ -254,15 +254,23 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
         if (terminating) {
             ImsBinding b = bindings.findLive(to).orElseThrow();
             target = b.contact;
+        } else if (isMrfDestination(to)) {
+            asChain = isc == null ? List.of() : isc.asChain(null);
+            target = asChain.isEmpty() && isc != null ? isc.asUri() : (asChain.isEmpty() ? to : asChain.getFirst());
         } else {
             String ifc = hss == null ? null : hss.findByImpu(e.fromUri()).map(s -> s.ifcJson).orElse(null);
+            boolean calleeKnown = hss != null && hss.resolveIdentity(to).isPresent();
+            if (calleeKnown) {
+                send(new SendResponse(e.callId(), 480, "Temporarily Unavailable"));
+                LOG.debug("[S-CSCF] INVITE callId={} callee unregistered {}", e.callId(), to);
+                return;
+            }
             if (isc != null && isc.shouldInvokeAs(ifc)) {
                 asChain = isc.asChain(ifc);
                 target = asChain.isEmpty() ? isc.asUri() : asChain.getFirst();
             } else if (isc != null && isc.hasBgcf() && looksLikeBreakout(to)) {
                 target = isc.bgcfUri();
             } else {
-                // iFC skip / no AS → route toward Request-URI (callee), not force AS
                 target = to;
             }
         }
@@ -317,6 +325,12 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
             ims.put("Route", routes);
         }
         send(new SendInvite(e.callId(), target, e.fromUri(), e.sdpBody(), ims));
+    }
+
+    /** Lab MRF: sip:1000@… still ISC to FreeSWITCH. A-B users use registered Contact. */
+    static boolean isMrfDestination(String uri) {
+        String user = et.elisa.ims.hss.ImsIdentityKeys.userPart(uri);
+        return "1000".equals(user);
     }
 
     void onAck(SipAckEvent e) {

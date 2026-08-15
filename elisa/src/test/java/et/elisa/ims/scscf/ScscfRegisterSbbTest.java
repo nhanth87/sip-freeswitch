@@ -9,10 +9,13 @@ import et.elisa.ims.aka.AkaMd5;
 import et.elisa.ims.config.ImsRoleFlags;
 import et.elisa.ims.cx.CxClient;
 import et.elisa.ims.cx.CxCodec;
+import et.elisa.ims.digest.SipDigestAuth;
 import et.elisa.ims.hss.HssLiteService;
 import et.elisa.ims.reg.BindingStore;
 import et.elisa.ims.support.ImsTestSupport;
 import et.elisa.ims.support.ImsTestSupport.CapturingRa;
+import et.elisa.persist.ImsSubscriber;
+import et.elisa.security.SipDigestHasher;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -149,6 +152,39 @@ class ScscfRegisterSbbTest {
     }
 
     @Test
+    void digestRegister_dashboardSipClient() {
+        CapturingRa ra = new CapturingRa();
+        StubCx cx = new StubCx();
+        cx.uar = CxCodec.uaaAvps("sip:scscf.ims.lab:5060");
+        DigestHss hss = new DigestHss();
+        StubBindings bindings = new StubBindings();
+        ScscfRegisterSbb sbb = new ScscfRegisterSbb(ImsTestSupport.roles(true, true, true, true),
+                cx, hss, bindings, null);
+        ImsTestSupport.injectRa(sbb, ra);
+
+        sbb.onRegister(new SipRegisterEvent("c-dig", "sip:alice@ims.lab", "sip:alice@ims.lab",
+                "sip:alice@10.0.0.8:5060", 3600, null, null));
+        SendResponse challenge = ra.ofType(SendResponse.class).getFirst();
+        assertEquals(401, challenge.statusCode());
+        assertTrue(challenge.headers().get("WWW-Authenticate").contains("algorithm=MD5"));
+        assertEquals(0, cx.marCalls.get());
+
+        String nonce = SipDigestAuth.nonceOf(challenge.headers().get("WWW-Authenticate"));
+        String ha1 = hss.sub.fsA1Hash;
+        String uri = "sip:ims.lab";
+        String ha2 = SipDigestAuth.md5Hex("REGISTER:" + uri);
+        String response = SipDigestAuth.md5Hex(ha1 + ":" + nonce + ":" + ha2);
+        String auth = "Digest username=\"alice\", realm=\"ims.lab\", nonce=\"" + nonce
+                + "\", uri=\"" + uri + "\", response=\"" + response + "\", algorithm=MD5";
+        sbb.onRegister(new SipRegisterEvent("c-dig", "sip:alice@ims.lab", "sip:alice@ims.lab",
+                "sip:alice@10.0.0.8:5060", 3600, auth, "<sip:pcscf;lr>"));
+        SendResponse ok = ra.ofType(SendResponse.class).get(1);
+        assertEquals(200, ok.statusCode());
+        assertEquals(1, bindings.upserts.get());
+        assertEquals(1, cx.sarCalls.get());
+    }
+
+    @Test
     void badRes_forbidden() {
         CapturingRa ra = new CapturingRa();
         StubHss hss = new StubHss();
@@ -212,7 +248,7 @@ class ScscfRegisterSbbTest {
         }
     }
 
-    static final class StubHss extends HssLiteService {
+    static class StubHss extends HssLiteService {
         Optional<HssLiteService.PendingAuth> pending = Optional.empty();
         final AtomicReference<Long> committedSqn = new AtomicReference<>();
 
@@ -226,6 +262,44 @@ class ScscfRegisterSbbTest {
 
         @Override public void commitSqn(String impi, long nextSqn) {
             committedSqn.set(nextSqn);
+        }
+
+        @Override public Optional<et.elisa.persist.ImsSubscriber> findByImpi(String impi) {
+            return Optional.empty();
+        }
+
+        @Override public Optional<et.elisa.persist.ImsSubscriber> findByImpu(String impu) {
+            return Optional.empty();
+        }
+
+        @Override public Optional<et.elisa.persist.ImsSubscriber> resolveIdentity(String raw) {
+            return Optional.empty();
+        }
+    }
+
+    static final class DigestHss extends StubHss {
+        final ImsSubscriber sub = new ImsSubscriber();
+
+        DigestHss() {
+            sub.impi = "alice@ims.lab";
+            sub.impu = "sip:alice@ims.lab";
+            sub.fsA1Hash = SipDigestHasher.a1Hash("alice", "ims.lab", "alice");
+            sub.enabled = true;
+        }
+
+        @Override
+        public Optional<ImsSubscriber> findByImpi(String impi) {
+            return Optional.of(sub);
+        }
+
+        @Override
+        public Optional<ImsSubscriber> findByImpu(String impu) {
+            return Optional.of(sub);
+        }
+
+        @Override
+        public Optional<ImsSubscriber> resolveIdentity(String raw) {
+            return Optional.of(sub);
         }
     }
 

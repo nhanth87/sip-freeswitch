@@ -4,22 +4,21 @@ import com.microjainslee.ra.sipservlet.collab.DialogRegistry;
 import et.elisa.cluster.DialogCheckpoint;
 import et.elisa.cluster.DialogCheckpointStore;
 import et.elisa.cluster.SipDialogHa;
-import et.elisa.persist.SfDialogCheckpoint;
 import et.elisa.recovery.DialogOwnerStore;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.transaction.Transactional;
-import java.time.Instant;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Function;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 /**
  * Dual-write CMP recovery store for invite/dialog SBB state.
- * Hot path: Infinispan {@link DialogCheckpointStore}; durable: Postgres
- * {@code sf_dialog_checkpoint}. Load order: ISPN → PG (rehydrate ISPN on miss).
+ * Hot path: Infinispan {@link DialogCheckpointStore} only (no JTA).
+ * Durable Postgres via {@link DialogCmpDurableWriter} when {@code sf.cmp.pg-sync=true}.
+ * Load order: ISPN → PG (rehydrate ISPN on miss).
  *
  * <p>Optional {@link #setSipHaEnricher} merges live {@link DialogRegistry} portable
  * meta into the checkpoint on save (same SoT plane — not a second registry).
@@ -31,33 +30,49 @@ public class DialogCmpPersistence {
 
     @Inject DialogCheckpointStore hot;
     @Inject DialogOwnerStore owners;
+    @Inject DialogCmpDurableWriter durable;
 
     /** Test / lab fallback when CDI ISPN is disabled — never used as SoT in prod. */
     private final ConcurrentMap<String, InviteCmpSnapshot> memoryFallback = new ConcurrentHashMap<>();
 
     private volatile boolean pgEnabled = true;
+    private volatile boolean pgSync = true;
     private volatile Function<String, DialogRegistry.PortableDialogMeta> sipHaEnricher;
 
     /** Unit-test ctor — no CDI. */
     public DialogCmpPersistence() {
         this.hot = null;
         this.owners = null;
+        this.durable = null;
     }
 
     public DialogCmpPersistence(DialogCheckpointStore hot) {
         this.hot = hot;
         this.owners = null;
+        this.durable = null;
     }
 
     public DialogCmpPersistence(DialogCheckpointStore hot, DialogOwnerStore owners) {
         this.hot = hot;
         this.owners = owners;
+        this.durable = null;
     }
 
     /** Disable Panache for pure unit tests. */
     public DialogCmpPersistence withoutPg() {
         this.pgEnabled = false;
         return this;
+    }
+
+    /** ISPN-only INVITE path (cluster-1m). Load/save skip Postgres. */
+    public DialogCmpPersistence withoutPgSync() {
+        this.pgSync = false;
+        return this;
+    }
+
+    @Inject
+    void applyPgSync(@ConfigProperty(name = "sf.cmp.pg-sync", defaultValue = "true") boolean pgSync) {
+        this.pgSync = pgSync;
     }
 
     /**
@@ -68,15 +83,21 @@ public class DialogCmpPersistence {
         this.sipHaEnricher = enricher;
     }
 
-    @Transactional
     public void save(InviteCmpSnapshot snap) {
         if (snap == null || snap.sipCallId() == null || snap.sipCallId().isBlank()) {
             return;
         }
         InviteCmpSnapshot enriched = enrichFromRa(snap);
         DialogCheckpoint cp = enriched.toCheckpoint();
+        boolean ended = DialogCheckpoint.STATE_TERMINATED.equals(enriched.dialogState());
         if (hot != null && hot.enabled()) {
-            hot.put(cp);
+            if (ended) {
+                hot.remove(enriched.sipCallId());
+            } else {
+                hot.put(cp);
+            }
+        } else if (ended) {
+            memoryFallback.remove(enriched.sipCallId());
         } else {
             memoryFallback.put(enriched.sipCallId(), enriched);
         }
@@ -86,8 +107,8 @@ public class DialogCmpPersistence {
                 && !DialogCheckpoint.STATE_TERMINATED.equals(enriched.dialogState())) {
             owners.putIfAbsent(enriched.sipCallId(), enriched.elisaNodeId());
         }
-        if (pgEnabled) {
-            persistPg(cp);
+        if (usePg()) {
+            durable.persist(cp);
         }
         LOG.debugf("cmp save callId=%s state=%s fs=%s haEmpty=%s",
                 enriched.sipCallId(), enriched.dialogState(), enriched.fsUuid(),
@@ -118,11 +139,22 @@ public class DialogCmpPersistence {
         }
     }
 
-    @Transactional
     public Optional<InviteCmpSnapshot> load(String sipCallId) {
         if (sipCallId == null || sipCallId.isBlank()) {
             return Optional.empty();
         }
+        String canon = SipCallIds.canonical(sipCallId);
+        Optional<InviteCmpSnapshot> hit = loadExact(canon);
+        if (hit.isPresent()) {
+            return hit;
+        }
+        if (!canon.equals(sipCallId)) {
+            return loadExact(sipCallId);
+        }
+        return Optional.empty();
+    }
+
+    private Optional<InviteCmpSnapshot> loadExact(String sipCallId) {
         if (hot != null && hot.enabled()) {
             Optional<DialogCheckpoint> hotHit = hot.get(sipCallId);
             if (hotHit.isPresent()) {
@@ -134,25 +166,35 @@ public class DialogCmpPersistence {
                 return Optional.of(mem);
             }
         }
-        if (!pgEnabled) {
+        if (!usePg()) {
             return Optional.empty();
         }
-        Optional<InviteCmpSnapshot> durable = loadPg(sipCallId);
-        durable.ifPresent(snap -> {
+        Optional<InviteCmpSnapshot> found = durable.load(sipCallId);
+        found.ifPresent(snap -> {
+            if (DialogCheckpoint.STATE_TERMINATED.equals(snap.dialogState())) {
+                return;
+            }
             if (hot != null && hot.enabled()) {
                 hot.put(snap.toCheckpoint());
             } else {
-                memoryFallback.put(sipCallId, snap);
+                memoryFallback.put(snap.sipCallId(), snap);
             }
         });
-        return durable;
+        return found;
     }
 
-    @Transactional
     public void remove(String sipCallId) {
         if (sipCallId == null) {
             return;
         }
+        String canon = SipCallIds.canonical(sipCallId);
+        removeExact(canon);
+        if (!canon.equals(sipCallId)) {
+            removeExact(sipCallId);
+        }
+    }
+
+    private void removeExact(String sipCallId) {
         if (hot != null) {
             hot.remove(sipCallId);
         }
@@ -160,87 +202,12 @@ public class DialogCmpPersistence {
         if (owners != null) {
             owners.remove(sipCallId);
         }
-        if (pgEnabled) {
-            markEndedPg(sipCallId);
+        if (usePg()) {
+            durable.markEnded(sipCallId);
         }
     }
 
-    void persistPg(DialogCheckpoint cp) {
-        SfDialogCheckpoint row = SfDialogCheckpoint.findById(cp.callId());
-        if (row == null) {
-            row = new SfDialogCheckpoint();
-            row.sipCallId = cp.callId();
-            row.startedAt = cp.startedAt() != null ? cp.startedAt() : Instant.now();
-        }
-        row.peer = cp.peer();
-        row.fromUri = cp.fromUri();
-        row.toUri = cp.toUri();
-        row.trunkUri = cp.trunkUri();
-        row.fsUuid = cp.fsUuid();
-        row.msisdn = cp.msisdn();
-        row.fsNodeId = cp.fsNodeId();
-        row.elisaNodeId = cp.elisaNodeId();
-        row.dialogState = cp.effectiveState();
-        row.updatedAt = cp.updatedAt() != null ? cp.updatedAt() : Instant.now();
-        row.endedAt = DialogCheckpoint.STATE_TERMINATED.equals(row.dialogState) ? Instant.now() : null;
-        SipDialogHa ha = cp.effectiveSipHa();
-        row.remotePeer = ha.remotePeer();
-        row.transport = ha.transport();
-        row.remoteTransport = ha.remoteTransport();
-        row.cseq = ha.cseq();
-        row.fromTag = ha.fromTag();
-        row.toTag = ha.toTag();
-        row.contactUri = ha.contactUri();
-        row.remoteContactUri = ha.remoteContactUri();
-        row.sipMethod = ha.method();
-        row.farFromUri = ha.farFromUri();
-        row.farFromTag = ha.farFromTag();
-        row.persist();
-    }
-
-    void markEndedPg(String sipCallId) {
-        SfDialogCheckpoint row = SfDialogCheckpoint.findById(sipCallId);
-        if (row == null) {
-            return;
-        }
-        row.dialogState = DialogCheckpoint.STATE_TERMINATED;
-        row.updatedAt = Instant.now();
-        row.endedAt = Instant.now();
-        row.persist();
-    }
-
-    Optional<InviteCmpSnapshot> loadPg(String sipCallId) {
-        SfDialogCheckpoint row = SfDialogCheckpoint.findById(sipCallId);
-        if (row == null || row.endedAt != null) {
-            return Optional.empty();
-        }
-        Instant started = row.startedAt != null ? row.startedAt : Instant.now();
-        Instant updated = row.updatedAt != null ? row.updatedAt : started;
-        SipDialogHa ha = new SipDialogHa(
-                row.remotePeer,
-                row.transport,
-                row.remoteTransport,
-                row.cseq,
-                row.fromTag,
-                row.toTag,
-                row.contactUri,
-                row.remoteContactUri,
-                row.sipMethod,
-                row.farFromUri,
-                row.farFromTag);
-        return Optional.of(new InviteCmpSnapshot(
-                row.sipCallId,
-                row.fsUuid,
-                row.msisdn,
-                row.fromUri,
-                row.toUri,
-                row.trunkUri,
-                row.peer,
-                row.fsNodeId,
-                row.elisaNodeId,
-                row.dialogState,
-                started.toEpochMilli(),
-                updated.toEpochMilli(),
-                ha));
+    private boolean usePg() {
+        return pgEnabled && pgSync && durable != null;
     }
 }

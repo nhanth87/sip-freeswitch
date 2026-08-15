@@ -4,8 +4,10 @@ import com.microjainslee.api.ProfileAlreadyExistsException;
 import com.microjainslee.api.ProfileFacility;
 import com.microjainslee.api.ProfileID;
 import com.microjainslee.api.ProfileLocalObject;
+import et.elisa.cmp.SipCallIds;
 import et.elisa.persist.ImsSubscriber;
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -35,6 +37,7 @@ public final class ElisaProfiles {
         pf.createProfileTable(ImsSubscriberProfile.TABLE);
         pf.registerIndex(ImsSubscriberProfile.TABLE, "impi");
         pf.registerIndex(ImsSubscriberProfile.TABLE, "impu");
+        pf.registerIndex(ImsSubscriberProfile.TABLE, "directoryUserId");
         pf.registerIndex(ImsSubscriberProfile.TABLE, "tenantId");
 
         pf.createProfileTable(CallSessionProfile.TABLE);
@@ -75,6 +78,7 @@ public final class ElisaProfiles {
             sub.setMsisdn(row.msisdn);
             sub.setImpi(row.impi);
             sub.setImpu(row.impu);
+            sub.setDirectoryUserId(row.directoryUserId());
             sub.setTenantId(row.tenantId);
             sub.setDisplayName(row.displayName);
             sub.setFsA1Hash(row.fsA1Hash);
@@ -107,7 +111,7 @@ public final class ElisaProfiles {
             CallSessionProfile cs = getOrCreate(pf, CallSessionProfile.TABLE, fsUuid, CallSessionProfile.class);
             cs.setFsUuid(fsUuid);
             if (sipCallId != null) {
-                cs.setSipCallId(sipCallId);
+                cs.setSipCallId(SipCallIds.canonical(sipCallId));
             }
             if (msisdn != null) {
                 cs.setMsisdn(msisdn);
@@ -154,7 +158,23 @@ public final class ElisaProfiles {
     }
 
     public static Collection<ProfileLocalObject> findBySipCallId(ProfileFacility pf, String sipCallId) {
+        if (pf == null || sipCallId == null || sipCallId.isBlank()) {
+            return List.of();
+        }
+        String canon = SipCallIds.canonical(sipCallId);
+        Collection<ProfileLocalObject> hits =
+                pf.findProfilesByAttribute(CallSessionProfile.TABLE, "sipCallId", canon);
+        if (!hits.isEmpty() || canon.equals(sipCallId)) {
+            return hits;
+        }
         return pf.findProfilesByAttribute(CallSessionProfile.TABLE, "sipCallId", sipCallId);
+    }
+
+    public static Collection<ProfileLocalObject> findByDirectoryUserId(ProfileFacility pf, String directoryUserId) {
+        if (pf == null || directoryUserId == null || directoryUserId.isBlank()) {
+            return List.of();
+        }
+        return pf.findProfilesByAttribute(ImsSubscriberProfile.TABLE, "directoryUserId", directoryUserId.trim());
     }
 
     public static Optional<ImsSubscriberProfile> getSubscriber(ProfileFacility pf, String profileKey) {

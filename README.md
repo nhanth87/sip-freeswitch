@@ -1,6 +1,6 @@
 # sip-freeswitch / Elisa
 
-Private nhanth87 SIP edge (**Elisa**) + FreeSWITCH + PostgreSQL. Target **10 000 INVITE/s**.
+Private nhanth87 SIP edge (**Elisa** IMS) + **epc/** (4G MVNO HSS/SGW/PGW, separate process) + FreeSWITCH + PostgreSQL. Elisa target **10 000 INVITE/s**.
 
 > **PRIVATE** — `nhanth87/sip-freeswitch` only.
 
@@ -18,4 +18,9 @@ mise install
 # http://127.0.0.1:8088/admin/  (admin/admin when sf.admin.dev-login=true)
 ```
 
-Ingress design: [`docs/agents/nginx-ingress.md`](docs/agents/nginx-ingress.md). See [`AGENTS.md`](AGENTS.md) and [`docs/agents/`](docs/agents/).
+Ingress design: [`docs/agents/nginx-ingress.md`](docs/agents/nginx-ingress.md). EPC plane: [`docs/agents/epc.md`](docs/agents/epc.md). See [`AGENTS.md`](AGENTS.md) and [`docs/agents/`](docs/agents/).
+
+```bash
+# EPC control-plane lab (dedicated postgres-epc; not the Elisa DB)
+docker compose -f docker-compose.yml -f docker-compose.services.yml --profile epc config
+```

@@ -59,5 +59,5 @@ awk -v frag="$FRAG" -v marker="$MARKER" '
 mv "$tmp" "$PRE_PUSH"
 chmod +x "$PRE_PUSH"
 echo "installed IMS smoke gate into $PRE_PUSH"
-echo "runs when push includes changes under elisa/ ra-freeswitch/ loadtest/sipp app/html/admin ra-sip paths"
+echo "runs when push includes changes under elisa/ loadtest/sipp app/html/admin ra-sip paths"
 echo "override: IMS_SMOKE_ALLOW_SKIP=1 (not for SIP claims)  IMS_SMOKE_FORCE=1 (always run)"

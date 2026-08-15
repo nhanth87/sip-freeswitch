@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.microjainslee.ra.sipservlet.command.SendInvite;
 import com.microjainslee.ra.sipservlet.command.SendRegister;
 import com.microjainslee.ra.sipservlet.command.SendResponse;
+import com.microjainslee.ra.sipservlet.command.SendSdpUpdate;
 import com.microjainslee.ra.sipservlet.events.SipInviteEvent;
 import com.microjainslee.ra.sipservlet.events.SipRegisterEvent;
 import com.microjainslee.ra.sipservlet.events.SipResponseEvent;
@@ -87,6 +88,29 @@ class Ts24229InviteRoutingTest {
             sbb.onEvent(new SipResponseEvent("c1", 183, "Session Progress", "v=0", "application/sdp", List.of()), null);
             assertEquals(183, ra.ofType(SendResponse.class).getFirst().statusCode());
         }
+
+        @Test
+        void pOnly_401_relaysWwwAuthenticate() {
+            CapturingRa ra = new CapturingRa();
+            PcscfProxySbb sbb = new PcscfProxySbb(ImsTestSupport.roles(true, false, false, false));
+            ImsTestSupport.injectRa(sbb, ra);
+            Map<String, String> www = Map.of("WWW-Authenticate",
+                    "Digest realm=\"ims.lab\", nonce=\"n1\", algorithm=MD5, qop=\"auth\"");
+            sbb.onEvent(new SipResponseEvent("r1", 401, "Unauthorized", null, null, List.of(), www), null);
+            SendResponse r = ra.ofType(SendResponse.class).getFirst();
+            assertEquals(401, r.statusCode());
+            assertTrue(r.headers().get("WWW-Authenticate").contains("algorithm=MD5"));
+        }
+
+        @Test
+        void pOnly_200WithSdp_forwardsOfferAnswer() {
+            CapturingRa ra = new CapturingRa();
+            PcscfProxySbb sbb = new PcscfProxySbb(ImsTestSupport.roles(true, false, false, false));
+            ImsTestSupport.injectRa(sbb, ra);
+            String sdp = "v=0\r\nm=audio 4000 RTP/AVP 9\r\na=rtpmap:9 G722/8000";
+            sbb.onEvent(new SipResponseEvent("c-hd", 200, "OK", sdp, "application/sdp", List.of()), null);
+            assertEquals(sdp, ra.ofType(SendSdpUpdate.class).getFirst().sdp());
+        }
     }
 
     @Nested
@@ -113,6 +137,19 @@ class Ts24229InviteRoutingTest {
             ImsTestSupport.injectRa(sbb, ra);
             sbb.onEvent(invite("mt2", "sip:ext@other", "sip:unknown@ims.lab"), null);
             assertEquals(404, ra.ofType(SendResponse.class).getFirst().statusCode());
+        }
+
+        @Test
+        void iOnly_401_relaysWwwAuthenticate() {
+            CapturingRa ra = new CapturingRa();
+            IcscfRoutingSbb sbb = new IcscfRoutingSbb(ImsTestSupport.roles(false, true, false, false), new StubCx(Map.of(), Map.of()));
+            ImsTestSupport.injectRa(sbb, ra);
+            Map<String, String> www = Map.of("WWW-Authenticate",
+                    "Digest realm=\"ims.lab\", nonce=\"n1\", algorithm=MD5, qop=\"auth\"");
+            sbb.onEvent(new SipResponseEvent("r1", 401, "Unauthorized", null, null, List.of(), www), null);
+            SendResponse r = ra.ofType(SendResponse.class).getFirst();
+            assertEquals(401, r.statusCode());
+            assertTrue(r.headers().get("WWW-Authenticate").contains("algorithm=MD5"));
         }
 
         @Test
@@ -207,6 +244,59 @@ class Ts24229InviteRoutingTest {
         }
 
         @Test
+        void mtInvite_bareUserMatchesRegisteredImpu() {
+            CapturingRa ra = new CapturingRa();
+            ImsBinding b = new ImsBinding();
+            b.impu = "sip:bob@ims.lab";
+            b.contact = "sip:bob@10.0.0.9:5060";
+            b.expiresAt = Instant.now().plusSeconds(600);
+            MatchingBindings bindings = new MatchingBindings(b);
+            ScscfInviteSbb sbb = new ScscfInviteSbb.$Concrete(
+                    ImsTestSupport.roles(false, false, true, false),
+                    router("sip:as@fs"), bindings, new DialogCmpPersistence().withoutPg(),
+                    null, null, "elisa-1", "fs-1");
+            ImsTestSupport.injectRa(sbb, ra);
+            sbb.onEvent(invite("mt-bare", "sip:alice@ims.lab", "sip:bob@10.0.0.1"), null);
+            assertEquals("sip:bob@10.0.0.9:5060", ra.ofType(SendInvite.class).getFirst().toUri());
+        }
+
+        @Test
+        void moInvite_knownUnregisteredCallee_480() {
+            CapturingRa ra = new CapturingRa();
+            StubHss hss = new StubHss();
+            ImsSubscriber bob = new ImsSubscriber();
+            bob.impu = "sip:bob@ims.lab";
+            bob.ifcJson = "{\"skip\":true}";
+            hss.ifcByImpu.put("sip:bob@ims.lab", bob.ifcJson);
+            ScscfInviteSbb sbb = new ScscfInviteSbb.$Concrete(
+                    ImsTestSupport.roles(false, false, true, true),
+                    router("sip:as@fs"), new EmptyBindings(), new DialogCmpPersistence().withoutPg(),
+                    null, hss, "elisa-1", "fs-1");
+            ImsTestSupport.injectRa(sbb, ra);
+            sbb.onEvent(invite("unreg", "sip:alice@ims.lab", "sip:bob@ims.lab"), null);
+            assertEquals(480, ra.ofType(SendResponse.class).getFirst().statusCode());
+        }
+
+        @Test
+        void mt200WithSdp_updatesOfferAnswer() {
+            CapturingRa ra = new CapturingRa();
+            DialogCmpPersistence store = new DialogCmpPersistence().withoutPg();
+            ImsBinding b = new ImsBinding();
+            b.impu = "sip:bob@ims.lab";
+            b.contact = "sip:bob@10.0.0.9:5060";
+            b.expiresAt = Instant.now().plusSeconds(600);
+            ScscfInviteSbb sbb = new ScscfInviteSbb.$Concrete(
+                    ImsTestSupport.roles(false, false, true, false),
+                    router("sip:as@fs"), new LiveBindings(b), store,
+                    null, null, "elisa-1", "fs-1");
+            ImsTestSupport.injectRa(sbb, ra);
+            sbb.onEvent(invite("hd1", "sip:alice@ims.lab", "sip:bob@ims.lab"), null);
+            String answer = "v=0\r\nm=audio 4000 RTP/AVP 9 0\r\na=rtpmap:9 G722/8000";
+            sbb.onEvent(new SipResponseEvent("hd1", 200, "OK", answer, "application/sdp", List.of()), null);
+            assertEquals(answer, ra.ofType(SendSdpUpdate.class).getFirst().sdp());
+        }
+
+        @Test
         void provisional183_forwardedAndCmpEarly() {
             CapturingRa ra = new CapturingRa();
             DialogCmpPersistence store = new DialogCmpPersistence().withoutPg();
@@ -268,6 +358,26 @@ class Ts24229InviteRoutingTest {
 
         @Override public Optional<ImsBinding> findLive(String impu) {
             return Optional.ofNullable(binding);
+        }
+    }
+
+    static final class MatchingBindings extends BindingStore {
+        final ImsBinding binding;
+
+        MatchingBindings(ImsBinding binding) {
+            this.binding = binding;
+        }
+
+        @Override
+        public Optional<ImsBinding> findLive(String impu) {
+            if (binding == null || impu == null) {
+                return Optional.empty();
+            }
+            if (et.elisa.ims.hss.ImsIdentityKeys.bindingKeys(impu).contains(binding.impu)
+                    || binding.impu.equals(impu)) {
+                return Optional.of(binding);
+            }
+            return Optional.empty();
         }
     }
 

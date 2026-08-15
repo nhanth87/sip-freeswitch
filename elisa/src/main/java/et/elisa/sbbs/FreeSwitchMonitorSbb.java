@@ -4,9 +4,9 @@ import com.microjainslee.api.ActivityContextInterface;
 import com.microjainslee.api.Sbb;
 import com.microjainslee.api.SleeEvent;
 import com.microjainslee.api.SleeEventHandler;
-import et.elisa.ra.freeswitch.events.FsApiResponseEvent;
-import et.elisa.ra.freeswitch.events.FsChannelEvent;
-import et.elisa.ra.freeswitch.events.FsHeartbeatEvent;
+import com.microjainslee.ra.freeswitch.events.FsApiResponseEvent;
+import com.microjainslee.ra.freeswitch.events.FsChannelEvent;
+import com.microjainslee.ra.freeswitch.events.FsHeartbeatEvent;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 

@@ -7,9 +7,9 @@ import com.microjainslee.api.annotations.CmpField;
 import com.microjainslee.api.annotations.SbbAnnotation;
 import com.microjainslee.core.CmpBackedSbb;
 import et.elisa.logging.SleeEventTrace;
-import et.elisa.ra.freeswitch.events.FsApiResponseEvent;
-import et.elisa.ra.freeswitch.events.FsChannelEvent;
-import et.elisa.ra.freeswitch.events.FsHeartbeatEvent;
+import com.microjainslee.ra.freeswitch.events.FsApiResponseEvent;
+import com.microjainslee.ra.freeswitch.events.FsChannelEvent;
+import com.microjainslee.ra.freeswitch.events.FsHeartbeatEvent;
 import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -160,6 +160,7 @@ public abstract class CallSessionSbb extends CmpBackedSbb implements SleeEventHa
                     "variable_elisa_sip_call_id",
                     "Caller-Unique-ID");
             String caller = first(h,
+                    "variable_sip_from_uri",
                     "Caller-Caller-ID-Number",
                     "Caller-Username",
                     "variable_sip_from_user",

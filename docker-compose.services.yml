@@ -217,3 +217,112 @@ services:
     ports:
       - "2080:2080"
     networks: [sf-net]
+
+  # ── EPC plane (profile epc). Dedicated postgres-epc — never the Elisa DB.
+  # One epc-host image × roles. SGW-C 1:1 SGW-U via PFCP (same idea as S-CSCF↔FS).
+  #   docker compose -f docker-compose.yml -f docker-compose.services.yml --profile epc up -d
+  postgres-epc:
+    profiles: ["epc"]
+    image: postgres:16
+    environment:
+      POSTGRES_DB: epc
+      POSTGRES_USER: epc
+      POSTGRES_PASSWORD: epc
+    volumes: [epc-postgres:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U epc -d epc"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks: [sf-net]
+
+  epc-hss:
+    profiles: ["epc"]
+    build:
+      context: ./epc
+      dockerfile: epc-host/Dockerfile
+    env_file: [./deploy/epc/roles/hss.env]
+    environment:
+      EPC_JDBC_URL: jdbc:postgresql://postgres-epc:5432/epc
+      JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true"
+    expose: ["8099", "3868"]
+    depends_on:
+      postgres-epc:
+        condition: service_healthy
+    networks: [sf-net]
+
+  epc-sgwc:
+    profiles: ["epc"]
+    build:
+      context: ./epc
+      dockerfile: epc-host/Dockerfile
+    env_file: [./deploy/epc/roles/sgwc.env]
+    environment:
+      EPC_JDBC_URL: jdbc:postgresql://postgres-epc:5432/epc
+      JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true"
+    expose: ["8099", "2123"]
+    depends_on:
+      postgres-epc:
+        condition: service_healthy
+      sgwu:
+        condition: service_started
+    networks: [sf-net]
+
+  epc-pgwc:
+    profiles: ["epc"]
+    build:
+      context: ./epc
+      dockerfile: epc-host/Dockerfile
+    env_file: [./deploy/epc/roles/pgwc.env]
+    environment:
+      EPC_JDBC_URL: jdbc:postgresql://postgres-epc:5432/epc
+      JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true"
+    expose: ["8099", "2123"]
+    depends_on:
+      postgres-epc:
+        condition: service_healthy
+      pgwu:
+        condition: service_started
+    networks: [sf-net]
+
+  sgwu:
+    profiles: ["epc"]
+    image: alpine:3.20
+    command: ["sh", "-c", "echo sgwu linux-gtp placeholder — kernel GTP, not Java; sleep infinity"]
+    expose: ["8805", "2152"]
+    networks: [sf-net]
+
+  pgwu:
+    profiles: ["epc"]
+    image: alpine:3.20
+    command: ["sh", "-c", "echo pgwu linux-gtp placeholder — kernel GTP, not Java; sleep infinity"]
+    expose: ["8805", "2152"]
+    networks: [sf-net]
+
+  epc-sgwc-2:
+    profiles: ["epc"]
+    build:
+      context: ./epc
+      dockerfile: epc-host/Dockerfile
+    env_file: [./deploy/epc/roles/sgwc-2.env]
+    environment:
+      EPC_JDBC_URL: jdbc:postgresql://postgres-epc:5432/epc
+      JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true"
+    expose: ["8099", "2123"]
+    depends_on:
+      postgres-epc:
+        condition: service_healthy
+      sgwu-2:
+        condition: service_started
+    networks: [sf-net]
+
+  sgwu-2:
+    profiles: ["epc"]
+    image: alpine:3.20
+    command: ["sh", "-c", "echo sgwu-2 linux-gtp placeholder; sleep infinity"]
+    expose: ["8805", "2152"]
+    networks: [sf-net]
+
+volumes:
+  epc-postgres: {}

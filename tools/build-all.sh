@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Build ra-freeswitch + Elisa (fast-jar). JDK 25 only (mise zulu-25).
+# Build Elisa (fast-jar) + epc reactor. JDK 25 only (mise zulu-25).
+# RAs (ra-freeswitch, ra-gtpv2c, ra-pfcp, ra-diameter, ra-sip-servlet) live in
+# micro-jainslee vendor-ras — install that reactor first.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -31,10 +33,9 @@ fi
 export PATH="${JAVA_HOME}/bin:${PATH}"
 echo "JAVA_HOME=${JAVA_HOME}"
 
-cd "${ROOT}/ra-freeswitch"
-mvn -q -DskipTests=false test
-mvn -q -DskipTests install
 cd "${ROOT}/elisa"
 mvn -q -DskipTests=false test
 mvn -q -Dquarkus.package.jar.type=fast-jar package
-echo "OK: ra-freeswitch + Elisa built (fast-jar)"
+cd "${ROOT}/epc"
+mvn -q -DskipTests=false test
+echo "OK: Elisa (fast-jar) + epc reactor"

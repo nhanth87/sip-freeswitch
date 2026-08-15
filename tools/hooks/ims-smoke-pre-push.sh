@@ -48,7 +48,7 @@ need=0
 if [[ -n "${IMS_SMOKE_FORCE:-}" ]]; then
   need=1
 elif printf '%s\n' "$changed" | grep -qE \
-  '^(elisa/|ra-freeswitch/|loadtest/sipp/|loadtest/ims-tools/sipp-scenarios/|app/html/admin/|docs/agents/ims-|tools/ims-smoke)'; then
+  '^(elisa/|loadtest/sipp/|loadtest/ims-tools/sipp-scenarios/|app/html/admin/|docs/agents/ims-|tools/ims-smoke)'; then
   need=1
 elif printf '%s\n' "$changed" | grep -qiE 'sip|ims|cscf|pcscf'; then
   # catch SIP-related renames outside the prefixes

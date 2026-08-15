@@ -19,6 +19,10 @@ public record CallSession(
 ) implements Serializable {
     private static final long serialVersionUID = 1L;
 
+    public CallSession {
+        sipCallId = et.elisa.cmp.SipCallIds.canonical(sipCallId);
+    }
+
     public CallSession withState(String newState) {
         return new CallSession(fsUuid, sipCallId, profileId, msisdn, tenantId,
                 elisaNodeId, fsNodeId, direction, newState, startedAt, Instant.now());

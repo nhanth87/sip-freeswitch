@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import et.elisa.cluster.CallSession;
-import et.elisa.ra.freeswitch.events.FsChannelEvent;
+import com.microjainslee.ra.freeswitch.events.FsChannelEvent;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;

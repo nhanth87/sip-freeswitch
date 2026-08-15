@@ -25,8 +25,12 @@ public class HssLiteService {
 
     /** Pending AKA vectors keyed by callId / session. */
     private final ConcurrentHashMap<String, PendingAuth> pending = new ConcurrentHashMap<>();
+    /** Pending SIP Digest (dashboard Linphone/Zoiper) keyed by callId / IMPI. */
+    private final ConcurrentHashMap<String, PendingDigest> digestPending = new ConcurrentHashMap<>();
 
     public record PendingAuth(String impi, String impu, byte[] xres, long nextSqn) {}
+
+    public record PendingDigest(String impi, String impu, String nonce, String ha1) {}
 
     @Transactional
     public Optional<ImsSubscriber> findByImpi(String impi) {
@@ -72,7 +76,21 @@ public class HssLiteService {
         if (byMsisdn.isPresent()) {
             return byMsisdn;
         }
-        return findByImpi(noSip).or(() -> findByImpi(user));
+        Optional<ImsSubscriber> byImpi = findByImpi(noSip).or(() -> findByImpi(user));
+        if (byImpi.isPresent()) {
+            return byImpi;
+        }
+        // FS cid_num / xml_curl user-part: "alice" → sip:alice@<realm>
+        String realm = ImsIdentityKeys.realmOrDefault(roles != null ? roles.realm() : null);
+        String impu = ImsIdentityKeys.impu(user, realm);
+        if (impu != null) {
+            byImpu = findByImpu(impu);
+            if (byImpu.isPresent()) {
+                return byImpu;
+            }
+        }
+        String impi = ImsIdentityKeys.impi(user, realm);
+        return impi == null ? Optional.empty() : findByImpi(impi);
     }
 
     @Transactional
@@ -109,6 +127,91 @@ public class HssLiteService {
         return Optional.ofNullable(pending.get(callId));
     }
 
+    public void rememberDigest(String callId, String impi, String impu, String nonce, String ha1) {
+        if (nonce == null || ha1 == null || ha1.isBlank() || impi == null || impi.isBlank()) {
+            return;
+        }
+        PendingDigest d = new PendingDigest(impi, impu, nonce, ha1);
+        if (callId != null && !callId.isBlank()) {
+            digestPending.put(callId, d);
+        }
+        digestPending.put(impi, d);
+    }
+
+    public Optional<PendingDigest> peekDigest(String key) {
+        if (key == null) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(digestPending.get(key));
+    }
+
+    public Optional<PendingDigest> takeDigest(String key) {
+        Optional<PendingDigest> d = Optional.ofNullable(digestPending.remove(key));
+        d.ifPresent(p -> {
+            digestPending.remove(p.impi());
+            if (key != null) {
+                digestPending.remove(key);
+            }
+        });
+        return d;
+    }
+
+    /**
+     * Admin upsert by IMPI (then IMPU). Dashboard SIP password → {@code fsA1Hash}.
+     */
+    @Transactional
+    public ImsSubscriber upsert(ImsSubscriber incoming) {
+        if (incoming == null || incoming.impi == null || incoming.impi.isBlank()) {
+            throw new IllegalArgumentException("impi required");
+        }
+        ImsSubscriber existing = findByImpi(incoming.impi.trim())
+                .or(() -> incoming.impu == null ? Optional.empty() : findByImpu(incoming.impu.trim()))
+                .orElse(null);
+        Instant now = Instant.now();
+        if (existing == null) {
+            incoming.impi = incoming.impi.trim();
+            if (incoming.impu != null) {
+                incoming.impu = incoming.impu.trim();
+            }
+            incoming.enabled = true;
+            incoming.createdAt = now;
+            incoming.updatedAt = now;
+            incoming.persist();
+            return incoming;
+        }
+        if (incoming.impu != null && !incoming.impu.isBlank()) {
+            existing.impu = incoming.impu.trim();
+        }
+        if (incoming.msisdn != null) {
+            existing.msisdn = incoming.msisdn.isBlank() ? null : incoming.msisdn.trim();
+        }
+        if (incoming.displayName != null) {
+            existing.displayName = incoming.displayName.isBlank() ? null : incoming.displayName.trim();
+        }
+        if (incoming.tenantId != null) {
+            existing.tenantId = incoming.tenantId.isBlank() ? null : incoming.tenantId.trim();
+        }
+        if (incoming.ki != null && !incoming.ki.isBlank()) {
+            existing.ki = incoming.ki.trim();
+        }
+        if (incoming.opc != null && !incoming.opc.isBlank()) {
+            existing.opc = incoming.opc.trim();
+        }
+        if (incoming.amf != null && !incoming.amf.isBlank()) {
+            existing.amf = incoming.amf.trim();
+        }
+        if (incoming.fsA1Hash != null && !incoming.fsA1Hash.isBlank()) {
+            existing.fsA1Hash = incoming.fsA1Hash.trim();
+        }
+        if (incoming.ifcJson != null) {
+            existing.ifcJson = incoming.ifcJson;
+        }
+        existing.enabled = incoming.enabled;
+        existing.updatedAt = now;
+        existing.persist();
+        return existing;
+    }
+
     /**
      * Cache XRES from Cx MAA (TS 29.229 SIP-Authorization) so S-CSCF can verify
      * the subsequent REGISTER when HSS is remote or when MAR short-circuits.
@@ -137,7 +240,10 @@ public class HssLiteService {
 
     @Transactional
     public Map<Integer, String> handleUar(String impi, String impu) {
-        if (findByImpi(impi).isEmpty() && findByImpu(impu).isEmpty()) {
+        if (findByImpi(impi).isEmpty()
+                && findByImpu(impu).isEmpty()
+                && resolveIdentity(impi).isEmpty()
+                && resolveIdentity(impu).isEmpty()) {
             return Map.of(CxCodec.RESULT_CODE, "5001");
         }
         return CxCodec.uaaAvps(roles.scscfUri());

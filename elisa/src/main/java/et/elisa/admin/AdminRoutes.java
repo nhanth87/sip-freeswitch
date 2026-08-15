@@ -281,6 +281,7 @@ public class AdminRoutes {
         Map<String, Object> s = new LinkedHashMap<>(fs.status());
         s.put("invites", metrics.inviteCount());
         s.put("rejects", metrics.rejectCount());
+        s.put("sipMessages", metrics.messageCount());
         s.put("dialogs", metrics.activeDialogs());
         s.put("iceRequired", mediaPolicy.iceRequired() || mediaPolicy.rtpRedirect());
         s.put("requireTurn", mediaPolicy.requireTurn());

@@ -24,6 +24,7 @@ public record InviteCmpSnapshot(
         SipDialogHa sipHa
 ) {
     public InviteCmpSnapshot {
+        sipCallId = SipCallIds.canonical(sipCallId);
         if (sipHa == null) {
             sipHa = SipDialogHa.EMPTY;
         }

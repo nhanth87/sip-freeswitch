@@ -12,6 +12,7 @@ import et.elisa.ims.aka.AkaMd5;
 import et.elisa.ims.config.ImsRoleFlags;
 import et.elisa.ims.cx.CxClient;
 import et.elisa.ims.cx.CxCodec;
+import et.elisa.ims.digest.SipDigestAuth;
 import et.elisa.ims.hss.HssLiteService;
 import et.elisa.ims.reg.BindingStore;
 import et.elisa.persist.ImsSubscriber;
@@ -82,6 +83,18 @@ public final class ScscfRegisterSbb implements Sbb, SleeEventHandler {
                 send(SendResponse.of(e.callId(), 403, "Forbidden"));
                 return;
             }
+            ImsSubscriber sub = hss == null ? null
+                    : hss.findByImpi(impi).or(() -> hss.findByImpu(impu)).or(() -> hss.resolveIdentity(impu))
+                    .orElse(null);
+            if (sub != null && sub.fsA1Hash != null && !sub.fsA1Hash.isBlank()) {
+                String nonce = SipDigestAuth.newNonce();
+                hss.rememberDigest(e.callId(), impi, impu, nonce, sub.fsA1Hash);
+                String realm = roles.realm() != null ? roles.realm() : "ims.lab";
+                send(SendResponse.withHeaders(e.callId(), 401, "Unauthorized",
+                        Map.of("WWW-Authenticate", SipDigestAuth.wwwAuthenticate(realm, nonce))));
+                LOG.debug("[S-CSCF] Digest challenge callId={} impi={}", e.callId(), impi);
+                return;
+            }
             Map<Integer, String> maa = cx.mar(impi, impu, e.callId());
             if (!"2001".equals(maa.get(CxCodec.RESULT_CODE))) {
                 send(SendResponse.of(e.callId(), 403, "Forbidden"));
@@ -110,6 +123,10 @@ public final class ScscfRegisterSbb implements Sbb, SleeEventHandler {
             return;
         }
 
+        if (tryDigestRegister(e, impi, impu, contact, expires)) {
+            return;
+        }
+
         var pending = hss.peekPending(e.callId()).or(() -> hss.peekPending(impi));
         byte[] res = AkaMd5.extractResFromAuthorization(e.authorization());
         if (pending.isEmpty() || !AkaMd5.verifyRes(pending.get().xres(), res)) {
@@ -130,6 +147,37 @@ public final class ScscfRegisterSbb implements Sbb, SleeEventHandler {
                 "Path", e.pathHeader() == null ? "<" + roles.pcscfUri() + ";lr>" : e.pathHeader()
         )));
         LOG.debug("[S-CSCF] REGISTER ok impu={} expires={}", impu, expires);
+    }
+
+    private boolean tryDigestRegister(SipRegisterEvent e, String impi, String impu,
+                                      String contact, int expires) {
+        if (hss == null || SipDigestAuth.isAka(e.authorization())
+                || !SipDigestAuth.isMd5Digest(e.authorization())) {
+            return false;
+        }
+        var pending = hss.peekDigest(e.callId()).or(() -> hss.peekDigest(impi));
+        if (pending.isEmpty()) {
+            return false;
+        }
+        HssLiteService.PendingDigest d = pending.get();
+        if (!SipDigestAuth.verify(e.authorization(), d.ha1(), "REGISTER", d.nonce())) {
+            send(SendResponse.of(e.callId(), 403, "Forbidden"));
+            return true;
+        }
+        hss.takeDigest(e.callId());
+        hss.takeDigest(impi);
+        cx.sar(impi, impu);
+        bindings.upsert(impu, contact, e.pathHeader(), e.callId(), expires);
+        mirrorSubscriberProfile(impi, impu);
+        if (thirdParty != null) {
+            thirdParty.notifyAs(impu, contact, expires);
+        }
+        send(SendResponse.withHeaders(e.callId(), 200, "OK", Map.of(
+                "Service-Route", "<" + roles.scscfUri() + ";lr>",
+                "Path", e.pathHeader() == null ? "<" + roles.pcscfUri() + ";lr>" : e.pathHeader()
+        )));
+        LOG.debug("[S-CSCF] Digest REGISTER ok impu={} expires={}", impu, expires);
+        return true;
     }
 
     private void mirrorSubscriberProfile(String impi, String impu) {

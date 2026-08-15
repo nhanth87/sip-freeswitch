@@ -2,7 +2,7 @@ package et.elisa.cluster;
 
 import et.elisa.persist.SfClusterNode;
 import et.elisa.persist.SfFsPair;
-import et.elisa.ra.freeswitch.FreeSwitchRaConfig;
+import com.microjainslee.ra.freeswitch.FreeSwitchRaConfig;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.util.ArrayList;
 import java.util.Comparator;

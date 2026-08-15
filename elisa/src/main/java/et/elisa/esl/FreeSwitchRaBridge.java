@@ -1,8 +1,8 @@
 package et.elisa.esl;
 
 import et.elisa.cluster.FsPairRegistry;
-import et.elisa.ra.freeswitch.FreeSwitchRaConfig;
-import et.elisa.ra.freeswitch.FreeSwitchResourceAdaptor;
+import com.microjainslee.ra.freeswitch.FreeSwitchRaConfig;
+import com.microjainslee.ra.freeswitch.FreeSwitchResourceAdaptor;
 import jakarta.enterprise.context.ApplicationScoped;
 
 /**
