@@ -48,4 +48,17 @@ class DualWriteSessionStoreTest {
         assertEquals(2, sink.size());
         assertEquals(0, store.size());
     }
+
+    @Test
+    void findByS11cTeidFallsBackToDurableNotH2() {
+        HeapSessionStore hot = new HeapSessionStore();
+        HeapDurableSink durable = new HeapDurableSink();
+        DualWriteSessionStore store = new DualWriteSessionStore(hot, durable, Runnable::run);
+        SessionKeys keys = new SessionKeys(new Imsi("001010000000001"), "internet", new BearerId(5));
+        SessionCheckpoint cp = new SessionCheckpoint(
+                SessionCheckpoint.sgwId(keys), "sgw", keys.imsi().digits(), keys.apn(), 5,
+                "epc-1", 1L, "", null, null, null, 1L, "1", 0x11, 1L);
+        durable.checkpoint(cp);
+        assertEquals(0x11, store.findByS11cTeid(0x11).orElseThrow().s11cTeid());
+    }
 }

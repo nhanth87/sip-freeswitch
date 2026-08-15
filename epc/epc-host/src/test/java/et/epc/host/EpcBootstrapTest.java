@@ -63,4 +63,12 @@ class EpcBootstrapTest {
     void clusterNameIsEpcNotElisa() {
         assertEquals("epc-cluster", EpcClusterConfig.local("n").clusterName());
     }
+
+    @Test
+    void jdbcUrlMustBePostgresEpcNotH2() {
+        EpcBootstrap b = new EpcBootstrap(
+                new EpcRoles(false, true, false), EpcClusterConfig.local("epc-sgwc-1"));
+        b.withJdbcUrl(EpcJdbc.DEFAULT_URL);
+        assertThrows(IllegalStateException.class, () -> b.withJdbcUrl("jdbc:h2:mem:epc"));
+    }
 }

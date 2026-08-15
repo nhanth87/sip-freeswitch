@@ -244,6 +244,33 @@ class Ts24229InviteRoutingTest {
         }
 
         @Test
+        void mtInvite_usesReceivedFlow_notPrivateContactHost() {
+            CapturingRa ra = new CapturingRa();
+            ImsBinding b = new ImsBinding();
+            b.impu = "sip:alice@ims.lab";
+            b.contact = "sip:alice@172.21.0.1:5060";
+            b.receivedHost = "192.0.2.80";
+            b.receivedPort = 5060;
+            b.receivedTransport = "UDP";
+            b.expiresAt = Instant.now().plusSeconds(600);
+            b.pathHeader = "<sip:pcscf.ims.lab:5060;lr;ob>";
+            LiveBindings bindings = new LiveBindings(b);
+            ScscfInviteSbb sbb = new ScscfInviteSbb.$Concrete(
+                    ImsTestSupport.roles(false, false, true, false),
+                    router("sip:as@fs"), bindings, new DialogCmpPersistence().withoutPg(),
+                    null, null, "elisa-1", "fs-1");
+            ImsTestSupport.injectRa(sbb, ra);
+
+            sbb.onEvent(invite("mt-nat", "sip:bob@ims.lab", "sip:alice@ims.lab"), null);
+
+            SendInvite inv = ra.ofType(SendInvite.class).getFirst();
+            assertEquals("sip:alice@172.21.0.1:5060", inv.toUri(), "Request-URI stays registered Contact");
+            assertTrue(inv.nextHopUri().contains("192.0.2.80"),
+                    "MT next hop must be REGISTER source, not Contact 172.21.0.1");
+            assertFalse(inv.nextHopUri().contains("172.21.0.1"));
+        }
+
+        @Test
         void mtInvite_bareUserMatchesRegisteredImpu() {
             CapturingRa ra = new CapturingRa();
             ImsBinding b = new ImsBinding();

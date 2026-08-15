@@ -98,6 +98,17 @@ public final class SgwControl {
         return s1u;
     }
 
+    /**
+     * Release Access Bearers: clear S1-U forwarding, keep the S5 checkpoint.
+     * @return true if the S11 TEID was known
+     */
+    public boolean releaseAccessByTeid(int s11cTeid) {
+        return sessions.findByS11cTeid(s11cTeid).map(cp -> {
+            pfcp.sendCommand(new PfcpProgramSession(sgwu, cp.pfcpSeid(), List.of()));
+            return true;
+        }).orElse(false);
+    }
+
     private static PfcpFteid pf(Fteid f) {
         return new PfcpFteid(f.teid(), f.address(), f.interfaceType());
     }

@@ -16,6 +16,7 @@ import et.elisa.ims.scscf.IscThirdPartyRegister;
 import et.elisa.ims.scscf.ScscfRegisterSbb;
 import et.elisa.ims.support.ImsTestSupport;
 import et.elisa.ims.support.ImsTestSupport.CapturingRa;
+import et.elisa.persist.ImsSubscriber;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -150,6 +151,7 @@ class Ts24229RegisterFlowTest {
             assertEquals(path, r.headers().get("Path"));
             assertEquals(1, bindings.upserts.get());
             assertEquals(CONTACT, bindings.lastContact.get());
+            assertEquals(path, bindings.lastPath.get(), "Path on REGISTER 200 must be stored on the binding");
             assertEquals(3600, bindings.lastExpires.get().intValue());
             assertEquals(42L, hss.committedSqn.get().longValue());
             assertEquals(1, tp.get());
@@ -329,18 +331,42 @@ class Ts24229RegisterFlowTest {
         @Override public void commitSqn(String impi, long nextSqn) {
             committedSqn.set(nextSqn);
         }
+
+        @Override public Optional<ImsSubscriber> findByImpi(String impi) {
+            return Optional.empty();
+        }
+
+        @Override public Optional<ImsSubscriber> findByImpu(String impu) {
+            return Optional.empty();
+        }
+
+        @Override public Optional<ImsSubscriber> resolveIdentity(String raw) {
+            return Optional.empty();
+        }
     }
 
     static final class RecordingBindings extends BindingStore {
         final AtomicInteger upserts = new AtomicInteger();
         final AtomicReference<String> lastContact = new AtomicReference<>();
         final AtomicReference<Integer> lastExpires = new AtomicReference<>();
+        final AtomicReference<String> lastPath = new AtomicReference<>();
+        final AtomicReference<String> lastReceivedHost = new AtomicReference<>();
+        final AtomicReference<Integer> lastReceivedPort = new AtomicReference<>();
 
         @Override
         public void upsert(String impu, String contact, String path, String callId, int expiresSec) {
+            upsert(impu, contact, path, callId, expiresSec, null, null, null);
+        }
+
+        @Override
+        public void upsert(String impu, String contact, String path, String callId, int expiresSec,
+                           String receivedHost, Integer receivedPort, String receivedTransport) {
             upserts.incrementAndGet();
             lastContact.set(contact);
             lastExpires.set(expiresSec);
+            lastPath.set(path);
+            lastReceivedHost.set(receivedHost);
+            lastReceivedPort.set(receivedPort);
         }
     }
 }

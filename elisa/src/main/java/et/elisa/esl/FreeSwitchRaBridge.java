@@ -13,6 +13,7 @@ public class FreeSwitchRaBridge {
 
     private volatile FreeSwitchResourceAdaptor adaptor;
     private volatile String activeFsNodeId;
+    private volatile FsPairRegistry.EslTarget lastRebind;
 
     public void bind(FreeSwitchResourceAdaptor adaptor) {
         this.adaptor = adaptor;
@@ -30,9 +31,27 @@ public class FreeSwitchRaBridge {
         this.activeFsNodeId = fsNodeId;
     }
 
+    /** Last {@link #rebind} target (tests / R9 remap). Null until first rebind. */
+    public FsPairRegistry.EslTarget lastRebind() {
+        return lastRebind;
+    }
+
     public boolean live() {
         FreeSwitchResourceAdaptor a = adaptor;
         return a != null && a.live();
+    }
+
+    /**
+     * Synchronous ESL connect probe. Sets {@code eslLive} from the wire —
+     * never invents REGED / live when FS is down.
+     */
+    public boolean probeLive() {
+        FreeSwitchResourceAdaptor a = adaptor;
+        if (a == null) {
+            return false;
+        }
+        a.apiSync("status");
+        return a.live();
     }
 
     public String api(String command) {
@@ -44,8 +63,13 @@ public class FreeSwitchRaBridge {
     }
 
     public void rebind(FsPairRegistry.EslTarget target) {
+        if (target == null) {
+            return;
+        }
+        lastRebind = target;
+        activeFsNodeId = target.fsNodeId();
         FreeSwitchResourceAdaptor a = adaptor;
-        if (a == null || target == null) {
+        if (a == null) {
             return;
         }
         FreeSwitchRaConfig cfg = new FreeSwitchRaConfig();
@@ -54,6 +78,6 @@ public class FreeSwitchRaBridge {
         cfg.setPassword(target.password());
         cfg.setAutoSubscribe(true);
         a.reconfigure(cfg);
-        activeFsNodeId = target.fsNodeId();
+        a.apiSync("status");
     }
 }

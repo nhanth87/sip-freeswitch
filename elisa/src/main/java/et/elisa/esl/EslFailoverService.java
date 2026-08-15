@@ -7,6 +7,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -15,6 +16,8 @@ import org.jboss.logging.Logger;
 
 /**
  * C3: when primary ESL is down, walk {@link FsPairRegistry} failover list and rebind.
+ * List is <em>this node only</em> — never cluster-wide "whatever is up"
+ * (that would steal another S-CSCF's FS). R9 home pin: retry home FS only.
  */
 @ApplicationScoped
 public class EslFailoverService {
@@ -23,9 +26,22 @@ public class EslFailoverService {
 
     @Inject FsPairRegistry pairs;
     @Inject FreeSwitchRaBridge bridge;
+    @Inject HomeEslRemapService homeRemap;
 
     private final AtomicInteger cursor = new AtomicInteger(0);
     private ScheduledExecutorService scheduler;
+
+    /** CDI. */
+    @Inject
+    public EslFailoverService() {
+    }
+
+    /** Unit-test wiring. */
+    EslFailoverService(FsPairRegistry pairs, FreeSwitchRaBridge bridge, HomeEslRemapService homeRemap) {
+        this.pairs = pairs;
+        this.bridge = bridge;
+        this.homeRemap = homeRemap;
+    }
 
     void onStart(@Observes StartupEvent ev) {
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -45,10 +61,18 @@ public class EslFailoverService {
 
     void probe() {
         try {
-            if (bridge.adaptor() == null) {
+            if (bridge.adaptor() == null && homeRemap == null) {
                 return;
             }
             if (bridge.live()) {
+                return;
+            }
+            String pin = homeRemap != null ? homeRemap.pinnedHomeFsNodeId() : null;
+            if (pin != null && !pin.isBlank()) {
+                retryPinnedHome(pin);
+                return;
+            }
+            if (bridge.adaptor() == null) {
                 return;
             }
             List<FsPairRegistry.EslTarget> targets = pairs.targetsForThisNode();
@@ -77,6 +101,25 @@ public class EslFailoverService {
             LOG.warn("ESL failover: no live target in pair list");
         } catch (Exception e) {
             LOG.debugf(e, "ESL failover probe error");
+        }
+    }
+
+    /** Home pin: retry that FS only. Do not walk this node's pair (would steal). */
+    private void retryPinnedHome(String fsNodeId) {
+        Optional<FsPairRegistry.EslTarget> home = pairs.targetByFsNodeId(fsNodeId);
+        if (home.isEmpty()) {
+            LOG.warnf("R9 pinned home FS unknown fsNode=%s eslLive=false", fsNodeId);
+            return;
+        }
+        FsPairRegistry.EslTarget t = home.get();
+        LOG.warnf("R9 retry pinned home FS fsNode=%s %s:%d", t.fsNodeId(), t.host(), t.port());
+        try {
+            bridge.rebind(t);
+        } catch (Exception e) {
+            LOG.warnf(e, "R9 pinned home retry failed fsNode=%s", t.fsNodeId());
+        }
+        if (!bridge.live()) {
+            LOG.warnf("R9 home FS still down fsNode=%s eslLive=false — not moving RTP", t.fsNodeId());
         }
     }
 }

@@ -137,7 +137,8 @@ public final class ScscfRegisterSbb implements Sbb, SleeEventHandler {
         hss.takePending(impi);
         hss.commitSqn(pending.get().impi(), pending.get().nextSqn());
         cx.sar(impi, impu);
-        bindings.upsert(impu, contact, e.pathHeader(), e.callId(), expires);
+        bindings.upsert(impu, contact, e.pathHeader(), e.callId(), expires,
+                e.receivedHost(), e.receivedPort(), e.receivedTransport());
         mirrorSubscriberProfile(impi, impu);
         if (thirdParty != null) {
             thirdParty.notifyAs(impu, contact, expires);
@@ -167,7 +168,8 @@ public final class ScscfRegisterSbb implements Sbb, SleeEventHandler {
         hss.takeDigest(e.callId());
         hss.takeDigest(impi);
         cx.sar(impi, impu);
-        bindings.upsert(impu, contact, e.pathHeader(), e.callId(), expires);
+        bindings.upsert(impu, contact, e.pathHeader(), e.callId(), expires,
+                e.receivedHost(), e.receivedPort(), e.receivedTransport());
         mirrorSubscriberProfile(impi, impu);
         if (thirdParty != null) {
             thirdParty.notifyAs(impu, contact, expires);

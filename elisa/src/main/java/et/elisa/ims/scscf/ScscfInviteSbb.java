@@ -43,7 +43,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 /**
- * S-CSCF session — ISC to FreeSWITCH AS/MRF; MT via binding contact.
+ * S-CSCF session — ISC to FreeSWITCH AS/MRF; MT via binding Contact + flow.
  * <p>
  * JAIN SLEE 1.1 §6.5 CMP fields recover app call state after SBB entity death
  * via {@link DialogCmpPersistence} (ISPN → PG). Mid-dialog SendResponse/SendBye
@@ -250,10 +250,14 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
             }
         }
         String target;
+        String nextHop = null;
         List<String> asChain = List.of();
         if (terminating) {
             ImsBinding b = bindings.findLive(to).orElseThrow();
-            target = b.contact;
+            target = b.contact != null ? b.contact : to;
+            if (b.flowDiffersFromContact()) {
+                nextHop = b.flowNextHopUri();
+            }
         } else if (isMrfDestination(to)) {
             asChain = isc == null ? List.of() : isc.asChain(null);
             target = asChain.isEmpty() && isc != null ? isc.asUri() : (asChain.isEmpty() ? to : asChain.getFirst());
@@ -324,7 +328,7 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
             }
             ims.put("Route", routes);
         }
-        send(new SendInvite(e.callId(), target, e.fromUri(), e.sdpBody(), ims));
+        send(new SendInvite(e.callId(), target, e.fromUri(), e.sdpBody(), ims, nextHop));
     }
 
     /** Lab MRF: sip:1000@… still ISC to FreeSWITCH. A-B users use registered Contact. */

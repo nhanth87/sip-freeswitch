@@ -9,6 +9,7 @@ import jakarta.transaction.Transactional;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 @ApplicationScoped
@@ -19,19 +20,39 @@ public class BindingStore {
     @ConfigProperty(name = "sf.cluster.node-id", defaultValue = "elisa-1")
     String nodeId;
 
+    /** Same-JVM REGISTER source seen at P-CSCF before S-CSCF upserts the row. */
+    private final ConcurrentHashMap<String, ReceivedFlow> pendingFlows = new ConcurrentHashMap<>();
+
+    public record ReceivedFlow(String host, Integer port, String transport) {}
+
     @Transactional
     public void upsert(String impu, String contact, String path, String callId, int expiresSec) {
+        upsert(impu, contact, path, callId, expiresSec, null, null, null);
+    }
+
+    @Transactional
+    public void upsert(String impu, String contact, String path, String callId, int expiresSec,
+                       String receivedHost, Integer receivedPort, String receivedTransport) {
         Instant exp = Instant.now().plusSeconds(Math.max(0, expiresSec));
         if (expiresSec == 0) {
             ImsBinding b = ImsBinding.find("impu = ?1 and contact = ?2", impu, contact).firstResult();
             if (b != null) {
                 b.delete();
             }
+            pendingFlows.remove(contact);
             List<ImsBinding> remain = ImsBinding.list("impu", impu);
             if (remain.isEmpty()) {
                 regHome.remove(impu);
             }
             return;
+        }
+        if (receivedHost == null || receivedHost.isBlank()) {
+            ReceivedFlow pending = contact == null ? null : pendingFlows.get(contact);
+            if (pending != null) {
+                receivedHost = pending.host();
+                receivedPort = pending.port();
+                receivedTransport = pending.transport();
+            }
         }
         // Lab: one live Contact per IMPU (Linphone / dashboard A-B). Drop stale devices.
         List<ImsBinding> existing = ImsBinding.list("impu", impu);
@@ -53,8 +74,34 @@ public class BindingStore {
         b.expiresAt = exp;
         b.callId = callId;
         b.updatedAt = Instant.now();
+        if (receivedHost != null && !receivedHost.isBlank()) {
+            b.receivedHost = receivedHost;
+            b.receivedPort = receivedPort;
+            b.receivedTransport = receivedTransport;
+        }
         b.persist();
         regHome.put(impu, nodeId);
+    }
+
+    /**
+     * P-CSCF: remember REGISTER UDP/TCP source for this Contact (PG + same-JVM merge).
+     * Does not create an unauthenticated binding row.
+     */
+    @Transactional
+    public void rememberFlow(String contact, String receivedHost, Integer receivedPort,
+                             String receivedTransport) {
+        if (contact == null || contact.isBlank() || receivedHost == null || receivedHost.isBlank()) {
+            return;
+        }
+        pendingFlows.put(contact, new ReceivedFlow(receivedHost, receivedPort, receivedTransport));
+        List<ImsBinding> rows = ImsBinding.list("contact", contact);
+        for (ImsBinding row : rows) {
+            row.receivedHost = receivedHost;
+            row.receivedPort = receivedPort;
+            row.receivedTransport = receivedTransport;
+            row.updatedAt = Instant.now();
+            row.persist();
+        }
     }
 
     @Transactional

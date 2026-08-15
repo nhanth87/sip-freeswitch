@@ -5,8 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import et.elisa.cluster.DialogCheckpoint;
+import et.elisa.cluster.FsPairRegistry;
 import et.elisa.cmp.DialogCmpPersistence;
 import et.elisa.cmp.InviteCmpSnapshot;
+import et.elisa.esl.FreeSwitchRaBridge;
+import et.elisa.esl.HomeEslRemapService;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -133,5 +137,52 @@ class SbbRecoveryManagerLocalTest {
                 DialogCheckpoint.STATE_EARLY, now, now));
         RecoveryDecision d = mgr.decide(RecoveryKey.sipCallId("cid-home", "elisa-1"), false);
         assertEquals(RecoveryDecision.LOCAL_RESPAWN, d);
+    }
+
+    @Test
+    void failoverSpawnRebindsEslToCheckpointHomeFs() {
+        FsPairRegistry.EslTarget fs1 =
+                new FsPairRegistry.EslTarget("fs-1", "127.0.0.1", 8021, "ClueCon", 0);
+        FsPairRegistry.EslTarget fs2 =
+                new FsPairRegistry.EslTarget("fs-2", "10.0.0.22", 8021, "ClueCon", 0);
+        FsPairRegistry pairs = new FsPairRegistry().memoryOnly("elisa-1", List.of(fs1), fs2);
+        FreeSwitchRaBridge bridge = new FreeSwitchRaBridge();
+        bridge.setActiveFsNodeId("fs-1");
+        HomeEslRemapService remap = new HomeEslRemapService(pairs, bridge);
+        mgr.bindHomeEslRemap(remap);
+
+        long now = System.currentTimeMillis();
+        cmp.save(new InviteCmpSnapshot(
+                "cid-r9", "uuid-home", "2519", "sip:a@x", "sip:b@x", null,
+                "10.0.0.1:5060", "fs-2", "dead-node", DialogCheckpoint.STATE_CONFIRMED, now, now));
+
+        assertTrue(mgr.failoverSpawn(RecoveryKey.sipCallId("cid-r9", "dead-node"), 0L));
+        assertEquals("fs-2", bridge.lastRebind().fsNodeId());
+        assertEquals("10.0.0.22", bridge.lastRebind().host());
+        assertEquals(8021, bridge.lastRebind().port());
+        assertFalse(bridge.live(), "home FS down must not fake eslLive");
+        assertEquals("elisa-1", owners.get("cid-r9").orElseThrow().ownerNodeId());
+    }
+
+    @Test
+    void failoverSpawnHomeFsDownDoesNotFakeLive() {
+        FsPairRegistry.EslTarget fs1 =
+                new FsPairRegistry.EslTarget("fs-1", "127.0.0.1", 8021, "ClueCon", 0);
+        FsPairRegistry.EslTarget fs2 =
+                new FsPairRegistry.EslTarget("fs-2", "10.0.0.22", 8021, "ClueCon", 0);
+        FsPairRegistry pairs = new FsPairRegistry().memoryOnly("elisa-1", List.of(fs1), fs2);
+        FreeSwitchRaBridge bridge = new FreeSwitchRaBridge();
+        bridge.setActiveFsNodeId("fs-1");
+        mgr.bindHomeEslRemap(new HomeEslRemapService(pairs, bridge));
+
+        long now = System.currentTimeMillis();
+        cmp.save(new InviteCmpSnapshot(
+                "cid-r9-down", "uuid-2", "2519", "sip:a@x", "sip:b@x", null,
+                "10.0.0.1:5060", "fs-2", "dead-node", DialogCheckpoint.STATE_EARLY, now, now));
+
+        assertTrue(mgr.failoverSpawn(RecoveryKey.sipCallId("cid-r9-down", "dead-node"), 0L));
+        assertFalse(bridge.live());
+        assertFalse(bridge.probeLive());
+        assertEquals("fs-2", bridge.lastRebind().fsNodeId());
     }
 }

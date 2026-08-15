@@ -420,7 +420,7 @@ final class ElisaBootstrap {
                                     ? freeSwitchRaBridge.activeFsNodeId() : "fallback"));
         }
         if (imsRoles.pcscf()) {
-            container.registerSbbType(PcscfProxySbb.class, () -> new PcscfProxySbb(imsRoles, cpsMetrics));
+            container.registerSbbType(PcscfProxySbb.class, () -> new PcscfProxySbb(imsRoles, cpsMetrics, bindingStore));
         }
         if (imsRoles.icscf()) {
             container.registerSbbType(IcscfRoutingSbb.class, () -> new IcscfRoutingSbb(imsRoles, cxClient));

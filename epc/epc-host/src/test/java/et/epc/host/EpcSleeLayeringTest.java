@@ -63,9 +63,59 @@ class EpcSleeLayeringTest {
         assertEquals(7, rsp.sequence());
         assertEquals(Gtpv2Ies.CAUSE_REQUEST_ACCEPTED, rsp.first(Gtpv2Ie.CAUSE).value()[0] & 0xff);
         assertNotNull(rsp.first(Gtpv2Ie.FTEID));
+        Gtpv2Ie bearer = rsp.first(Gtpv2Ie.BEARER_CONTEXT);
+        assertNotNull(bearer);
+        List<Gtpv2Ie> inner = Gtpv2Ies.decodeGrouped(bearer.value());
+        assertTrue(inner.stream().anyMatch(i -> i.type() == Gtpv2Ie.EBI && (i.value()[0] & 0xff) == 5));
+        assertTrue(inner.stream().anyMatch(i -> i.type() == Gtpv2Ie.FTEID));
+        GtpFteid s1u = Gtpv2Ies.s1uFromBearerContext(rsp);
+        assertNotNull(s1u);
+
+        int sgwS11 = Gtpv2Ies.decodeFteid(rsp.first(Gtpv2Ie.FTEID).value()).teid();
+        Gtpv2Message rab = new Gtpv2Message(
+                Gtpv2MessageType.RELEASE_ACCESS_BEARERS_REQUEST, sgwS11, 8, (byte) 1, List.of());
+        bootstrap.gtp().receive(Gtpv2Codec.encode(rab), mme);
+        Gtpv2Message rabRsp = waitDecode(sent, 3);
+        assertEquals(Gtpv2MessageType.RELEASE_ACCESS_BEARERS_RESPONSE, rabRsp.type());
+        assertEquals(8, rabRsp.sequence());
+        assertEquals(Gtpv2Ies.CAUSE_REQUEST_ACCEPTED, rabRsp.first(Gtpv2Ie.CAUSE).value()[0] & 0xff);
         assertTrue(bootstrap.sessions().size() >= 1);
         assertNotNull(bootstrap.gtp());
         assertTrue(bootstrap.slee() == slee);
+    }
+
+    @Test
+    void releaseAccessUnknownTeidAnswersContextNotFound() throws Exception {
+        slee = new MicroSleeContainer();
+        bootstrap = new EpcBootstrap(
+                new EpcRoles(false, true, false), EpcClusterConfig.local("epc-sgwc-1"));
+        bootstrap.attachTo(slee);
+        CopyOnWriteArrayList<byte[]> sent = new CopyOnWriteArrayList<>();
+        bootstrap.gtp().setSink((bytes, peer) -> sent.add(bytes));
+        InetSocketAddress mme = new InetSocketAddress("192.0.2.10", 2123);
+        Gtpv2Message rab = new Gtpv2Message(
+                Gtpv2MessageType.RELEASE_ACCESS_BEARERS_REQUEST, 0xdead, 3, (byte) 1, List.of());
+        bootstrap.gtp().receive(Gtpv2Codec.encode(rab), mme);
+        Gtpv2Message rsp = waitDecode(sent, 1);
+        assertEquals(Gtpv2MessageType.RELEASE_ACCESS_BEARERS_RESPONSE, rsp.type());
+        assertEquals(Gtpv2Ies.CAUSE_CONTEXT_NOT_FOUND, rsp.first(Gtpv2Ie.CAUSE).value()[0] & 0xff);
+    }
+
+    @Test
+    void inboundDdnIsAcknowledged() throws Exception {
+        slee = new MicroSleeContainer();
+        bootstrap = new EpcBootstrap(
+                new EpcRoles(false, true, false), EpcClusterConfig.local("epc-sgwc-1"));
+        bootstrap.attachTo(slee);
+        CopyOnWriteArrayList<byte[]> sent = new CopyOnWriteArrayList<>();
+        bootstrap.gtp().setSink((bytes, peer) -> sent.add(bytes));
+        InetSocketAddress mme = new InetSocketAddress("192.0.2.10", 2123);
+        Gtpv2Message ddn = new Gtpv2Message(
+                Gtpv2MessageType.DOWNLINK_DATA_NOTIFICATION, 0, 4, (byte) 1, List.of());
+        bootstrap.gtp().receive(Gtpv2Codec.encode(ddn), mme);
+        Gtpv2Message ack = waitDecode(sent, 1);
+        assertEquals(Gtpv2MessageType.DOWNLINK_DATA_NOTIFICATION_ACKNOWLEDGE, ack.type());
+        assertEquals(Gtpv2Ies.CAUSE_REQUEST_ACCEPTED, ack.first(Gtpv2Ie.CAUSE).value()[0] & 0xff);
     }
 
     private static Gtpv2Message waitDecode(CopyOnWriteArrayList<byte[]> sent, int min) throws InterruptedException {

@@ -52,16 +52,20 @@ public class EpcRuntime {
     @ConfigProperty(name = "epc.pfcp.bind.port", defaultValue = "8805")
     int pfcpBindPort;
 
+    @ConfigProperty(name = "epc.jdbc.url", defaultValue = EpcJdbc.DEFAULT_URL)
+    String jdbcUrl;
+
     private EpcBootstrap bootstrap;
     private LinkStatusBoard board;
     private MicroSleeContainer slee;
 
     void onStart(@Observes StartupEvent ev) {
+        EpcJdbc.requirePostgres(jdbcUrl);
         EpcRoles roles = EpcRoles.fromEnv(roleHss, roleSgwc, rolePgwc);
         EpcClusterConfig cfg = new EpcClusterConfig(
                 nodeId, ClusterMode.valueOf(mode), clusterName, nodeIndex);
         slee = new MicroSleeContainer();
-        bootstrap = new EpcBootstrap(roles, cfg);
+        bootstrap = new EpcBootstrap(roles, cfg).withJdbcUrl(jdbcUrl);
         bootstrap.attachTo(slee);
         bootstrap.bindTransport(
                 new InetSocketAddress("0.0.0.0", gtpBindPort),

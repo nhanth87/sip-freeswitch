@@ -80,6 +80,12 @@ public final class EpcBootstrap {
         return this;
     }
 
+    /** Product HSS JDBC is PostgreSQL on {@code postgres-epc}/{@code epc} only. */
+    public EpcBootstrap withJdbcUrl(String jdbcUrl) {
+        EpcJdbc.requirePostgres(jdbcUrl);
+        return this;
+    }
+
     /**
      * Test / RA-only path: activate endpoints on the given bootstrap and do
      * <em>not</em> attach SBBs. Prefer {@link #attachTo(MicroSleeContainer)}

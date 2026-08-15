@@ -114,6 +114,10 @@ public abstract class GtpGatewaySbb extends CmpBackedSbb implements SleeEventHan
                 case CREATE_SESSION_REQUEST -> createSession(ev);
                 case MODIFY_BEARER_REQUEST -> modifyBearer(ev);
                 case DELETE_SESSION_REQUEST -> deleteSession(ev);
+                case RELEASE_ACCESS_BEARERS_REQUEST -> releaseAccessBearers(ev);
+                case DOWNLINK_DATA_NOTIFICATION -> downlinkDataNotification(ev);
+                case DOWNLINK_DATA_NOTIFICATION_ACKNOWLEDGE ->
+                    LOG.debug("GtpGatewaySbb DDN-Ack seq={}", msg.sequence());
                 default -> LOG.debug("GtpGatewaySbb ignore {}", msg.type());
             }
         } catch (RuntimeException e) {
@@ -155,13 +159,13 @@ public abstract class GtpGatewaySbb extends CmpBackedSbb implements SleeEventHan
             send(error(ev.message(), 64), ev.peer());
             return;
         }
-        Fteid newEnb = api(Gtpv2Ies.senderFteid(ev.message()));
+        Fteid newEnb = api(Gtpv2Ies.s1uFromBearerContext(ev.message()));
         Fteid s1u = sgw.modifyAccessByTeid(ev.message().teid(), newEnb);
         setS11cTeid(ev.message().teid());
         send(new Gtpv2Message(Gtpv2MessageType.MODIFY_BEARER_RESPONSE,
                 ev.message().teid(), ev.message().sequence(), ev.message().recovery(),
                 List.of(Gtpv2Ies.causeAccepted(),
-                        new Gtpv2Ie(Gtpv2Ie.FTEID, 0, Gtpv2Ies.encodeFteid(gtp(s1u))))),
+                        bearerContext(gtp(s1u)))),
                 ev.peer());
     }
 
@@ -170,6 +174,25 @@ public abstract class GtpGatewaySbb extends CmpBackedSbb implements SleeEventHan
             pgw.deleteSession(new Imsi(getImsi()), getApn());
         }
         send(new Gtpv2Message(Gtpv2MessageType.DELETE_SESSION_RESPONSE,
+                ev.message().teid(), ev.message().sequence(), ev.message().recovery(),
+                List.of(Gtpv2Ies.causeAccepted())), ev.peer());
+    }
+
+    /**
+     * Release Access Bearers: drop S1-U forwarding, keep S5. Always answer 171.
+     * Cause 16 if the S11 TEID is known; 64 (Context not found) otherwise.
+     */
+    private void releaseAccessBearers(Gtpv2MessageEvent ev) {
+        boolean released = sgw != null && sgw.releaseAccessByTeid(ev.message().teid());
+        int cause = released ? Gtpv2Ies.CAUSE_REQUEST_ACCEPTED : Gtpv2Ies.CAUSE_CONTEXT_NOT_FOUND;
+        send(new Gtpv2Message(Gtpv2MessageType.RELEASE_ACCESS_BEARERS_RESPONSE,
+                ev.message().teid(), ev.message().sequence(), ev.message().recovery(),
+                List.of(Gtpv2Ies.cause(cause))), ev.peer());
+    }
+
+    /** Inbound DDN (176) is odd on an SGW; still ack 177 so the peer is not left hanging. */
+    private void downlinkDataNotification(Gtpv2MessageEvent ev) {
+        send(new Gtpv2Message(Gtpv2MessageType.DOWNLINK_DATA_NOTIFICATION_ACKNOWLEDGE,
                 ev.message().teid(), ev.message().sequence(), ev.message().recovery(),
                 List.of(Gtpv2Ies.causeAccepted())), ev.peer());
     }
@@ -199,7 +222,7 @@ public abstract class GtpGatewaySbb extends CmpBackedSbb implements SleeEventHan
                         Gtpv2Ies.causeAccepted(),
                         new Gtpv2Ie(Gtpv2Ie.FTEID, 0, Gtpv2Ies.encodeFteid(gtp(r.sgwS11c()))),
                         new Gtpv2Ie(Gtpv2Ie.PDN_ADDRESS, 0, Gtpv2Ies.encodePaa(r.ue().ipv4())),
-                        new Gtpv2Ie(Gtpv2Ie.BEARER_CONTEXT, 0, Gtpv2Ies.encodeFteid(gtp(r.sgwS1u())))));
+                        bearerContext(gtp(r.sgwS1u()))));
     }
 
     private static Gtpv2Message pgwCreateSessionResponse(Gtpv2Message req, CreateSessionResult r) {
@@ -208,7 +231,13 @@ public abstract class GtpGatewaySbb extends CmpBackedSbb implements SleeEventHan
                 List.of(
                         Gtpv2Ies.causeAccepted(),
                         new Gtpv2Ie(Gtpv2Ie.FTEID, 0, Gtpv2Ies.encodeFteid(gtp(r.pgwS5c()))),
-                        new Gtpv2Ie(Gtpv2Ie.PDN_ADDRESS, 0, Gtpv2Ies.encodePaa(r.ue().ipv4()))));
+                        new Gtpv2Ie(Gtpv2Ie.PDN_ADDRESS, 0, Gtpv2Ies.encodePaa(r.ue().ipv4())),
+                        bearerContext(gtp(r.pgwS5u()))));
+    }
+
+    private static Gtpv2Ie bearerContext(GtpFteid s1u) {
+        return new Gtpv2Ie(Gtpv2Ie.BEARER_CONTEXT, 0,
+                Gtpv2Ies.encodeBearerContext(Gtpv2Ies.DEFAULT_BEARER_EBI, s1u, Gtpv2Ies.causeAccepted()));
     }
 
     private static GtpFteid gtp(Fteid f) {
@@ -224,10 +253,12 @@ public abstract class GtpGatewaySbb extends CmpBackedSbb implements SleeEventHan
             case CREATE_SESSION_REQUEST -> Gtpv2MessageType.CREATE_SESSION_RESPONSE;
             case MODIFY_BEARER_REQUEST -> Gtpv2MessageType.MODIFY_BEARER_RESPONSE;
             case DELETE_SESSION_REQUEST -> Gtpv2MessageType.DELETE_SESSION_RESPONSE;
+            case RELEASE_ACCESS_BEARERS_REQUEST -> Gtpv2MessageType.RELEASE_ACCESS_BEARERS_RESPONSE;
+            case DOWNLINK_DATA_NOTIFICATION -> Gtpv2MessageType.DOWNLINK_DATA_NOTIFICATION_ACKNOWLEDGE;
             default -> Gtpv2MessageType.CREATE_SESSION_RESPONSE;
         };
         return new Gtpv2Message(rsp, req.teid(), req.sequence(), req.recovery(),
-                List.of(new Gtpv2Ie(Gtpv2Ie.CAUSE, 0, new byte[] {(byte) cause, 0})));
+                List.of(Gtpv2Ies.cause(cause)));
     }
 
     private void send(Gtpv2Message msg, InetSocketAddress peer) {

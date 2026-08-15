@@ -20,8 +20,10 @@ import com.microjainslee.ra.sipservlet.events.SipRegisterEvent;
 import com.microjainslee.ra.sipservlet.events.SipResponseEvent;
 import et.elisa.ims.charging.PChargingVectors;
 import et.elisa.ims.config.ImsRoleFlags;
+import et.elisa.ims.reg.BindingStore;
 import et.elisa.logging.SleeEventTrace;
 import et.elisa.metrics.SipCpsMetrics;
+import et.elisa.persist.ImsBinding;
 import java.util.List;
 import java.util.Map;
 import org.apache.logging.log4j.LogManager;
@@ -37,21 +39,27 @@ public final class PcscfProxySbb implements Sbb, SleeEventHandler {
 
     private final ImsRoleFlags roles;
     private final SipCpsMetrics metrics;
+    private final BindingStore bindings;
 
     @InjectRa(name = "sip-servlet-ra")
     private volatile RaCommandPort sipRa;
 
     public PcscfProxySbb() {
-        this(null, null);
+        this(null, null, null);
     }
 
     public PcscfProxySbb(ImsRoleFlags roles) {
-        this(roles, null);
+        this(roles, null, null);
     }
 
     public PcscfProxySbb(ImsRoleFlags roles, SipCpsMetrics metrics) {
+        this(roles, metrics, null);
+    }
+
+    public PcscfProxySbb(ImsRoleFlags roles, SipCpsMetrics metrics, BindingStore bindings) {
         this.roles = roles;
         this.metrics = metrics;
+        this.bindings = bindings;
     }
 
     @Override public void sbbCreate() {}
@@ -82,7 +90,10 @@ public final class PcscfProxySbb implements Sbb, SleeEventHandler {
         if (roles == null || !roles.pcscf()) {
             return;
         }
-        String path = "<" + roles.pcscfUri() + ";lr>";
+        if (bindings != null) {
+            bindings.rememberFlow(e.contactUri(), e.receivedHost(), e.receivedPort(), e.receivedTransport());
+        }
+        String path = "<" + roles.pcscfUri() + ";lr;ob>";
         LOG.debug("[P-CSCF] REGISTER Path={} callId={} (sec-agree soft-fail)", path, e.callId());
         // Co-located I/S: ScscfRegisterSbb owns AKA; Path stamped on 200 by S-CSCF.
         if (roles.scscf() || roles.icscf()) {
@@ -117,6 +128,13 @@ public final class PcscfProxySbb implements Sbb, SleeEventHandler {
             metrics.onInvite();
         }
         Map<String, List<String>> ims = PChargingVectors.copyIms(e.imsHeaders());
+        String flowHop = mtFlowNextHop(e);
+        if (flowHop != null) {
+            LOG.debug("[P-CSCF] MT INVITE callId={} to={} flow={}", e.callId(), e.toUri(), flowHop);
+            send(SendResponse.of(e.callId(), 100, "Trying"));
+            send(new SendInvite(e.callId(), e.toUri(), e.fromUri(), e.sdpBody(), ims, flowHop));
+            return;
+        }
         ims.put("P-Asserted-Identity", List.of(e.fromUri()));
         ims.put("Route", List.of("<" + roles.icscfUri() + ";lr>"));
         PChargingVectors.ensureInvite(ims, e.callId(), roles.realm());
@@ -124,6 +142,20 @@ public final class PcscfProxySbb implements Sbb, SleeEventHandler {
         LOG.debug("[P-CSCF] INVITE callId={} to={} next={}", e.callId(), e.toUri(), next);
         send(SendResponse.of(e.callId(), 100, "Trying"));
         send(new SendInvite(e.callId(), e.toUri(), e.fromUri(), e.sdpBody(), ims, next));
+    }
+
+    /**
+     * Terminating INVITE toward UE: Request-URI is a Contact/IP, not an IMPU domain.
+     * Send on the stored REGISTER flow, not Contact 172.21.0.1.
+     */
+    private String mtFlowNextHop(SipInviteEvent e) {
+        if (bindings == null || e == null || !ImsBinding.looksLikeIpHost(e.toUri())) {
+            return null;
+        }
+        return bindings.findLive(e.toUri())
+                .filter(ImsBinding::flowDiffersFromContact)
+                .map(ImsBinding::flowNextHopUri)
+                .orElse(null);
     }
 
     void onAck(SipAckEvent e) {

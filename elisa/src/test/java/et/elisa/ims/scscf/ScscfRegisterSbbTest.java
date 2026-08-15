@@ -152,6 +152,29 @@ class ScscfRegisterSbbTest {
     }
 
     @Test
+    void success_storesReceivedFlowSeparateFromPrivateContact() {
+        CapturingRa ra = new CapturingRa();
+        StubCx cx = new StubCx();
+        StubHss hss = new StubHss();
+        StubBindings bindings = new StubBindings();
+        byte[] xres = AkaMd5.parseHex("1122334455667788");
+        hss.pending = Optional.of(new HssLiteService.PendingAuth("u@ims.lab", "sip:u@ims.lab", xres, 9));
+        ScscfRegisterSbb sbb = new ScscfRegisterSbb(ImsTestSupport.roles(true, true, true, true),
+                cx, hss, bindings, null);
+        ImsTestSupport.injectRa(sbb, ra);
+
+        String auth = "Digest response=\"" + AkaMd5.toHex(xres) + "\"";
+        sbb.onRegister(new SipRegisterEvent("c-nat", "sip:alice@ims.lab", "sip:alice@ims.lab",
+                "sip:alice@172.21.0.1:5060", 3600, auth, "<sip:pcscf.ims.lab:5060;lr;ob>",
+                "192.0.2.80", 5060, "UDP"));
+
+        assertEquals(200, ra.ofType(SendResponse.class).getFirst().statusCode());
+        assertEquals(1, bindings.upserts.get());
+        assertEquals("192.0.2.80", bindings.lastReceivedHost.get());
+        assertEquals(5060, bindings.lastReceivedPort.get().intValue());
+    }
+
+    @Test
     void digestRegister_dashboardSipClient() {
         CapturingRa ra = new CapturingRa();
         StubCx cx = new StubCx();
@@ -305,10 +328,20 @@ class ScscfRegisterSbbTest {
 
     static final class StubBindings extends BindingStore {
         final AtomicInteger upserts = new AtomicInteger();
+        final AtomicReference<String> lastReceivedHost = new AtomicReference<>();
+        final AtomicReference<Integer> lastReceivedPort = new AtomicReference<>();
 
         @Override
         public void upsert(String impu, String contact, String path, String callId, int expiresSec) {
+            upsert(impu, contact, path, callId, expiresSec, null, null, null);
+        }
+
+        @Override
+        public void upsert(String impu, String contact, String path, String callId, int expiresSec,
+                           String receivedHost, Integer receivedPort, String receivedTransport) {
             upserts.incrementAndGet();
+            lastReceivedHost.set(receivedHost);
+            lastReceivedPort.set(receivedPort);
         }
     }
 }

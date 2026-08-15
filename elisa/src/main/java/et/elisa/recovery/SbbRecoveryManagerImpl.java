@@ -13,6 +13,7 @@ import et.elisa.cluster.DialogCheckpointStore;
 import et.elisa.cluster.FsPairRegistry;
 import et.elisa.cmp.DialogCmpPersistence;
 import et.elisa.cmp.InviteCmpSnapshot;
+import et.elisa.esl.HomeEslRemapService;
 import et.elisa.ims.scscf.ScscfInviteSbb;
 import et.elisa.profile.ElisaProfileService;
 import et.elisa.session.CallSessionSbb;
@@ -57,6 +58,7 @@ public class SbbRecoveryManagerImpl implements SbbRecoveryManager {
     @Inject DialogCheckpointStore checkpoints;
     @Inject FsPairRegistry fsPairRegistry;
     @Inject ElisaProfileService profiles;
+    @Inject HomeEslRemapService homeEslRemap;
 
     private volatile SipServletResourceAdaptor sipRa;
     private volatile SessionRecoveryService sessionRecovery;
@@ -100,6 +102,11 @@ public class SbbRecoveryManagerImpl implements SbbRecoveryManager {
 
     public void bindSessionRecovery(SessionRecoveryService service) {
         this.sessionRecovery = service;
+    }
+
+    /** Unit-test wiring for R9 ESL remap. */
+    public void bindHomeEslRemap(HomeEslRemapService remap) {
+        this.homeEslRemap = remap;
     }
 
     @PostConstruct
@@ -247,6 +254,7 @@ public class SbbRecoveryManagerImpl implements SbbRecoveryManager {
                 return false;
             }
             claimWon.incrementAndGet();
+            remapHomeEsl(key);
             boolean ok = spawnAndRestore(key, /*failover*/ true);
             if (ok && sipRa != null && !hasRestoredWire(key.correlate())) {
                 blockedSipHa.incrementAndGet();
@@ -353,6 +361,52 @@ public class SbbRecoveryManagerImpl implements SbbRecoveryManager {
         }
         return spawnInvite(correlate, failover);
     }
+
+    /**
+     * R9: recovered dialog keeps media on home FS. Rebind ESL when this
+     * S-CSCF's primary is a different node. Home down → eslLive=false.
+     */
+    void remapHomeEsl(RecoveryKey key) {
+        if (homeEslRemap == null || key == null) {
+            return;
+        }
+        HomeFs home = resolveHomeFs(key);
+        if (home.fsNodeId() == null) {
+            return;
+        }
+        homeEslRemap.remapToHomeFs(home.elisaNodeId(), home.fsNodeId());
+    }
+
+    private HomeFs resolveHomeFs(RecoveryKey key) {
+        if (key.kind() == CorrelateKind.FS_UUID && callSessions != null) {
+            Optional<CallSession> session = callSessions.findByFsUuid(key.correlate());
+            if (session.isPresent()) {
+                CallSession s = session.get();
+                return new HomeFs(s.elisaNodeId(), s.fsNodeId());
+            }
+        }
+        if (dialogCmp != null) {
+            Optional<InviteCmpSnapshot> snap = dialogCmp.load(key.correlate());
+            if (snap.isPresent()) {
+                InviteCmpSnapshot s = snap.get();
+                String fs = s.fsNodeId();
+                if (fs != null && !fs.isBlank()) {
+                    String elisa = s.elisaNodeId() != null ? s.elisaNodeId() : key.homeNodeId();
+                    return new HomeFs(elisa, fs);
+                }
+            }
+        }
+        if (callSessions != null) {
+            Optional<CallSession> session = callSessions.findBySipCallId(key.correlate());
+            if (session.isPresent()) {
+                CallSession s = session.get();
+                return new HomeFs(s.elisaNodeId(), s.fsNodeId());
+            }
+        }
+        return new HomeFs(key.homeNodeId(), null);
+    }
+
+    private record HomeFs(String elisaNodeId, String fsNodeId) {}
 
     private boolean spawnInvite(String callId, boolean failover) {
         Optional<InviteCmpSnapshot> snap = dialogCmp != null ? dialogCmp.load(callId) : Optional.empty();

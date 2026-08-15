@@ -12,4 +12,12 @@ public interface DurableSink {
     Optional<SessionCheckpoint> load(String sessionId);
 
     List<SessionCheckpoint> loadByOwner(String nodeId);
+
+    /**
+     * Postgres (or LOCAL heap sink) lookup by S11-C TEID. Default empty —
+     * GTP RAB must not assume a SQL engine other than PostgreSQL.
+     */
+    default Optional<SessionCheckpoint> findByS11cTeid(int s11cTeid) {
+        return Optional.empty();
+    }
 }
