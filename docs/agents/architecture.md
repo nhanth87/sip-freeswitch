@@ -14,7 +14,7 @@ flowchart LR
   AMF -.-> SMF[SMF_UPF_ext]
   Elisa -->|ISC_SIP| FS[freeswitch_MRF]
   Elisa -->|ESL| FS
-  Elisa -->|Cx| HSS[HSS_lite_or_peer]
+  Elisa -->|Cx| HSS[HSS_lite_or_epc_hss]
   FS -->|RTP_ICE_TURN| Media[media_path]
   UE -->|RTP| Media
   FS -->|xml_curl_internal| Elisa
@@ -31,6 +31,7 @@ flowchart LR
 | **postgres** | Config, tenants, IMS profiles/bindings, call sessions, CDR |
 | **Infinispan** | Dialog + registration + call-session (C1/P2) |
 | **5GC (external)** | AMF/SMF/UPF — PDU / mobility; **not** in Elisa |
+| **epc/** (sibling process) | 4G MVNO HSS + SGW-C/U + PGW-C/U — **not** this JVM — [`epc.md`](epc.md) |
 
 **5G note:** Voice enters on **Gm** via nginx SIP VIP → Elisa P-CSCF. Full call flows: [`ims-core.md`](ims-core.md) § *5G → CSCF boundary*.
 
@@ -44,9 +45,10 @@ Do **not** grow Elisa into:
 - Full session-border product (transcoding farm, SIP-I/SIP-T gateway farm)
 - FreePBX as the signaling controller
 - AMF/SMF/UPF (5GC) inside this process
+- GTP-U, S11, S6a, PFCP, PCEF (those live in [`epc/`](../../epc/), separate process + `epc-cluster`)
 
 IMS CSCF + Cx **are in scope** (lab); PCRF Rx/N5 / MGCF deferred.
 
 **rtp_redirect** (required): media via TURN / FS RTP; Elisa enforces SDP policy + FS `bypass_media=false`. See [`media-ice-turn.md`](media-ice-turn.md).
 
-Capacity: **10 000 INVITE/s** on signaling — claim only after SIPp green.
+Capacity: **10 000 INVITE/s per node** on signaling — claim only after SIPp green ([`capacity-acceptance.md`](capacity-acceptance.md)). **1M SIP TPS** is cluster-scale, not one JVM — [`capacity-1m.md`](capacity-1m.md).

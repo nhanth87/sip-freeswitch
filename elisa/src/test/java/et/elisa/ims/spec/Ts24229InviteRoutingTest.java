@@ -201,6 +201,23 @@ class Ts24229InviteRoutingTest {
         }
 
         @Test
+        void bye_sendsFarLegBefore200() {
+            CapturingRa ra = new CapturingRa();
+            ScscfInviteSbb sbb = new ScscfInviteSbb.$Concrete(
+                    ImsTestSupport.roles(false, false, true, false),
+                    router("sip:1000@freeswitch:5060"), new EmptyBindings(),
+                    new DialogCmpPersistence().withoutPg(),
+                    null, null, "elisa-1", "fs-1");
+            ImsTestSupport.injectRa(sbb, ra);
+            sbb.onEvent(new com.microjainslee.ra.sipservlet.events.SipByeEvent("bye-fs"), null);
+            assertEquals(2, ra.commands.size());
+            assertTrue(ra.commands.get(0) instanceof com.microjainslee.ra.sipservlet.command.SendBye,
+                    "ISC BYE toward FreeSWITCH must precede 200 — RA endDialog on BYE 200");
+            assertTrue(ra.commands.get(1) instanceof SendResponse);
+            assertEquals(200, ((SendResponse) ra.commands.get(1)).statusCode());
+        }
+
+        @Test
         void moInvite_ifcSkipAs_mustNotStillForceAsUri() {
             CapturingRa ra = new CapturingRa();
             IscAsRouter isc = router("sip:as@127.0.0.1:5062");

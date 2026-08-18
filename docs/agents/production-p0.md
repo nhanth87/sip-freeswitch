@@ -93,6 +93,7 @@ Green `mvn test` alone ≠ host runs new code.
 ## 7. Explicit non-claims
 
 - No 10 000 INVITE/s until SIPp green ([`capacity-acceptance.md`](capacity-acceptance.md))
+- No 1M SIP TPS claim; that is cluster-scale after the 10k/node gate ([`capacity-1m.md`](capacity-1m.md))
 - No Chronos / full Clearwater / Sh / Ut / Rx / ENUM NAPTR
 - No Digicom “fixed” without §6
 

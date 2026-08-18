@@ -125,6 +125,10 @@ final class ElisaBootstrap {
     @ConfigProperty(name = "sf.ims.cx.listen-port", defaultValue = "3868") int cxPort;
     @ConfigProperty(name = "sf.ims.cx.origin-host", defaultValue = "elisa.ims.lab") String cxOriginHost;
     @ConfigProperty(name = "sf.ims.cx.origin-realm", defaultValue = "ims.lab") String cxOriginRealm;
+    @ConfigProperty(name = "sf.ims.cx.peer-host", defaultValue = "") String cxPeerHost;
+    @ConfigProperty(name = "sf.ims.cx.peer-port", defaultValue = "3868") int cxPeerPort;
+    @ConfigProperty(name = "sf.ims.cx.destination-host", defaultValue = "hss.ims.lab") String cxDestHost;
+    @ConfigProperty(name = "sf.ims.cx.destination-realm", defaultValue = "ims.lab") String cxDestRealm;
     @ConfigProperty(name = "microjainslee.container.sbb-pool-min", defaultValue = "16") int sbbPoolMin;
     @ConfigProperty(name = "microjainslee.container.sbb-pool-max", defaultValue = "40960") int sbbPoolMax;
     @ConfigProperty(name = "sf.ims.cx.enabled", defaultValue = "true") boolean cxEnabled;
@@ -338,6 +342,12 @@ final class ElisaBootstrap {
         cfg.setOriginHost(cxOriginHost);
         cfg.setRealm(cxOriginRealm);
         cfg.setProductName("elisa-ims-cx");
+        diameterConfigSet(cfg, "setDestinationHost", String.class, cxDestHost);
+        diameterConfigSet(cfg, "setDestinationRealm", String.class, cxDestRealm);
+        if (cxPeerHost != null && !cxPeerHost.isBlank() && !"none".equalsIgnoreCase(cxPeerHost.trim())) {
+            diameterConfigSet(cfg, "setPeerHost", String.class, cxPeerHost.trim());
+            diameterConfigSet(cfg, "setPeerPort", int.class, cxPeerPort);
+        }
         DiameterResourceAdaptor ra = new DiameterResourceAdaptor();
         diameterEndpoint = new DiameterRaEndpoint(ra);
         diameterEndpoint.setConfig(cfg);
@@ -348,8 +358,20 @@ final class ElisaBootstrap {
         if (rfAcrEmitter != null) {
             rfAcrEmitter.bindDiameter(diameterEndpoint);
         }
-        LOG.info("Diameter RA Cx {}:{} originHost={} peerReady={}",
-                cxHost, cxPort, cxOriginHost, diameterEndpoint.isPeerReady());
+        LOG.info("Diameter RA Cx {}:{} originHost={} peer={}:{} destHost={} peerReady={}",
+                cxHost, cxPort, cxOriginHost,
+                cxPeerHost == null || cxPeerHost.isBlank() || "none".equalsIgnoreCase(cxPeerHost.trim())
+                        ? "-" : cxPeerHost.trim(),
+                cxPeerPort, cxDestHost, diameterEndpoint.isPeerReady());
+    }
+
+    /** ra-diameter 1.2 SNAPSHOT gained peer/dest setters after some lab jars; skip if absent. */
+    private static void diameterConfigSet(DiameterRaConfig cfg, String method, Class<?> type, Object value) {
+        try {
+            cfg.getClass().getMethod(method, type).invoke(cfg, value);
+        } catch (ReflectiveOperationException e) {
+            LOG.debug("DiameterRaConfig.{} not in this ra-diameter — {}", method, e.toString());
+        }
     }
 
     private void wireTelemetry() {

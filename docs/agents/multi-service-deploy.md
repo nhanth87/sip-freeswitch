@@ -13,6 +13,11 @@
 | `hss` | **same** | HSS only | Diameter Cx (no SIP/ESL) |
 | `freeswitch` (×N) | FS image | n/a | **Essential** MRF/AS + ESL — always paired with S |
 | `nginx` | edge | n/a | VIP SIP + admin HTTP |
+| `epc-hss` | **epc-host** | `EPC_ROLE_HSS` | S6a + production Cx (`postgres-epc`) |
+| `epc-sgwc` (×N) | **same** | `EPC_ROLE_SGWC` | S11/S5 + Sxa; 1:1 `sgwu` |
+| `epc-pgwc` (×N) | **same** | `EPC_ROLE_PGWC` | S5 + Sxb + PCEF; 1:1 `pgwu` |
+
+EPC overlay: `docker compose -f docker-compose.yml -f docker-compose.services.yml --profile epc up -d`. Roles: [`deploy/epc/roles/`](../../deploy/epc/roles/). Cx to EPC HSS: [`deploy/elisa/roles/scscf-cx-epc.env`](../../deploy/elisa/roles/scscf-cx-epc.env). Detail: [`epc.md`](epc.md).
 
 ```text
 UA ──VIP──► nginx ──► pcscf (×N, affinity)

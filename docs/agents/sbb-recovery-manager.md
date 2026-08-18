@@ -50,7 +50,7 @@ Detection → Decision (home sticky / fence) → Restore (ISPN→PG→Profile) �
 | R6 TERMINATED no respawn | **yes** |
 | R7 checkpoint cadence | app write-through + RA Gate A (existing) |
 | R8 off INVITE path | async VT executor on removal + `@ViewChanged` async listener |
-| R9 FS pair | noted; no auto ESL remap yet |
+| R9 FS pair | **yes** — `HomeEslRemapService` on `failoverSpawn`: ESL rebind to checkpoint `fsNodeId` via `sf_fs_pair`; home down → `eslLive=false` (no fake REGED, no RTP move). Unit-tested only — not a live N–N kill prove. |
 | R10 rehydrate guard | `RECOVERING` ThreadLocal + SessionRecovery REHYDRATING |
 
 ---
@@ -105,6 +105,7 @@ RA DialogRegistry + RaSessionMeta
                               recoverAfterFailure
                               restoreDialogFromCheckpoint (SipDialogHa)
                               then restoreDialogFromCluster if ClusterManager bound
+                              R9 HomeEslRemapService → ESL rebind to checkpoint fsNodeId
                               metric blocked_sip_ha if no lastRequest
          │
          │  mid-dialog BYE (C2 VIP may land on B)
@@ -139,7 +140,7 @@ void onEntitySuspect(String sbbId, long lastBeatEpochMs);
 ## 5. Remaining gaps
 
 1. **SIP `lastRequest` / `lastResponse` objects** — synthetic rebuild from SipDialogHa; early INVITE without tags still blocked (`blockedSipHa`).
-2. **C3 FS pair ESL remap** on failover — not automatic (R9 / P1). Media stays on home FS.
+2. **C3 FS pair ESL remap** on failover — **wired (R9)**: `failoverSpawn` → `HomeEslRemapService` rebinds `freeswitch-ra` to checkpoint home `fsNodeId`. Media stays on home FS. Home ESL down stays `eslLive=false`. `EslFailoverService` still walks **this** node's pair only (pinned home is not replaced by another S-CSCF's FS). Unit tests only — not proven with `nn-midcall-kill.sh` in this pass.
 3. **Admin HTMX orphan list** — not shipped.
 4. **Kernel `SbbEntitySnapshot` prefer-newer merge** — app CMP is primary restore path today.
 5. **Chronos-class dialog SM** — no.

@@ -28,3 +28,7 @@ Scenarios: [`loadtest/sipp/`](../../loadtest/sipp/).
 ## Phase-0 baseline
 
 Until SIPp green at 10k: record max green CPS in bench output and treat 10k as **target**, not fact.
+
+## Next ladder (not this gate)
+
+**1 000 000 SIP TPS** is a cluster aggregate after this 10k/node gate is green. It is not 1M INVITE/s and not one JVM. Foundations + honesty: [`capacity-1m.md`](capacity-1m.md).

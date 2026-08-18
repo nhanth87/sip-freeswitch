@@ -1,0 +1,83 @@
+Vòng SIP đầy đủ đã chạy local qua VIP nginx → P-CSCF → I-CSCF → S-CSCF (HSS-lite + PG) → FreeSWITCH. Không rsync host. Không claim 10k CPS.
+
+Kết quả SIPp 10 cuộc/s
+Warmup 1 cuộc rồi 300 cuộc / 30s, target 10 cps (thực tế 9.05 cps):
+
+Bước	Số lượng
+REGISTER → 401 Digest
+300 / 300
+REGISTER auth → 200
+300 / 300
+INVITE sip:1000@ims.lab → 100 + 200 (FS)
+300 / 300
+ACK
+300
+Hold 3s
+300
+BYE → 200
+300 / 300
+Successful / Failed
+300 / 0
+INVITE 200 trung vị ~140 ms. Binding sip:alice@ims.lab home elisa-scscf-1. S-CSCF log ISC third-party REGISTER tới sip:1000@freeswitch:5060.
+
+Đường đi trên 200 REGISTER: Path: <sip:pcscf.ims.lab:5060;lr> + Service-Route: <sip:scscf:5060;lr>.
+
+Lỗi / lỗ hổng (không giấu)
+BYE 200 của SIPp không teardown FreeSWITCH. Sau run còn 301 channel ACTIVE (sofia/external/alice@ims.lab → 1000, sleep). FS log 0 BYE. P-CSCF trả 200 cho UE rồi SendBye không tới FS. Đã hupall sau test.
+RTP PCAP không phát được. play_pcap_audio cần raw IPv4 socket (root/CAP_NET_RAW). User không sudo → SIPp abort trước BYE trên probe đầu. Load run chỉ hold SDP, không gửi RTP.
+coturn unhealthy — TURN/rtp_redirect không prove được. SDP 200 của FS là 172.21.0.5 (IP docker).
+hss container không nằm trên path. I/S short-circuit HSS-lite (SF_IMS_HSS=true) + Postgres elisa. Diameter Cx tới hss:3868 không chạy (0 log).
+scscf-2 / freeswitch-2 không nhận cuộc. UAR luôn sip:scscf:5060. N–N pair idle.
+SIPp Failed to delete FD from epoll, errno = 1 — nhiễu local, không fail cuộc.
+Probe sớm: Digest 403 vì parser nonce= khớp nhầm cnonce= (thứ tự header SIPp). Đã sửa SipDigestAuth, rebuild image, class indexOfToken có trong jar đang chạy trên scscf. Chưa commit.
+Module nào được đụng
+Module	Trong vòng này
+nginx :5060
+Có (Gm VIP)
+P-CSCF
+Có (Path)
+I-CSCF
+Có (Mw split; log DEBUG tắt)
+S-CSCF-1 + HSS-lite/PG
+Có (401/200 Digest + ISC)
+FreeSWITCH-1
+Có (INVITE 200 + channel leak)
+postgres
+Có
+S-CSCF-2, FS-2, HSS Diameter, coturn RTP
+Không
+Sửa Digest chưa commit; bảo nếu muốn commit.
+
+hãy fix tất cả các lỗi
+
+Đã sửa trên lab local (không rsync host) và chứng minh lại vòng SIPp. 50/50 cuộc thành công, FreeSWITCH còn 0 channel sau BYE.
+
+Đã fix và prove
+1. BYE không tới FreeSWITCH
+S-CSCF trả 200 cho BYE trước khi gửi BYE ra ISC. RA teardown dialog ngay lúc đó nên BYE tới FS bị drop. Đổi thứ tự: SendBye (FS) rồi mới 200, giống P-CSCF.
+Sau warmup + 50 cuộc / 10 cps: FS show channels = 0 total.
+
+2. Digest 403 (SIPp cnonce trước nonce)
+Parser nonce= không còn khớp nhầm cnonce=. REGISTER 401 → 200 ổn.
+
+3. coturn unhealthy
+Healthcheck dùng pgrep (không có trong image). Đổi sang bash /dev/tcp/127.0.0.1/3478. Coturn giờ healthy.
+
+Không phải bug vòng gọi
+scscf-2 / freeswitch-2 idle — alice home S là sip:scscf:5060. UAR trả đúng home, không round-robin.
+
+RTP PCAP — play_pcap_audio cần CAP_NET_RAW/root. Signaling+SDP đã 200; scenario lab: loadtest/sipp/uac_full_loop_reg_invite.xml (hold 3s, không raw socket).
+
+SIPp epoll errno 1 — nhiễu local, không fail cuộc.
+
+HSS Diameter (còn phụ thuộc jar)
+I-CSCF không còn short-circuit SF_IMS_HSS=true; Cx đi Diameter khi peerReady (CER/CEA), không thì fallback PG HSS-lite (cùng DB elisa).
+Jar ra-diameter trong m2 chưa có setPeerHost (corsac SNAPSHOT không resolve để mvn install). HSS JVM chưa nhận UAR trên wire cho đến khi cài ra-diameter mới. REGISTER vẫn chạy nhờ fallback.
+
+Chưa commit. Bảo nếu muốn commit.
+
+đảm bảo 100% 3gpp specs, và production thật, k phải test
+
+Bắt đầu sửa mặt phẳng production: Mw REGISTER giữ CSeq/From-tag, Diameter TCP client thật (CER/CEA), Cx fail-closed.
+
+đã siết các rule mỗi call có 1 profile và các cmp chưa (profile của micro-jainslee)? hãy lưu lại tất cả vào lession learn và agents.md

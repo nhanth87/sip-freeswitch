@@ -80,7 +80,7 @@ public final class SipDigestAuth {
     static String param(String header, String name) {
         String lower = header.toLowerCase(Locale.ROOT);
         String key = name.toLowerCase(Locale.ROOT) + "=";
-        int i = lower.indexOf(key);
+        int i = indexOfToken(lower, key);
         if (i < 0) {
             return null;
         }
@@ -101,6 +101,26 @@ public final class SipDigestAuth {
             end++;
         }
         return header.substring(v, end);
+    }
+
+    /** Match {@code name=} as a Digest token, not a substring of {@code cnonce}. */
+    static int indexOfToken(String lowerHeader, String key) {
+        int from = 0;
+        while (from < lowerHeader.length()) {
+            int found = lowerHeader.indexOf(key, from);
+            if (found < 0) {
+                return -1;
+            }
+            if (found == 0 || !isTokenChar(lowerHeader.charAt(found - 1))) {
+                return found;
+            }
+            from = found + 1;
+        }
+        return -1;
+    }
+
+    private static boolean isTokenChar(char c) {
+        return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
     }
 
     public static String md5Hex(String raw) {

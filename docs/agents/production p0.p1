@@ -1,0 +1,144 @@
+Elisa + EPC production P0 / P1
+Evaluation 2026-08-15, local lab only — no rsync, no Digicom host ship. IMS nn PCAPs remain 2026-08-11. Local mid-call re-run today failed (INVITE 480). Digest A–B HD is in-docker only. EPC has no attach PCAP. Unit tests are not a host prove. Not 10k INVITE/s.
+
+This slice is local-only
+Do not rsync dist/elisa to a host. Operator/Digicom package-dist stays out of scope. IMS P0 wire prove is still the 2026-08-11 PCAPs. Local nn-midcall-kill.sh on 2026-08-15 got INVITE 480 and wrote no pcap.
+GO
+IMS P0 lab nn (2026-08-11)
+NO
+Operator / Digicom host
+CODE
+GTP-C Echo + CSR + RAB/DDN
+NO
+GTP attach PCAP
+Datastore lock: Elisa quarkus.datasource.db-kind=postgresql, dedicated DB elisa, Flyway, quarkus-jdbc-postgresql only (no H2). V9 adds ims_binding.received_host/port/transport. EPC jdbc:postgresql://postgres-epc:5432/epc — EpcJdbc.requirePostgres rejects H2/Derby/SQLite and /elisa.
+
+Readiness mix
+Weighted judgment, not SIPp. Source: tree grep 2026-08-15 + lab A–B PCAPs dated 2026-08-11.
+
+P0 proven vs P1 blocked
+58 proven / 27 partial / 15 blocked
+Green = lab P0 wire (REGISTER 401, INVITE 200, mid-call BYE) + nginx SIP/TCP listen config
+
+Yellow = code landed, no host/peer prove (flow next-hop, RAB/DDN, grouped Bearer Context)
+
+Orange = host package-dist / charging-on / GTP attach / 10k INVITE/s
+
+P0 — lab go-live
+Exit: split N–N CSCF can REGISTER / INVITE / survive S-CSCF kill, admin shows peer truth (never LISTEN-as-UP), prod overlay has no lab secrets, charging stays off.
+
+Gate	Status	Evidence	Note
+REGISTER first hop 401
+Pass (dated)	p0-register-401.pcap 2026-08-11	AKA and Digest MD5 both challenge. No 2026-08-15+ pcap in tree.
+INVITE 200 + ACK + BYE
+Pass (dated)	p0-invite-200.pcap 2026-08-11	Park/MRF 1000 path; A–B HD is extra. No newer pcap.
+N–N mid-call kill S-CSCF
+Fail (local 2026-08-15)	nn-midcall-kill.sh exit 1; no pcap on disk	INVITE → 480 before 200. Last Pass pcap remains 2026-08-11.
+Admin peer truth
+Pass (lab)	/admin/ims eslLive + cxPeerReady + DIST_SYNC	HSS-lite local ≠ remote CER/CEA
+prod.env fail-closed
+Pass (code)	application-prod.properties + deploy/elisa/roles/prod.env	Empty API key / HMAC; dev-login=false
+Charging off
+Pass	sf.ims.feature.charging=false	Correct for P0. Enabling is P1 prove — not proven.
+sbb-pool-max 40960
+Pass (config)	application.properties / prod	Not a CPS measurement
+nginx L4 SIP/TCP listen
+Pass (config)	deploy/nginx/nginx.conf + nginx.services.conf listen 5060	UDP 5060 still lab; not a TLS SIP VIP
+Digest A–B HD
+Partial	In-docker alice→bob SDP G.722/Opus	Host Contact 172.21.0.1 / LAN: INVITE timeout
+Prove artifact on host
+Skipped	Local slice — no rsync	package-dist → rsync dist/elisa is out of scope this session.
+P0 holds
+Split P/I/S + HSS-lite, Path / PAI / 100 Trying, WWW-Authenticate relay, BindingStore one live Contact + PG flow columns (received_host/port/transport), ISPN DIST_SYNC CMP, FreeSWITCH mandatory, charging master off.
+
+Datastore is PostgreSQL only (db-kind=postgresql, Flyway V9, dedicated elisa DB, quarkus-jdbc-postgresql — no H2). EPC uses postgres-epc / epc — never H2, never share USSDGW. Ship dist/elisa/ on JDK 25. Never clobber host configs/.
+
+P0 does not mean
+Not Clearwater parity. Not Chronos. Not UICC AKA at scale. Not reachable UEs behind NAT on a host phone. Not 10k INVITE/s. Not 1M SIP TPS. Not EPC VoLTE (Rx/N5 still out of Elisa). Not GTP attach GO.
+
+production-p0.md status line is lab nn, not a customer cutover. flowNextHopUri unit tests are not a Linphone prove.
+
+P1 — first operator-usable slice
+Roadmap P1b is charging (Rf ACR + CGRates CDRsV1 + SessionS deferred debit), flagged off. Flow next-hop and nginx SIP/TCP listen landed as code/config; host phone and TLS SIP VIP remain. Capacity 10k is a later claim gate, not this slice.
+
+Item	Code	Wire prove	Blocker
+Rf ACR via ra-diameter
+Landed, flagged	None with charging=true	Need peerReady Rf + START/STOP PCAP
+CGRates CDRsV1 dual-write
+Landed, flagged	None	Need cgrates profile or URL + hangup CDR
+SessionS + pending debit
+Landed, flagged	None	OCS down → fake-continue; recover without double-debit
+Remote Cx (epc-hss)
+Overlay env exists	Not VoLTE E2E	sf.ims.role.hss=false + CER/CEA; no Rx QoS
+ESL remap to home FS
+Code (unit)	HomeEslRemapService + SbbRecoveryManagerLocalTest	Failover spawn rebinds ESL to checkpoint home FS. Not a live N–N prove.
+P-CSCF flow-token / NAT
+Code (unit)	None — not a host Linphone prove	ImsBinding.flowNextHopUri + ScscfInviteSbb when received ≠ Contact. Tests: ImsBindingFlowTest, Ts24229*. Host phone still open.
+TS 33.203 IPsec / sec-agree
+Soft-fail	None	PcscfProxySbb logs sec-agree skip
+SIP/TCP or TLS VIP
+Pass (config) TCP listen 5060	Lab still UDP 5060	TLS SIP VIP not present; UDP remains lab-only
+Full iFC XML
+iFC-lite / skip:true	Lab pair uses skip	Not Clearwater iFC
+P1 charging is not a silent flip
+sf.ims.feature.charging is still false. Turning it on without a Rf peer and CGRates URL will soft-fail to logs. That is honest, not production charging. Prove: INVITE ACR START, BYE ACR STOP, CDRsV1 HTTP 200, pending-charge settle with no double-debit.
+EPC GTP-C — P0 / P1
+Control plane is vendor ra-gtpv2c + GtpGatewaySbb in epc-host. User-plane GTP-U is Linux, not the JVM. Inventory taken from Mobius mobius-software-ltd/gtp (Java 8, Netty UDP, AGPL-3.0): extract header and procedure shape only — do not depend on or copy that tree.
+
+Gate	Status	Evidence	Note
+Echo T=0 (TS 29.274 §5.1)
+Pass (unit)	Gtpv2CodecTest decodeMmeShapedEchoWithoutTeid	Was T=1 always — MME Echo would fail decode
+Version Not Supported
+Pass (unit)	RA replies type 3 on non-v2 flags	Mobius maps unknown; we do not throw
+CSR / MBR / DSR
+Code	GtpGatewaySbb + SgwControl + encodeBearerContext	CSR uses grouped IE 93 (EBI+F-TEID). No MME attach PCAP.
+Peer live = Echo Response
+Pass (code)	Gtpv2RaEndpoint.peer().live()	LISTEN / bind is never live
+DDN + Release Access Bearers
+Code (unit)	GtpGatewaySbb + EpcSleeLayeringTest asserts 171	RELEASE_ACCESS_BEARERS_REQUEST → 171. Inbound DDN (176) acks 177.
+Grouped Bearer Context IE
+Code (unit)	Gtpv2Ies.encodeBearerContext IE 93 EBI+F-TEID	Legacy stuffed F-TEID in IE 93 still decodes (s1uFromBearerContext).
+T3/N3 retransmit
+Code (unit)	Gtpv2T3N3 + Gtpv2T3N3Test (20 ra-gtpv2c tests)	T3=3s N3=3 on requests. Responses not retransmitted. §7.6 replay kept.
+GTP-U in JVM
+Out (lock)	epc-up-linux / Linux GTP	Mobius GTPTag path is not taken
+Attach / PDN connectivity PCAP
+Open	None	Unit tests ≠ MME on the wire. Not GTP attach GO.
+Hút máu from Mobius (kept)
+Echo and Version Not Supported encode T=0. Decode honors the T bit. Unknown message types become UNKNOWN instead of throwing. Opaque TLVs are kept; a truncated tail is dropped. Recovery IE is mandatory on Echo. Grouped Bearer Context is nested TLV (IE 93).
+
+~205 GTPv2 message classes and Netty epoll reuseport stay in Mobius. We keep a thin RA + SBB procedures.
+
+Not taken from Mobius
+AGPL sources, Java 8 baseline, commons-logging / log4j 1.2, Netty GTP-U, GTPTag, 200+ generated message classes, SO_REUSEPORT multi-bind. epc-host stays JDK 25 + DatagramSocket + virtual thread.
+
+Depend on nhanth87 ra-gtpv2c only. Never vendor the Mobius jar.
+
+GTP P0 is not attach
+Echo T=0 unblocks an MME ping. Create Session encodes grouped Bearer Context (IE 93). RAB 171 and DDN 177 ack are unit-tested. There is still no MME CSR on UDP :2123 and no Linux GTP-U packet forward. Do not claim EPC attach GO from unit tests.
+Do next (order)
+#	Work	Why	Closes
+1
+P-CSCF Path / flow — Code (unit) green 2026-08-18; host phone still open	flowNextHopUri when received ≠ Contact (I-CSCF forwards via SendInvite.nextHopUri, Request-URI stays callee). IcscfRoutingSbbTest fixed to assert nextHopUri. Not a Linphone prove.	P1 phones (host)
+2
+nginx SIP/TCP listen — Pass (config); TLS SIP later	listen 5060 TCP in nginx.conf + nginx.services.conf. UDP still lab.	P1 edge TLS
+G1
+GtpGatewaySbb RAB + DDN ack — Code (unit)	RELEASE_ACCESS_BEARERS_REQUEST → 171; DDN → 177. EpcSleeLayeringTest.	GTP P0 SGW-C (wire still open)
+G2
+Grouped Bearer Context TLV — Code (unit)	encodeBearerContext IE 93 EBI+F-TEID. Legacy stuffed F-TEID fallback.	GTP P0 codec (wire still open)
+G3
+MME attach PCAP on :2123 + Linux GTP-U	Unit Echo T=0 ≠ attach. Still no wire.	EPC P0 prove
+3
+Local nn-midcall-kill.sh 2026-08-15 FAIL	INVITE 480; no pcap. Last Pass remains 2026-08-11. No rsync.	P0 freshness
+4
+Host package-dist / rsync — skipped	This session is local only. Do not rsync dist/elisa.	Out of scope
+5
+Charging lab: flags on + Rf/CGRates PCAP	sf.ims.feature.charging still false — do not mark charging proven	P1 charging
+6
+Then SIPp 10k INVITE/s	Capacity gate, not this slice. Still 0 claim.	capacity-acceptance.md
+R9
+ESL remap to home FS — Code (unit)	HomeEslRemapService on failover spawn. Not a live N–N prove.	P1 media after N–N kill
+Never (unchanged)
+PFCP/N4, Gx, Gy, RTP through Elisa, nginx as P-CSCF, SBC topology hiding, 10k INVITE/s or 1M SIP TPS without SIPp, RestComm public remote, rsync dist/elisa to a host in this slice. GTP-U stays out of Elisa and epc-host JVMs. Do not vendor Mobius GTP (AGPL) or pull GTPTag / Netty into ra-gtpv2c. Mobius GTP (AGPL) or pull GTPTag / Netty into ra-gtpv2c.
+
+Sources: tree grep 2026-08-15 · docs/agents/production-p0.md · epc/docs/nni/pics-rel14.md · ra-gtpv2c Gtpv2Codec / Gtpv2Ies · github.com/mobius-software-ltd/gtp (AGPL inventory only) · lab A–B Digest PCAPs 2026-08-11 (in-docker PASS, host Contact FAIL). Unit tests ≠ host prove ≠ attach PCAP ≠ 10k INVITE/s.

@@ -1,6 +1,6 @@
 # ra-freeswitch — FreeSWITCH control RA
 
-JAINSLEE **internal RA** (sip-freeswitch module) for Elisa ↔ FreeSWITCH **control plane** (ESL). SIP stays on `ra-sip-servlet`.
+JAINSLEE vendor RA (`jain-slee/vendor-ras/ra-freeswitch`, artifact `com.microjainslee:ra-freeswitch`) for Elisa ↔ FreeSWITCH **control plane** (ESL). SIP stays on `ra-sip-servlet`.
 
 **Hard lock:** FreeSWITCH is an **essential** lab/product component (MRF/AS + media/ICE/TURN). This RA must **not** be dropped, and “full IMS” must **not** treat FS as an optional feature flag. Soft-fail when ESL is down (`eslLive=false`) is lifecycle honesty — not permission to omit FS from compose (always `depends_on` for S-CSCF / combined Elisa; N–N = 1:1 S↔FS).
 
@@ -8,7 +8,7 @@ JAINSLEE **internal RA** (sip-freeswitch module) for Elisa ↔ FreeSWITCH **cont
 
 | Q | Decision |
 |---|----------|
-| **A** | **1** — Internal module [`ra-freeswitch/`](../../ra-freeswitch/) first; promote to `jain-slee/vendor-ras/ra-freeswitch` later |
+| **A** | **vendor** — `jain-slee/vendor-ras/ra-freeswitch` (`com.microjainslee.ra.freeswitch`) |
 | **B** | **1+2** — ESL sync (`FsApi`/`FsBgapi` + `FsApiResponseEvent`) **and** inbound `HEARTBEAT` / `CHANNEL_*` events |
 | **C** | **2+3** — link activity `fs-link` for HEARTBEAT/API; per-channel `fs-ch-{uuid}` for `CHANNEL_*` (end on hangup/destroy) |
 

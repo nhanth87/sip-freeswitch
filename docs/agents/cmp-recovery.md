@@ -121,7 +121,7 @@ sequenceDiagram
 
 **Critical P0 (wired):** ISPN `@ViewChanged` → `onClusterViewChange`; `ClusterManager.adopt` shares Elisa `DefaultCacheManager` (one JGroups view) + `jainslee.ra.sticky.forward=true` on DIST_SYNC S-CSCF; every spawn restores `SipDialogHa` before Send*; `SBB_SELF_REMOVE` waits 50ms and only respawns EARLY/CONFIRMED; `SoftHangWatchdog` calls `onEntitySuspect` on stale local CMP.
 
-Honest limits: not Clearwater Chronos; no full NIST dialog SM; TCP mid-dialog inbound still prefers L4/VIP; ProfileFacility remains JVM-local; R9 ESL remap to home FS is P1.
+Honest limits: not Clearwater Chronos; no full NIST dialog SM; TCP mid-dialog inbound still prefers L4/VIP; ProfileFacility remains JVM-local; R9 ESL remap to home FS is wired on `failoverSpawn` (unit tests; not a live N–N kill prove).
 
 Kill-test (fail-closed): [`loadtest/scripts/nn-midcall-kill.sh`](../../loadtest/scripts/nn-midcall-kill.sh) — see [`docker-lab.md`](docker-lab.md).
 

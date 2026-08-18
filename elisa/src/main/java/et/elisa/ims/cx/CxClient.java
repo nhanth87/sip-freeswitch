@@ -14,9 +14,10 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 /**
- * Cx client: when HSS-lite local ({@code sf.ims.role.hss=true}), short-circuit;
- * else Diameter RA path only — gated on {@link DiameterRaBridge#peerReady()}
- * (CER/CEA), never LISTEN-only fiction.
+ * Cx client: when this JVM is HSS ({@code sf.ims.role.hss=true}), short-circuit
+ * to HSS-lite. Otherwise send Diameter Cx only when {@link DiameterRaBridge#peerReady()}
+ * (CER/CEA) — never LISTEN-only fiction. If the peer is down, fall back to PG
+ * HSS-lite so lab REGISTER is not 5012.
  */
 @ApplicationScoped
 public class CxClient {
@@ -41,31 +42,43 @@ public class CxClient {
     }
 
     public Map<Integer, String> mar(String impi, String impu, String callId) {
-        if (roles.hss()) {
-            return hss.handleMar(impi, impu, callId);
-        }
-        return sendSync(CxCodec.MAR, CxCodec.marAvps(impi, impu, roles.scscfUri()));
+        return dispatch(CxCodec.MAR, CxCodec.marAvps(impi, impu, roles.scscfUri()),
+                () -> hss.handleMar(impi, impu, callId));
     }
 
     public Map<Integer, String> uar(String impi, String impu) {
-        if (roles.hss()) {
-            return hss.handleUar(impi, impu);
-        }
-        return sendSync(CxCodec.UAR, CxCodec.uarAvps(impi, impu));
+        return dispatch(CxCodec.UAR, CxCodec.uarAvps(impi, impu),
+                () -> hss.handleUar(impi, impu));
     }
 
     public Map<Integer, String> lir(String impu) {
-        if (roles.hss()) {
-            return hss.handleLir(impu);
-        }
-        return sendSync(CxCodec.LIR, CxCodec.lirAvps(impu));
+        return dispatch(CxCodec.LIR, CxCodec.lirAvps(impu),
+                () -> hss.handleLir(impu));
     }
 
     public Map<Integer, String> sar(String impi, String impu) {
-        if (roles.hss()) {
-            return hss.handleSar(impi, impu);
+        return dispatch(CxCodec.SAR, CxCodec.sarAvps(impi, impu, roles.scscfUri()),
+                () -> hss.handleSar(impi, impu));
+    }
+
+    /**
+     * Local HSS-lite when this JVM is the HSS. Otherwise Diameter Cx only when
+     * CER/CEA {@code peerReady}; if the peer is down, lab falls back to PG
+     * HSS-lite so REGISTER is not 5012 — never treat LISTEN as ready.
+     */
+    private Map<Integer, String> dispatch(int cmd, Map<Integer, String> avps,
+                                          java.util.function.Supplier<Map<Integer, String>> local) {
+        if (roles != null && roles.hss()) {
+            return local.get();
         }
-        return sendSync(CxCodec.SAR, CxCodec.sarAvps(impi, impu, roles.scscfUri()));
+        if (diameter != null && diameter.peerReady()) {
+            return sendSync(cmd, avps);
+        }
+        if (hss != null) {
+            LOG.warnf("Cx remote cmd=%d peerReady=false — HSS-lite fallback (LISTEN≠peer)", cmd);
+            return local.get();
+        }
+        return sendSync(cmd, avps);
     }
 
     public void onAnswer(String sessionId, Map<Integer, String> avps) {

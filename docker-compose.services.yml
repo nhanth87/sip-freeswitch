@@ -83,8 +83,10 @@ services:
       SF_CLUSTER_NODE_ID: elisa-icscf-1
       SF_CLUSTER_ISPN_MODE: LOCAL
       SF_IMS_ISC_AS: sip:unused-isc.lab:5060
-      # Shared-PG HSS-lite until Diameter RA dials hss:3868 (LISTEN≠peer)
-      SF_IMS_HSS: "true"
+      SF_IMS_CX_PEER_HOST: hss
+      SF_IMS_CX_PEER_PORT: "3868"
+      SF_IMS_CX_ORIGIN: icscf.ims.lab
+      SF_IMS_CX_DEST_HOST: hss.ims.lab
     volumes: [./app/html:/html:ro]
     expose: ["8088", "5060"]
     depends_on:

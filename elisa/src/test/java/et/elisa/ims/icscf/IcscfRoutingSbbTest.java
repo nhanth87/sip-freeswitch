@@ -49,7 +49,8 @@ class IcscfRoutingSbbTest {
         sbb.onInvite(new SipInviteEvent("c2", "sip:a@ims.lab", "sip:b@ims.lab", "sip:a@1",
                 List.of(), List.of(), List.of(), "v=0", "application/sdp"));
         SendInvite inv = ra.ofType(SendInvite.class).getFirst();
-        assertTrue(inv.toUri().contains("scscf"));
+        assertTrue(inv.nextHopUri().contains("scscf"), "LIR target must be the Mw next hop (S-CSCF)");
+        assertEquals("sip:b@ims.lab", inv.toUri(), "Request-URI remains the callee, not the next hop");
     }
 
     @Test

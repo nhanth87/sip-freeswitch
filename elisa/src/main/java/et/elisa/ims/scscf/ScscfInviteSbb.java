@@ -361,8 +361,11 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
             cmpStore.remove(e.callId());
         }
         clearLocalCmp();
-        send(new SendResponse(e.callId(), 200, "OK"));
+        // Far leg first — SendResponse 200 to inbound BYE ends the RA dialog
+        // (maybeEndDialogAfterByeAck). BYE toward FreeSWITCH must go out while
+        // remotePeer/lastResponse are still present.
         send(new SendBye(e.callId()));
+        send(new SendResponse(e.callId(), 200, "OK"));
     }
 
     private void emitSipDialogCdr(String callId, Integer dur) {

@@ -55,6 +55,19 @@ class PcscfProxySbbTest {
     }
 
     @Test
+    void pOnly_bye_sendsFarLegBefore200() {
+        CapturingRa ra = new CapturingRa();
+        PcscfProxySbb sbb = new PcscfProxySbb(ImsTestSupport.roles(true, false, false, false));
+        ImsTestSupport.injectRa(sbb, ra);
+        sbb.onBye(new com.microjainslee.ra.sipservlet.events.SipByeEvent("bye1"));
+        assertEquals(2, ra.commands.size());
+        assertTrue(ra.commands.get(0) instanceof com.microjainslee.ra.sipservlet.command.SendBye,
+                "far-leg BYE must go out before 200 (RA tears dialog down on BYE 200)");
+        assertTrue(ra.commands.get(1) instanceof com.microjainslee.ra.sipservlet.command.SendResponse);
+        assertEquals(200, ((com.microjainslee.ra.sipservlet.command.SendResponse) ra.commands.get(1)).statusCode());
+    }
+
+    @Test
     void colocated_inviteDoesNotDoubleSend() {
         CapturingRa ra = new CapturingRa();
         PcscfProxySbb sbb = new PcscfProxySbb(ImsTestSupport.roles(true, true, true, true));

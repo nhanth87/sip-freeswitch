@@ -171,6 +171,12 @@ Map `pcscf.ims.lab` → VIP/host in `/etc/hosts` for Path/Contact tests (compose
 
 `/fs/` is **denied** on the nginx edge (N7 / xml_curl internal-only).
 
+## Capacity (SIP L4 — not a claim)
+
+Lab compose uses `worker_connections 16384` and SIP `access_log off` (UDP/TCP stream). Do not log every SIP datagram on a CPS run.
+
+Dedicated edge hosts aiming at cluster-scale SIP TPS: raise `worker_rlimit_nofile` / `worker_connections` toward 65535 and add P-CSCF members under `hash $remote_addr consistent`. 1M SIP TPS is many boxes — [`capacity-1m.md`](capacity-1m.md). RTP still bypasses nginx (N4).
+
 ## Done when (ops checklist)
 
 1. nginx `http` `:8080` / TLS `:8443` → Elisa `:8088` (admin login works).

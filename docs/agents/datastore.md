@@ -73,6 +73,8 @@ Or: truncate `flyway_schema_history`, drop all app tables, restart.
 
 Rule: say **INVITE/s**, **CDR writes/s**, or **REGISTER/s** — not bare “TPS”.
 
+Cluster horizon (1M SIP transactions/s, not a claim): [`capacity-1m.md`](capacity-1m.md). INVITE hot path stays ISPN; `sf.cmp.pg-sync=false` at that profile.
+
 ### Workload split (locked direction)
 
 ```text

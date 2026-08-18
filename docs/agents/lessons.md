@@ -23,7 +23,35 @@ Cross-cutting Digicom grill (from USSDGW / AdaptiveTimeout / SS7) — short form
 - **Async JDBC / flusher** must write every column the entity sets — schema alone ≠ persisted fields.
 - **Identity / network scoping:** tenant or realm IDs must match the routing plane’s partition key (Elisa tenant ↔ trunk/ACL; analogous to USSD `network_id`).
 
-## PFCP / Gx / Gy footguns (2026-08-10)
+## micro-jainslee Profile vs CMP — tightened rules (2026-08-08)
+
+The “ProfileFacility is failure SoT” trap (did this wrong once in USSDGW `ussdUser`). micro-jainslee default Facility is **JVM-local** (`InMemoryProfileFacility`); it must **never** be the cluster failover source of truth.
+
+- **One `CallSession` Profile per call — locked (C9/JP2).** Profile CMP PK = FreeSWITCH `fsUuid` (Unique-ID). Exactly **one** live `CallSession` row per call; `sipCallId` / `msisdn` are **secondary indexes only** (group multiple) — never second PK rows. Code: `et.elisa.profile.*` (`upsertCallSession` uses `getOrCreate(pf, CallSession, fsUuid, …)`; `endCallSession` removes by `fsUuid`). Index multi-match → pick the profile whose `state` is live.
+- **Two Profile tables only (JP2).** `ImsSubscriber` (PK msisdn else impi) + `CallSession` (PK fsUuid); compose via `msisdn`. No mega-row; index on `directoryUserId` for FS/xml_curl at 10k lookups.
+- **HSS Ki/SQN/OPc stay Postgres SoT (JP3).** Profile mirrors **non-crypto** identity only — no secrets in Profile CMP (JP4). PG `ims_subscriber` is authoritative for auth; Profile is a hot mirror / admin convenience.
+- **Failover SoT = CMP + ISPN→PG, not Profile.** Live dialog restore reads `DialogCmpPersistence` (ISPN `DIST_SYNC` → PG `sf_dialog_checkpoint`), then `CallSessionProfile` as hot mirror. Treat the JVM-local ProfileFacility as **advisory** until an Infinispan `ProfileStore` is installed (`MicroSleeContainer.installDurableStore`).
+- **Warm identity once, not per INVITE.** 10k subscribers = one boot pass (`ElisaProfileService.warmSubscribers`), never a per-call upsert storm. Hot path: no INFO dumps of profile bodies.
+
+## IMS forwarding: Request-URI stays the callee; next hop is `nextHopUri` (2026-08-18)
+
+Cross-CSCF INVITE forwarding: `SendInvite(callId, toUri, fromUri, sdp, ext, nextHopUri)` — `toUri` is the **callee** (Request-URI), the **route target** is the 6th field `nextHopUri`. Assert the *route*, never `toUri`, when testing I-CSCF LIR/Mw forwarding.
+
+- P-CSCF MO INVITE → I/S: `SendInvite(…, e.toUri()=callee, …, icscfUri)` — `toUri` untouched.
+- I-CSCF → S-CSCF: `SendInvite(…, e.toUri()=callee, …, scscf)` — put the LIR/`SERVER_NAME` in `nextHopUri`, keep `toUri`=callee. `IcscfRoutingSbbTest.invite_lirOk_forwardsToScscfWhenIOnly` was asserting `inv.toUri().contains("scscf")` (wrong — Request-URI) and failed; fixed to assert `nextHopUri()`. This is the code-side half of P1 "flowNextHopUri ≠ Contact"; host-phone (Linphone) proof still open.
+- P-CSCF MT INVITE toward UE: Request-URI is a Contact/IP, so `mtFlowNextHop` resolves the binding `flowNextHopUri` — distinct from the MO domain-IMPU case above.
+
+## N–N mid-call failover — proven gap (2026-08-17)
+
+Verified live on the wire (REGISTER 401→200 / INVITE 100→200→ACK→BYE all green), then reproduced the P0 `nn-midcall-kill` FAIL and root-caused it. This is **not** a regression you can fix by editing nginx — it is an open code-level HA gap.
+
+- **nginx Gm VIP pins a UE to its home S-CSCF via `hash $remote_addr consistent` (UDP L4).** When the home S-CSCF dies mid-call, the UE's BYE is still hashed to the *dead* node; open-source nginx `stream` has **no active `health_check` for UDP**, so it never re-routes to the surviving peer → retransmitted BYE, no 200.
+- **DO NOT "fix" it by round-robin:** the surviving peer has no local REGISTER/auth context for the UE's bare INVITE and answers **401 Unauthorized**, so round-robin breaks *normal* calls. Sticky L4 affinity is **required** for normal operation (peer-side dialog recovery is the only real fix: ISPN/CMP `DialogCheckpoint`/`CallSession` + RA `restorePortable` / SipDialogHa — still "not a live N–N prove").
+- **Test calorie bug:** `uac_invite_hold_bye.xml` INVITEs `sip:alice@ims.lab` — if alice is *registered*, the terminating S-CSCF forks the INVITE to her Contact (the SIPp UAC) → loop, no 200 (the 2026-08-11 "PASS" only worked because alice had no live binding → FS Park answered). A correct mid-call test must call a real answering callee (`sip:1000`, FS MRF). Use `loadtest/sipp/uac_midcall_reg_invite_1000.xml` + `loadtest/scripts/nn-midcall-kill-1000.sh` (resolves home from PG `ims_binding.home_scscf_node`).
+- **Destructive-test hygiene:** `nn-midcall-kill*` runs `docker stop` on the home S-CSCF and leaves it **down**. After the test you MUST `docker compose -f …services.yml --profile services --profile nn start scscf-2` and wait for **healthy** (~80 s) + ISPN rebalance with **both** `[elisa-scscf-1, elisa-scscf-2]` before re-running — otherwise the next REGISTER routes to the dead node and just hangs (the 401/200 loop stalls).
+- **`docker exec nginx -s reload` reads the mounted `/etc/nginx/nginx.conf`.** If the mounted config changed since start, the running process still uses the old loaded config — always `nginx -t` + reload after editing, and confirm destination IPs with a capture inside the nginx netns (sidecar `--net container:nginx-services`), not the repo file alone.
+
+
 
 Docs-only lock from PFCP/Gx analysis — **never** implement PFCP/N4, Gx, Gy, or Gx-over-Gy in Elisa. Rf ACR stub + CGRates (CDRsV1 / SessionS) are **grilled separately** (G1–G5) — see [`elisa-improve-plan.md`](elisa-improve-plan.md); do not invent PFCP/Gx paths as a shortcut.
 

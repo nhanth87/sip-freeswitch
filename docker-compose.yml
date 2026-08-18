@@ -41,7 +41,7 @@ services:
       - "3478:3478/udp"
       - "3478:3478/tcp"
     healthcheck:
-      test: ["CMD-SHELL", "pgrep turnserver >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "bash -c 'echo >/dev/tcp/127.0.0.1/3478'"]
       interval: 10s
       timeout: 5s
       retries: 6

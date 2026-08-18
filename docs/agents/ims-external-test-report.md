@@ -144,7 +144,7 @@ Env knobs:
 ./tools/install-ims-smoke-hook.sh
 ```
 
-Chains **after** Digicom attribution `pre-push` (does not replace it). Runs smoke when push range touches `elisa/`, `ra-freeswitch/`, `loadtest/sipp*`, IMS admin HTML, etc.
+Chains **after** Digicom attribution `pre-push` (does not replace it). Runs smoke when push range touches `elisa/`, `loadtest/sipp*`, IMS admin HTML, etc.
 
 ### 5. Existing CPS harness
 
