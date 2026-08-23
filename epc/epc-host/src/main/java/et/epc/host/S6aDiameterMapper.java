@@ -1,5 +1,6 @@
 package et.epc.host;
 
+import com.microjainslee.ra.diameter.avp.DiameterAvp;
 import com.microjainslee.ra.diameter.command.SendDiameterAnswer;
 import com.microjainslee.ra.diameter.events.DiameterRequestEvent;
 import et.epc.crypto.Bytes;
@@ -9,6 +10,7 @@ import et.epc.hss.S6aMessage;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -32,20 +34,19 @@ public final class S6aDiameterMapper {
         S6aCommand cmd = command(ev.commandCode(), true);
         S6aMessage.Builder b = S6aMessage.builder(cmd, true);
         Map<Integer, String> avps = ev.avps() == null ? Map.of() : ev.avps();
+        List<DiameterAvp> structured = ev.avpsStructured() == null ? List.of() : ev.avpsStructured();
         putUtf8(b, avps, S6aAvp.USER_NAME);
         putUtf8(b, avps, S6aAvp.ORIGIN_HOST);
-        if (avps.containsKey(S6aAvp.VISITED_PLMN_ID)) {
-            b.put(S6aAvp.VISITED_PLMN_ID, hexOrRaw(avps.get(S6aAvp.VISITED_PLMN_ID)));
-        }
-        if (avps.containsKey(S6aAvp.RAND)) {
-            b.put(S6aAvp.RAND, hexOrRaw(avps.get(S6aAvp.RAND)));
-        }
-        if (avps.containsKey(S6aAvp.RE_SYNCHRONIZATION_INFO)) {
-            b.put(S6aAvp.RE_SYNCHRONIZATION_INFO, hexOrRaw(avps.get(S6aAvp.RE_SYNCHRONIZATION_INFO)));
-        }
+        putUtf8(b, avps, S6aAvp.ORIGIN_REALM);
+        // Inbound app AVPs arrive as structured octets (ra-diameter now decodes them);
+        // prefer structured RAND / Re-Sync-Info / Visited-PLMN-Id, fall back to the flat map.
+        putOctets(b, avps, structured, S6aAvp.VISITED_PLMN_ID);
+        putOctets(b, avps, structured, S6aAvp.RAND);
+        putOctets(b, avps, structured, S6aAvp.RE_SYNCHRONIZATION_INFO);
         if (ev.originHost() != null && b.build().avpUtf8(S6aAvp.ORIGIN_HOST) == null) {
             b.putUtf8(S6aAvp.ORIGIN_HOST, ev.originHost());
         }
+        b.structured(structured);
         return b.build();
     }
 
@@ -66,7 +67,7 @@ public final class S6aDiameterMapper {
                 : Integer.toUnsignedLong(bytesToInt(rsp.avp(S6aAvp.RESULT_CODE)));
         return new SendDiameterAnswer(
                 req.sessionId(), S6A_APP_ID, req.commandCode(), result,
-                req.hopByHopId(), req.endToEndId(), avps);
+                req.hopByHopId(), req.endToEndId(), avps, rsp.structuredAvps());
     }
 
     private static void putUtf8(S6aMessage.Builder b, Map<Integer, String> avps, int code) {
@@ -74,6 +75,26 @@ public final class S6aDiameterMapper {
         if (v != null) {
             b.putUtf8(code, v);
         }
+    }
+
+    /** Put an octet-typed AVP preferring its structured form, else the flat hex map. */
+    private static void putOctets(S6aMessage.Builder b, Map<Integer, String> avps,
+                                  List<DiameterAvp> structured, int code) {
+        byte[] octets = structuredBytes(structured, code);
+        if (octets != null) {
+            b.put(code, octets);
+        } else if (avps.containsKey(code)) {
+            b.put(code, hexOrRaw(avps.get(code)));
+        }
+    }
+
+    private static byte[] structuredBytes(List<DiameterAvp> structured, int code) {
+        for (DiameterAvp a : structured) {
+            if (a.code() == code) {
+                return a.asOctets();
+            }
+        }
+        return null;
     }
 
     private static byte[] hexOrRaw(String s) {

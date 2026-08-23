@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import et.epc.api.ApnConfig;
 import et.epc.api.Imsi;
@@ -77,7 +78,11 @@ class HssServiceTest {
         SubscriberRecord rec = repo.find(IMSI).orElseThrow();
         assertEquals("mme.host.mno", rec.servingMmeHost());
         assertEquals("sip:scscf.ims.lab:5060", rec.imsScscfUri());
-        assertEquals("internet", ula.avpUtf8(S6aAvp.SUBSCRIPTION_DATA));
+        String subscriptionData = ula.avpUtf8(S6aAvp.SUBSCRIPTION_DATA);
+        assertTrue(subscriptionData.contains("\"internet\""));
+        assertTrue(subscriptionData.contains("\"ims\""));
+        assertEquals("0", ula.avpUtf8(S6aSubscriptionData.SUBSCRIBER_STATUS));
+        assertEquals("2", ula.avpUtf8(S6aSubscriptionData.NETWORK_ACCESS_MODE));
     }
 
     @Test

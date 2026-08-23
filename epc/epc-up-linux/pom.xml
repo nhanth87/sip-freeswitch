@@ -20,6 +20,15 @@
       <artifactId>ra-pfcp</artifactId>
     </dependency>
     <dependency>
+      <groupId>com.microjainslee</groupId>
+      <artifactId>jainslee-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.microjainslee</groupId>
+      <artifactId>jainslee-apt</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>

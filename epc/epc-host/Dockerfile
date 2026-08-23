@@ -1,6 +1,9 @@
 # EPC host — one image, HSS / SGW-C / PGW-C via EPC_ROLE_* flags. JDK 25.
+# NOTE: JDK base, not JRE — ra-diameter's Corsac DiameterParser registers AVPs
+# through javax.tools.JavaCompiler at runtime; a JRE image NPEs in
+# loadClassesWithCompiler and the Diameter RA never activates (2026-08-23 wire).
 # Prefers a pre-built tree: (cd epc && mvn -pl epc-host -am package)
-FROM eclipse-temurin:25-jre-jammy
+FROM eclipse-temurin:25-jdk-jammy
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \

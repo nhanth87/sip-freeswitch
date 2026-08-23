@@ -39,7 +39,7 @@ class EpcSleeLayeringTest {
     void echoStaysInRaCreateSessionGoesToSbb() throws Exception {
         slee = new MicroSleeContainer();
         bootstrap = new EpcBootstrap(
-                new EpcRoles(false, true, false), EpcClusterConfig.local("epc-sgwc-1"));
+                new EpcRoles(false, true, false, false, false, false), EpcClusterConfig.local("epc-sgwc-1"));
         bootstrap.attachTo(slee);
         CopyOnWriteArrayList<byte[]> sent = new CopyOnWriteArrayList<>();
         bootstrap.gtp().setSink((bytes, peer) -> sent.add(bytes));
@@ -88,7 +88,7 @@ class EpcSleeLayeringTest {
     void releaseAccessUnknownTeidAnswersContextNotFound() throws Exception {
         slee = new MicroSleeContainer();
         bootstrap = new EpcBootstrap(
-                new EpcRoles(false, true, false), EpcClusterConfig.local("epc-sgwc-1"));
+                new EpcRoles(false, true, false, false, false, false), EpcClusterConfig.local("epc-sgwc-1"));
         bootstrap.attachTo(slee);
         CopyOnWriteArrayList<byte[]> sent = new CopyOnWriteArrayList<>();
         bootstrap.gtp().setSink((bytes, peer) -> sent.add(bytes));
@@ -105,7 +105,7 @@ class EpcSleeLayeringTest {
     void inboundDdnIsAcknowledged() throws Exception {
         slee = new MicroSleeContainer();
         bootstrap = new EpcBootstrap(
-                new EpcRoles(false, true, false), EpcClusterConfig.local("epc-sgwc-1"));
+                new EpcRoles(false, true, false, false, false, false), EpcClusterConfig.local("epc-sgwc-1"));
         bootstrap.attachTo(slee);
         CopyOnWriteArrayList<byte[]> sent = new CopyOnWriteArrayList<>();
         bootstrap.gtp().setSink((bytes, peer) -> sent.add(bytes));

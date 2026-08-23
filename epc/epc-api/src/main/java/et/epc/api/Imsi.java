@@ -2,7 +2,7 @@ package et.epc.api;
 
 import java.util.Objects;
 
-public record Imsi(String digits) {
+public record Imsi(String digits) implements java.io.Serializable {
     public Imsi {
         Objects.requireNonNull(digits);
         String d = digits.trim();

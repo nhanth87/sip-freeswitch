@@ -5,7 +5,10 @@
 #   docker compose build elisa
 #
 # Layout must match Quarkus fast-jar: quarkus-run.jar + app/ + lib/ + quarkus/
-FROM eclipse-temurin:25-jre-jammy
+# NOTE: JDK base, not JRE — ra-diameter's Corsac DiameterParser registers AVPs
+# through javax.tools.JavaCompiler at runtime; a JRE image NPEs in
+# loadClassesWithCompiler and the Diameter RA never activates (2026-08-23 wire).
+FROM eclipse-temurin:25-jdk-jammy
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \

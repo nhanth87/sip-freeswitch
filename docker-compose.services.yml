@@ -247,6 +247,9 @@ services:
     env_file: [./deploy/epc/roles/hss.env]
     environment:
       EPC_JDBC_URL: jdbc:postgresql://postgres-epc:5432/epc
+      # P1 MME peer-trust drawbridge (Open5GS #4337); neutral off default.
+      EPC_HSS_MME_ALLOWLIST_ENABLED: "false"
+      EPC_HSS_MME_ALLOWLIST: ""
       JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true"
     expose: ["8099", "3868"]
     depends_on:
@@ -262,6 +265,10 @@ services:
     env_file: [./deploy/epc/roles/sgwc.env]
     environment:
       EPC_JDBC_URL: jdbc:postgresql://postgres-epc:5432/epc
+      # P1 split S5-C wire (SGW-C -> PGW-C GTPv2-C). Off = lab in-process.
+      EPC_S5C_WIRE: "false"
+      EPC_S5C_PGWC_PEER_HOST: "epc-pgwc"
+      EPC_S5C_PGWC_PEER_PORT: "2123"
       JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true"
     expose: ["8099", "2123"]
     depends_on:
@@ -279,6 +286,10 @@ services:
     env_file: [./deploy/epc/roles/pgwc.env]
     environment:
       EPC_JDBC_URL: jdbc:postgresql://postgres-epc:5432/epc
+      # P1 split S5-C listener side (PGW-C). Off = lab in-process.
+      EPC_S5C_WIRE: "false"
+      EPC_S5C_PGWC_PEER_HOST: "epc-sgwc"
+      EPC_S5C_PGWC_PEER_PORT: "2123"
       JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true"
     expose: ["8099", "2123"]
     depends_on:
@@ -325,6 +336,123 @@ services:
     command: ["sh", "-c", "echo sgwu-2 linux-gtp placeholder; sleep infinity"]
     expose: ["8805", "2152"]
     networks: [sf-net]
+
+  epc-pcrf:
+    profiles: ["epc"]
+    build:
+      context: ./epc
+      dockerfile: epc-host/Dockerfile
+    env_file: [./deploy/epc/roles/pcrf.env]
+    environment:
+      EPC_JDBC_URL: jdbc:postgresql://postgres-epc:5432/epc
+      JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true"
+    expose: ["8099", "3868"]
+    depends_on:
+      postgres-epc:
+        condition: service_healthy
+    networks: [sf-net]
+
+  epc-pcef:
+    profiles: ["epc"]
+    build:
+      context: ./epc
+      dockerfile: epc-host/Dockerfile
+    env_file: [./deploy/epc/roles/pcef.env]
+    environment:
+      EPC_JDBC_URL: jdbc:postgresql://postgres-epc:5432/epc
+      # P1 online charging to OCS over Gy; off = CDR offline only.
+      EPC_PCEF_OCS_ENABLED: "false"
+      JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true"
+    expose: ["8099", "3868"]
+    depends_on:
+      postgres-epc:
+        condition: service_healthy
+    networks: [sf-net]
+
+  epc-up-linux:
+    profiles: ["epc"]
+    build:
+      context: ./epc
+      dockerfile: epc-host/Dockerfile
+    env_file: [./deploy/epc/roles/up-linux.env]
+    environment:
+      EPC_JDBC_URL: jdbc:postgresql://postgres-epc:5432/epc
+      # P1 UP dataplane (GTP-U QER/URR); neutral defaults.
+      EPC_UP_QER_ENABLED: "false"
+      EPC_UP_URR_MODE: "poll"
+      EPC_UP_URR_POLL_MS: "60000"
+      EPC_UP_URR_BASELINE_PERSIST_MS: "300000"
+      JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true"
+    # up role = control-plane see-through (no Diameter/GTP-C/PFCP RA on this node).
+    # Kernel GTP-U is out of band; this host image is the UP peer-evidence node.
+    expose: ["8099"]
+    depends_on:
+      postgres-epc:
+        condition: service_healthy
+    networks: [sf-net]
+
+  # ── open5gs MME — the S6a CLIENT + S11 CLIENT that actually attach-against our EPC.
+  # Built from the in-tree open5gs source (loadtest/ims-tools/open5gs) as a standalone
+  # control-plane daemon (open5gs-mmed). No MongoDB needed — subscriber auth vectors are
+  # served by our epc-hss over S6a; `mme` resolves on sf-net for hss.env
+  # (EPC_DIAMETER_PEER_HOST=mme) and sgwc.env (EPC_GTP_PEER_HOST=mme).
+  #   docker compose -f docker-compose.yml -f docker-compose.services.yml --profile epc up -d --build mme
+  mme:
+    profiles: ["epc"]
+    image: local/open5gs-mme:epc
+    build:
+      context: .
+      dockerfile: epc/loadtest/open5gs/Dockerfile
+    command: ["open5gs-mmed", "-c", "/etc/open5gs/mme.yaml"]
+    volumes:
+      - ./epc/loadtest/open5gs/config/mme.yaml:/etc/open5gs/mme.yaml:ro
+      - ./epc/loadtest/open5gs/config/mme.conf:/etc/freeDiameter/mme.conf:ro
+      - ./epc/loadtest/open5gs/config/tls:/etc/open5gs/tls-lab:ro
+    expose: ["3868", "2123/udp", "36412/sctp"]
+    depends_on:
+      epc-hss:
+        condition: service_started
+      epc-sgwc:
+        condition: service_started
+    networks: [sf-net]
+
+  # ── Wire evidence capture sidecar (profile epc). tshark with NET_ADMIN/NET_RAW
+  # inside sf-net — proves S6a/S11/PFCP on the wire WITHOUT host sudo. One-shot:
+  #   docker compose -f docker-compose.yml -f docker-compose.services.yml --profile epc \
+  #     run --rm -T pcap tshark -i eth0 -f 'port 3868 or udp port 2123 or udp port 8805' \
+  #     -a duration:60 -w /pcaps/epc-wire.pcap
+  pcap:
+    profiles: ["epc"]
+    image: nicolaka/netshoot:latest
+    cap_add: [NET_ADMIN, NET_RAW]
+    volumes: ["./epc/loadtest/pcaps:/pcaps"]
+    networks: [sf-net]
+    entrypoint: []
+    command: ["sh", "-c", "sleep infinity"]
+
+  # ── OPTIONAL real open5gs user plane (SGWD/PGWD replaces the alpine placeholders above).
+  # Keep OFF by default: these live under profile "epc-up", so `--profile epc` still boots
+  # the alpine `sgwu`/`pgwu` placeholders unchanged. Enable only when you need real
+  # PFCP Sxa/Sxb + userspace GTP-U (S1-U/S5-U/SGi) against mme. They use the same
+  # local/open5gs-mme:epc image (build once), but need /dev/net/tun + NET_ADMIN +
+  # ogstun setup (see loadtest/ims-tools/open5gs/docker/build/setup.sh) and a pgwu
+  # with the PGW-C F-TEID; not required for the S6a/S11 control-plane smoke in the README.
+  # mme-sgwu:
+  #   profiles: ["epc-up"]
+  #   image: local/open5gs-mme:epc
+  #   command: ["open5gs-sgwud", "-c", "/etc/open5gs/sgwu.yaml"]
+  #   cap_add: [NET_ADMIN]
+  #   devices: ["/dev/net/tun:/dev/net/tun"]
+  #   expose: ["8805/udp", "2152/udp"]
+  #   networks: [sf-net]
+  # mme-pgwu:
+  #   profiles: ["epc-up"]
+  #   image: local/open5gs-mme:epc
+  #   command: ["open5gs-pgwud", "-c", "/etc/open5gs/pgwu.yaml"]
+  #   cap_add: [NET_ADMIN]
+  #   devices: ["/dev/net/tun:/dev/net/tun"]
+  #   expose: ["8805/udp", "2152/udp"]
+  #   networks: [sf-net]
 
 volumes:
   epc-postgres: {}

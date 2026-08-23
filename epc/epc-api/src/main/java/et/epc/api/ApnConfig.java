@@ -2,7 +2,7 @@ package et.epc.api;
 
 import java.util.Objects;
 
-public record ApnConfig(String apn, PdnType pdnType, QosProfile qos, boolean ims, String pcscfIpv4) {
+public record ApnConfig(String apn, PdnType pdnType, QosProfile qos, boolean ims, String pcscfIpv4) implements java.io.Serializable {
     public ApnConfig {
         Objects.requireNonNull(apn);
         Objects.requireNonNull(pdnType);

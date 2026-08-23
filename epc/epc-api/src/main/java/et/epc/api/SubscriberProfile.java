@@ -12,7 +12,7 @@ public record SubscriberProfile(
         String defaultApn,
         QosProfile subscribedQos,
         int chargingCharacteristics
-) {
+) implements java.io.Serializable {
     public SubscriberProfile {
         Objects.requireNonNull(imsi);
         Objects.requireNonNull(homePlmn);

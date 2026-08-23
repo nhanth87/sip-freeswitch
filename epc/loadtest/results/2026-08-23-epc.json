@@ -1,0 +1,51 @@
+{
+  "date": "2026-08-23",
+  "stamp": "20260823-184849",
+  "generated_by": "epc/loadtest/scripts/epc-acceptance.sh",
+  "gates": {
+    "jdk25": {
+      "pass": true,
+      "version": "openjdk version \"25.0.3\" 2026-04-21 LTS"
+    },
+    "mvn_test": {
+      "pass": true,
+      "command": "cd /home/meodien/Desktop/ethiopia-working-dir/worktrees/voice-service/sip-freeswitch/epc && mvn -B -ntp -pl epc-host -am test",
+      "exit": 0,
+      "summary": "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.016 s -- in et.epc.host.EpcJdbcTest;[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.034 s -- in et.epc.host.GtpGatewaySbbTest [INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.116 s -- in et.epc.host.EpcInfinispanManagerTest;[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.167 s -- in et.epc.host.IspnSessionStoreTest [INFO] Tests run: 80, Failures: 0, Errors: 0, Skipped: 0;[INFO] BUILD SUCCESS"
+    },
+    "package_dist": {
+      "pass": true,
+      "command": "cd /home/meodien/Desktop/ethiopia-working-dir/worktrees/voice-service/sip-freeswitch && ./tools/package-dist-epc.sh",
+      "exit": 0,
+      "dist_jar": "/home/meodien/Desktop/ethiopia-working-dir/worktrees/voice-service/sip-freeswitch/dist/epc/quarkus-run.jar",
+      "dist_jar_mtime": "2026-08-23 18:50:50.142518405 +0700",
+      "dist_run_mtime": "2026-08-23 18:50:50.223584635 +0700"
+    },
+    "wire_diameter_cea": {
+      "status": "skip",
+      "host": "",
+      "port": "3868",
+      "evidence": ""
+    },
+    "wire_gtp_echo": {
+      "status": "skip",
+      "host": "",
+      "port": "2123",
+      "evidence": ""
+    }
+  },
+  "wire_proof": false,
+  "wire_procedures": {"s6a_air_aia":{"ok":false,"status":"OPEN","evidence":"no peer / no capture (pcap path or tshark evidence missing)","blocked_by":"ra-diameter structured AVP (P0) + task_0002"},"s6a_ulr_ula":{"ok":false,"status":"OPEN","evidence":"no peer / no capture (pcap path or tshark evidence missing)","blocked_by":"ra-diameter structured AVP (P0) + task_0002"},"cx_mar_maa":{"ok":false,"status":"OPEN","evidence":"no peer / no capture (pcap path or tshark evidence missing)","blocked_by":"ra-diameter structured AVP (P0) + task_0002"},"gx_ccr_cca":{"ok":false,"status":"OPEN","evidence":"no peer / no capture (pcap path or tshark evidence missing)","blocked_by":"ra-diameter structured AVP (P0) + task_0003"},"pfcp_assoc":{"ok":false,"status":"OPEN","evidence":"no peer / no capture (pcap path or tshark evidence missing)","blocked_by":"task_0001 ra-pfcp + task_0004 (sgwu/pgwu are alpine placeholders)"},"s5c_create":{"ok":false,"status":"OPEN","evidence":"no peer / no capture (pcap path or tshark evidence missing)","blocked_by":"task_0004 (EPC_S5C_WIRE=false today)"}},
+  "attach": {"ok":false,"status":"OPEN","evidence":"no peer / no capture (needs operator-lab eNB + open5gs MME + UERANSIM UE)","detail":"2001 attach (S6a AIR/AIA+ULR/ULA + S11 Create Session + PFCP Session Establishment)","blocked_by":"task_0002 + task_0004 + task_0001"},
+  "p4_attach": "not-proven (requires operator lab eNB+MME: open5gs MME + UERANSIM)",
+  "blocked_by": {
+    "s6a_air_aia": "ra-diameter structured AVP (P0) + task_0002",
+    "s6a_ulr_ula": "ra-diameter structured AVP (P0) + task_0002",
+    "cx_mar_maa": "ra-diameter structured AVP (P0) + task_0002",
+    "gx_ccr_cca": "ra-diameter structured AVP (P0) + task_0003",
+    "pfcp_assoc": "task_0001 (ra-pfcp) + task_0004 (SGW-U/PGW-U placeholders)",
+    "s5c_create": "task_0004 (EPC_S5C_WIRE=false)",
+    "attach": "task_0002 + task_0004 + task_0001 (needs eNB + UERANSIM UE)"
+  },
+  "overall": "pass"
+}

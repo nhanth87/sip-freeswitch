@@ -10,10 +10,24 @@
   </parent>
   <artifactId>epc-pcef</artifactId>
   <name>epc :: epc-pcef</name>
+  <description>4G PCEF: Gx/Gy/Gz policy-and-charging decision core plus a standalone micro-jainslee application (PcefApp/PcefSbb). Depends on epc-api only for the domain library; jainslee-core + ra-diameter for the PcefSbb/PcefMain app bootstrap.</description>
   <dependencies>
     <dependency>
       <groupId>et.epc</groupId>
       <artifactId>epc-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.microjainslee</groupId>
+      <artifactId>jainslee-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.microjainslee</groupId>
+      <artifactId>ra-diameter</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.microjainslee</groupId>
+      <artifactId>jainslee-apt</artifactId>
+      <optional>true</optional>
     </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>

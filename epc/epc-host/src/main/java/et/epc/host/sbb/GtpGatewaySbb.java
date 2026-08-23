@@ -17,8 +17,13 @@ import com.microjainslee.ra.gtpv2c.Gtpv2Ie;
 import com.microjainslee.ra.gtpv2c.Gtpv2Ies;
 import com.microjainslee.ra.gtpv2c.Gtpv2Message;
 import com.microjainslee.ra.gtpv2c.Gtpv2MessageType;
+import com.microjainslee.ra.gtpv2c.command.GtpEchoCommand;
 import com.microjainslee.ra.gtpv2c.command.SendGtpv2Message;
+import com.microjainslee.ra.gtpv2c.event.GtpEchoEvent;
 import com.microjainslee.ra.gtpv2c.event.Gtpv2MessageEvent;
+import com.microjainslee.ra.pfcp.command.PfcpAssociateCommand;
+import com.microjainslee.ra.pfcp.event.PfcpAssociationEvent;
+import com.microjainslee.ra.pfcp.event.PfcpHeartbeatEvent;
 import com.microjainslee.ra.pfcp.event.PfcpMessageEvent;
 import et.epc.pgwc.CreateSessionResult;
 import et.epc.pgwc.PgwControl;
@@ -102,7 +107,10 @@ public abstract class GtpGatewaySbb extends CmpBackedSbb implements SleeEventHan
     public void onEvent(SleeEvent event, ActivityContextInterface aci) {
         switch (event) {
             case Gtpv2MessageEvent gtp -> onGtp(gtp);
+            case GtpEchoEvent echo -> onGtpEcho(echo);
             case PfcpMessageEvent pfcp -> onPfcp(pfcp);
+            case PfcpAssociationEvent assoc -> onPfcpAssociation(assoc);
+            case PfcpHeartbeatEvent hb -> onPfcpHeartbeat(hb);
             default -> {}
         }
     }
@@ -112,6 +120,7 @@ public abstract class GtpGatewaySbb extends CmpBackedSbb implements SleeEventHan
         try {
             switch (msg.type()) {
                 case CREATE_SESSION_REQUEST -> createSession(ev);
+                case CREATE_SESSION_RESPONSE -> s5cResponse(ev);
                 case MODIFY_BEARER_REQUEST -> modifyBearer(ev);
                 case DELETE_SESSION_REQUEST -> deleteSession(ev);
                 case RELEASE_ACCESS_BEARERS_REQUEST -> releaseAccessBearers(ev);
@@ -130,15 +139,42 @@ public abstract class GtpGatewaySbb extends CmpBackedSbb implements SleeEventHan
         setPfcpSeid(ev.message().seid());
     }
 
+    private void onGtpEcho(GtpEchoEvent ev) {
+        RaCommandPort port = gtpRa;
+        if (port != null && !ev.response()) {
+            port.sendCommand(new GtpEchoCommand(ev.peer()));
+        }
+    }
+
+    private void onPfcpAssociation(PfcpAssociationEvent ev) {
+        RaCommandPort port = pfcpRa;
+        if (port != null && !ev.associated()) {
+            port.sendCommand(new PfcpAssociateCommand(ev.peer()));
+        }
+    }
+
+    private void onPfcpHeartbeat(PfcpHeartbeatEvent ev) {
+        RaCommandPort port = pfcpRa;
+        if (port != null && !ev.response()) {
+            port.sendCommand(new PfcpAssociateCommand(ev.peer()));
+        }
+    }
+
     private void createSession(Gtpv2MessageEvent ev) {
-        Imsi imsi = new Imsi(Gtpv2Ies.imsiDigits(ev.message()));
-        String apnName = Gtpv2Ies.apn(ev.message());
-        Fteid sender = api(Gtpv2Ies.senderFteid(ev.message()));
+        Gtpv2Message msg = ev.message();
+        Imsi imsi = new Imsi(Gtpv2Ies.imsiDigits(msg));
+        String apnName = Gtpv2Ies.apn(msg);
+        Fteid sender = api(Gtpv2Ies.senderFteid(msg));
+        // GAP-sgw-pgw blocker 3: the MME's PGW S5/S8 control-plane F-TEID selects
+        // the PGW-C for the S5-C leg. When wire=true SgwControl routes the S5-C
+        // request to this address instead of the configured default peer.
+        GtpFteid pgwS5cGtp = Gtpv2Ies.pgwS5cFteid(msg);
         ApnConfig apn = apnOf(apnName);
         setImsi(imsi.digits());
         setApn(apnName);
         if (sgw != null) {
-            SgwCreateSessionResult r = sgw.createSession(imsi, apn, sender);
+            Fteid pgwS5c = pgwS5cGtp == null ? null : api(pgwS5cGtp);
+            SgwCreateSessionResult r = sgw.createSession(imsi, apn, sender, pgwS5c);
             setS11cTeid(r.sgwS11c().teid());
             setPfcpSeid(r.pgw().pfcpSeid());
             setGeneration(1L);
@@ -146,12 +182,27 @@ public abstract class GtpGatewaySbb extends CmpBackedSbb implements SleeEventHan
             return;
         }
         if (pgw != null) {
-            CreateSessionResult r = pgw.createSession(imsi, apn, sender);
-            setPfcpSeid(r.pfcpSeid());
-            send(pgwCreateSessionResponse(ev.message(), r), ev.peer());
+            s5cCreateSession(ev, imsi, apn, sender);
             return;
         }
-        send(error(ev.message(), 73), ev.peer());
+        send(error(msg, 73), ev.peer());
+    }
+
+    /**
+     * PGW-C server side of the S5-C split: answer an inbound
+     * {@code CREATE_SESSION_REQUEST} from the SGW-C with a
+     * {@code CREATE_SESSION_RESPONSE} carrying the PGW S5-C / S5-U F-TEIDs.
+     */
+    private void s5cCreateSession(Gtpv2MessageEvent ev, Imsi imsi, ApnConfig apn, Fteid sgwS5u) {
+        CreateSessionResult r = pgw.createSession(imsi, apn, sgwS5u);
+        setPfcpSeid(r.pfcpSeid());
+        send(pgwCreateSessionResponse(ev.message(), r), ev.peer());
+    }
+
+    private void s5cResponse(Gtpv2MessageEvent ev) {
+        if (sgw != null) {
+            sgw.onS5cResponse(ev.message());
+        }
     }
 
     private void modifyBearer(Gtpv2MessageEvent ev) {

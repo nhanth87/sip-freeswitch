@@ -20,6 +20,19 @@
       <artifactId>epc-crypto</artifactId>
     </dependency>
     <dependency>
+      <groupId>com.microjainslee</groupId>
+      <artifactId>jainslee-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.microjainslee</groupId>
+      <artifactId>ra-diameter</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.microjainslee</groupId>
+      <artifactId>jainslee-apt</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>
@@ -27,6 +40,27 @@
     <dependency>
       <groupId>org.apache.logging.log4j</groupId>
       <artifactId>log4j-api</artifactId>
+    </dependency>
+    <!-- Standalone (HssMain) durable datastore: Postgres JDBC + Flyway on the epc DB.
+         optional=true so these never leak into epc-host's transitive set — epc-host
+         owns its own Quarkus Agroal/Flyway for the db/migration location. -->
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <version>42.7.13</version>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+      <version>12.0.0</version>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-database-postgresql</artifactId>
+      <version>12.0.0</version>
+      <optional>true</optional>
     </dependency>
   </dependencies>
 </project>

@@ -1,0 +1,17 @@
+-- NOTE: same-content copy target. The lead copies this file verbatim to
+-- epc/epc-host/src/main/resources/db/migration/V3__epc_ims_identity.sql
+-- (epc-host owns Flyway; epc-hss stores the source of truth for the HSS schema).
+
+-- EPC IMS identity (Cx) columns + iFC store. Never Elisa/H2/SQLite.
+ALTER TABLE epc_subscriber
+    ADD COLUMN IF NOT EXISTS impi                  TEXT,
+    ADD COLUMN IF NOT EXISTS impu_csv              TEXT,
+    ADD COLUMN IF NOT EXISTS service_profile_json  TEXT,
+    ADD COLUMN IF NOT EXISTS ue_ambr_ul_bps        BIGINT,
+    ADD COLUMN IF NOT EXISTS ue_ambr_dl_bps        BIGINT;
+
+CREATE TABLE IF NOT EXISTS epc_ims_ifc (
+    impi        TEXT PRIMARY KEY,
+    ifc_json    TEXT,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);

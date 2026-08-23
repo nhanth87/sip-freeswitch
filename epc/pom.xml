@@ -17,6 +17,7 @@
     <module>epc-sgwc</module>
     <module>epc-pgwc</module>
     <module>epc-pcef</module>
+    <module>epc-pcrf</module>
     <module>epc-up-linux</module>
     <module>epc-host</module>
   </modules>
@@ -30,6 +31,8 @@
     <surefire.version>3.5.4</surefire.version>
     <compiler.plugin.version>3.14.0</compiler.plugin.version>
     <enforcer.plugin.version>3.5.0</enforcer.plugin.version>
+    <infinispan.version>15.0.0.Final</infinispan.version>
+    <protostream.version>5.0.1.Final</protostream.version>
   </properties>
 
   <dependencyManagement>
@@ -62,6 +65,11 @@
       <dependency>
         <groupId>et.epc</groupId>
         <artifactId>epc-pcef</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>et.epc</groupId>
+        <artifactId>epc-pcrf</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
@@ -101,6 +109,17 @@
       </dependency>
       <dependency>
         <groupId>com.microjainslee</groupId>
+        <artifactId>jainslee-apt</artifactId>
+        <version>${microjainslee.version}</version>
+        <optional>true</optional>
+      </dependency>
+      <dependency>
+        <groupId>com.microjainslee</groupId>
+        <artifactId>jainslee-ra-spi</artifactId>
+        <version>${microjainslee.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.microjainslee</groupId>
         <artifactId>adapter-quarkus</artifactId>
         <version>${microjainslee.version}</version>
       </dependency>
@@ -108,6 +127,26 @@
         <groupId>com.microjainslee</groupId>
         <artifactId>ra-diameter</artifactId>
         <version>${microjainslee.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.infinispan</groupId>
+        <artifactId>infinispan-core</artifactId>
+        <version>${infinispan.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.infinispan</groupId>
+        <artifactId>infinispan-commons</artifactId>
+        <version>${infinispan.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.infinispan.protostream</groupId>
+        <artifactId>protostream</artifactId>
+        <version>${protostream.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.infinispan.protostream</groupId>
+        <artifactId>protostream-types</artifactId>
+        <version>${protostream.version}</version>
       </dependency>
       <dependency>
         <groupId>org.apache.logging.log4j</groupId>

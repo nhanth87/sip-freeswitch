@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EPC Control Plane</title>
+<style>
+  :root{--bg:#0e1117;--panel:#171b24;--panel2:#1d2330;--line:#2a3242;--fg:#e6edf3;--mut:#8b95a7;--acc:#58a6ff;--ok:#3fb96f;--warn:#d29922;--err:#f47067;--mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;--sans:'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);line-height:1.5}
+  header{padding:22px 32px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
+  h1{font-size:20px;margin:0;letter-spacing:.2px}
+  .sub{color:var(--mut);font-size:13px}
+  .chip{display:inline-block;border:1px solid var(--acc);color:var(--acc);border-radius:999px;padding:1px 10px;font-size:12px;font-family:var(--mono);margin-right:6px}
+  .chip-mut{border-color:var(--line);color:var(--mut)}
+  main{max-width:1200px;margin:0 auto;padding:28px 32px 60px}
+  section{margin-bottom:34px}
+  h2{font-size:14px;text-transform:uppercase;letter-spacing:.12em;color:var(--mut);margin:0 0 12px}
+  .bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+  .refresh{background:var(--panel2);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:6px 14px;font-family:var(--sans);cursor:pointer;font-size:13px}
+  .refresh:hover{border-color:var(--acc)}
+  table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);font-size:13px;vertical-align:top}
+  th{background:var(--panel2);color:var(--mut);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+  tr:last-child td{border-bottom:none}
+  code{font-family:var(--mono);font-size:12px;background:#0b0e14;border:1px solid var(--line);border-radius:6px;padding:2px 7px}
+  .badge{display:inline-block;border-radius:999px;padding:1px 9px;font-size:11px;font-family:var(--mono)}
+  .badge-ro{border:1px solid var(--warn);color:var(--warn)}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .live{background:var(--ok)} .down{background:var(--err)}
+  .mut{color:var(--mut)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+  .card h3{margin:0 0 6px;font-size:14px;font-family:var(--mono)}
+  .card .state{font-size:13px;color:var(--mut)}
+  .card ul{margin:8px 0 0;padding-left:18px;color:var(--mut);font-size:12px}
+  footer{margin-top:40px;color:var(--mut);font-size:12px}
+  footer a{color:var(--acc);text-decoration:none}
+  .kicker{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--mut)}
+</style>
+</head>
+<body>
+<header>
+  <h1>EPC Control Plane</h1>
+  <span class="sub" id="headline">node/cluster not loaded</span>
+  <span class="sub">auto-refresh every 10&nbsp;s</span>
+</header>
+<main>
+  <section>
+    <div class="bar"><h2>Effective runtime configuration</h2><button class="refresh" id="cfg-refresh">Refresh config</button></div>
+    <table><thead><tr><th>Key</th><th>Value</th><th>Writable</th><th>Doc</th></tr></thead>
+      <tbody id="cfg-body"><tr><td class="mut" colspan="4">loading…</td></tr></tbody></table>
+  </section>
+  <section>
+    <div class="bar"><h2>Link / peer status</h2><button class="refresh" id="st-refresh">Refresh status</button></div>
+    <table><thead><tr><th>Name</th><th>Local listen</th><th>Live</th><th>Evidence</th></tr></thead>
+      <tbody id="st-body"><tr><td class="mut" colspan="4">loading…</td></tr></tbody></table>
+    <p class="mut" style="font-size:12px">live = peer evidence (CEA/watchdog) only; listen is not UP.</p>
+    <p id="role-line" class="mut" style="font-size:13px"></p>
+  </section>
+<section>
+    <h2>3GPP applications</h2>
+    <div class="grid">
+      <div class="card"><h3>S6a</h3><div class="state">Mobility Mgmt · HSS</div>
+        <ul><li>AIR &rarr; AIA (2001)</li><li>ULR &rarr; ULA (2001)</li><li>PUR, CLR, IDR, DSR</li></ul></div>
+      <div class="card"><h3>Cx</h3><div class="state">IMS subscriber · HSS</div>
+        <ul><li>UAR/LIR &rarr; SAA/CIA</li><li>SAR</li><li>MAR</li></ul></div>
+      <div class="card"><h3>Gx</h3><div class="state">PCC provisioning · PGW-C</div>
+        <ul><li>CCR &rarr; CCA</li></ul>
+        <div class="kicker">not routed (PcrfPort wiring in this worktree)</div></div>
+      <div class="card"><h3>Rx</h3><div class="state">AF QoS auth · PCRF</div>
+        <ul><li>AAR &rarr; AAA</li><li>RAR &rarr; RAA</li><li>STR &rarr; STA</li></ul>
+        <div class="kicker">not routed (PcrfPort wiring in this worktree)</div></div>
+    </div>
+  </section>
+  <footer>
+    Raw JSON: <a href="/epc/status">/epc/status</a> &middot; <a href="/epc/config">/epc/config</a>
+  </footer>
+</main>
+<script>
+  const FMT = new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  function esc(s){ return String(s).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function badge(w){ return w ? '' : '<span class="badge badge-ro">boot-time &middot; ro</span>'; }
+  function valCell(v){ return (typeof v === 'object' && v !== null && !Array.isArray(v)) ? JSON.stringify(v) : String(v); }
+
+  async function loadCfg(){
+    try{
+      var j = await (await fetch('/epc/config')).json();
+      var tb = document.getElementById('cfg-body'); tb.innerHTML = '';
+      for(var k in j){
+        var m = j[k];
+        var tr = document.createElement('tr');
+        if(k === 'effective'){
+          tr.innerHTML = '<td><code>effective</code></td><td><code>' + esc(JSON.stringify(m)) +
+            '</code></td><td><span class="badge badge-ro">derived</span></td>' +
+            '<td class="mut">effective ISPN mode, caches active, 3GPP apps</td>';
+        } else {
+          tr.innerHTML = '<td><code>' + esc(k) + '</code></td><td><code>' + esc(valCell(m.value)) +
+            '</code></td><td>' + badge(m.writable) + '</td><td class="mut">' + esc(m.doc) + '</td>';
+        }
+        tb.appendChild(tr);
+      }
+      var eff = j.effective || {}, ro = (j.roles && j.roles.value) || {};
+      var roles = ['hss','sgwc','pgwc','pcrf','pcef','up'].filter(function(x){ return ro[x]; }).join('/');
+      document.getElementById('headline').textContent =
+        (j.nodeId ? j.nodeId.value + ' &middot; ' : '') +
+        (j.clusterName ? j.clusterName.value + ' &middot; ' : '') +
+        (eff.isptMode || '') + ' &middot; roles ' + roles + ' &mdash; ' + FMT.format(new Date());
+    }catch(e){ document.getElementById('cfg-body').innerHTML =
+      '<tr><td class="mut" colspan="4">config fetch failed: ' + esc(e.message) + '</td></tr>'; }
+  }
+
+  async function loadStatus(){
+    try{
+      var j = await (await fetch('/epc/status')).json();
+      var tb = document.getElementById('st-body'); tb.innerHTML = '';
+      var links = Object.entries(j.links || {});
+      if(links.length === 0){ tb.innerHTML = '<tr><td class="mut" colspan="4">no peer links wired</td></tr>'; }
+      else links.forEach(function(entry){
+        var name = entry[0], l = entry[1];
+        var tr = document.createElement('tr');
+        var live = l.live ? '<span class="dot live"></span>live' : '<span class="dot down"></span>down';
+        tr.innerHTML = '<td><code>' + esc(name) + '</code></td><td class="mut">' +
+          (l.localListen ? esc(l.localListen) : '&mdash;') + '</td><td>' + live +
+          '</td><td class="mut">' + esc(l.evidence || '') + '</td>';
+        tb.appendChild(tr);
+      });
+      var rd = j.roles || {};
+      var chips = ['hss','sgwc','pgwc','pcrf','pcef','up'].map(function(k){
+        return '<span class="chip ' + (rd[k] ? '' : 'chip-mut') + '">' + k + '</span>'; }).join('');
+      document.getElementById('role-line').innerHTML = 'Roles: ' + chips +
+        ' &nbsp;&middot;&nbsp; node ' + esc(j.nodeId || '?') +
+        ' &nbsp;&middot;&nbsp; cluster ' + esc(j.cluster || '?');
+    }catch(e){ document.getElementById('st-body').innerHTML =
+      '<tr><td class="mut" colspan="4">status fetch failed: ' + esc(e.message) + '</td></tr>'; }
+  }
+
+  document.getElementById('cfg-refresh').addEventListener('click', loadCfg);
+  document.getElementById('st-refresh').addEventListener('click', loadStatus);
+  loadCfg();
+  loadStatus();
+  setInterval(function(){ loadCfg(); loadStatus(); }, 10000);
+</script>
+</body>
+</html>

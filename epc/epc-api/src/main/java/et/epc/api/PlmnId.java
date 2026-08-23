@@ -5,7 +5,7 @@ import java.util.Objects;
 /**
  * PLMN as MCC/MNC plus NAS/S6a 3-octet SN-id encoding (TS 24.301 / TS 23.003).
  */
-public record PlmnId(String mcc, String mnc) {
+public record PlmnId(String mcc, String mnc) implements java.io.Serializable {
 
     public PlmnId {
         Objects.requireNonNull(mcc);

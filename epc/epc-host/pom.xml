@@ -38,6 +38,14 @@
       <artifactId>quarkus-arc</artifactId>
     </dependency>
     <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-jdbc-postgresql</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-flyway</artifactId>
+    </dependency>
+    <dependency>
       <groupId>et.epc</groupId>
       <artifactId>epc-api</artifactId>
     </dependency>
@@ -68,6 +76,10 @@
     <dependency>
       <groupId>et.epc</groupId>
       <artifactId>epc-pcef</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>et.epc</groupId>
+      <artifactId>epc-pcrf</artifactId>
     </dependency>
     <dependency>
       <groupId>et.epc</groupId>

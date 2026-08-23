@@ -9,13 +9,18 @@ import com.microjainslee.api.annotations.InjectRa;
 import com.microjainslee.api.annotations.SbbAnnotation;
 import com.microjainslee.core.CmpBackedSbb;
 import com.microjainslee.ra.diameter.command.SendDiameterAnswer;
+import com.microjainslee.ra.diameter.events.DiameterAnswerEvent;
 import com.microjainslee.ra.diameter.events.DiameterRequestEvent;
+import et.epc.hss.CxAvp;
 import et.epc.hss.CxService;
+import et.epc.hss.CxService.CxResult;
 import et.epc.hss.HssService;
+import et.epc.hss.PcrfPort;
 import et.epc.hss.S6aMessage;
 import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 /**
  * One Diameter application gateway SBB. {@code mapEventToSbb} keys on class, so
@@ -28,9 +33,20 @@ public abstract class DiameterGatewaySbb extends CmpBackedSbb implements SleeEve
     public static final long S6A = 16_777_251L;
     public static final long CX = 16_777_216L;
     public static final long GX = 16_777_238L;
+    public static final long RX = 16_777_236L;
 
     private final HssService hss;
     private final CxService cx;
+
+    /** Gx/Rx delegation seam; null keeps the 3007 (default) answer path. */
+    private volatile PcrfPort pcrf;
+
+    /**
+     * Outbound-answer completion seam (Gx CCA etc.). Answers to our own
+     * {@code SendDiameterRequest} arrive as {@link DiameterAnswerEvent}; the
+     * Gx wire client completes its pending CCR here. Null = drop.
+     */
+    private volatile Consumer<DiameterAnswerEvent> answerSink;
 
     @InjectRa(name = "diameter-ra")
     private volatile RaCommandPort diameterRa;
@@ -42,6 +58,23 @@ public abstract class DiameterGatewaySbb extends CmpBackedSbb implements SleeEve
     public DiameterGatewaySbb(HssService hss, CxService cx) {
         this.hss = hss;
         this.cx = cx;
+    }
+
+    public DiameterGatewaySbb(HssService hss, CxService cx, PcrfPort pcrf) {
+        this(hss, cx);
+        this.pcrf = pcrf;
+    }
+
+    /** Attach (or detach, if {@code null}) the PCRF bridge without rebuilding. */
+    public DiameterGatewaySbb withPcrf(PcrfPort pcrf) {
+        this.pcrf = pcrf;
+        return this;
+    }
+
+    /** Attach (or detach, if {@code null}) the outbound-answer router (Gx CCA). */
+    public DiameterGatewaySbb withAnswerSink(Consumer<DiameterAnswerEvent> sink) {
+        this.answerSink = sink;
+        return this;
     }
 
     @CmpField("sessionId")
@@ -63,6 +96,13 @@ public abstract class DiameterGatewaySbb extends CmpBackedSbb implements SleeEve
 
     @Override
     public void onEvent(SleeEvent event, ActivityContextInterface aci) {
+        if (event instanceof DiameterAnswerEvent ans) {
+            Consumer<DiameterAnswerEvent> sink = answerSink;
+            if (sink != null) {
+                sink.accept(ans);
+            }
+            return;
+        }
         if (!(event instanceof DiameterRequestEvent req)) {
             return;
         }
@@ -71,6 +111,7 @@ public abstract class DiameterGatewaySbb extends CmpBackedSbb implements SleeEve
         SendDiameterAnswer answer = switch ((int) req.applicationId()) {
             case (int) S6A -> s6a(req);
             case (int) CX -> cx(req);
+            case (int) GX, (int) RX -> pcrf(req);
             default -> SendDiameterAnswer.error(
                     req.sessionId(), req.applicationId(), req.commandCode(),
                     req.hopByHopId(), req.endToEndId(), 3007L);
@@ -79,6 +120,16 @@ public abstract class DiameterGatewaySbb extends CmpBackedSbb implements SleeEve
         if (port != null && answer != null) {
             port.sendCommand(answer);
         }
+    }
+
+    /** Gx/Rx delegation. When no PCRF is bound, keep answering 3007. */
+    private SendDiameterAnswer pcrf(DiameterRequestEvent req) {
+        PcrfPort delegate = pcrf;
+        if (delegate == null) {
+            return SendDiameterAnswer.error(req.sessionId(), req.applicationId(),
+                    req.commandCode(), req.hopByHopId(), req.endToEndId(), 3007L);
+        }
+        return delegate.handle(req);
     }
 
     private SendDiameterAnswer s6a(DiameterRequestEvent req) {
@@ -97,45 +148,49 @@ public abstract class DiameterGatewaySbb extends CmpBackedSbb implements SleeEve
                     req.hopByHopId(), req.endToEndId(), 3002L);
         }
         Map<Integer, String> avps = req.avps() == null ? Map.of() : req.avps();
-        String user = avps.getOrDefault(1, "");
-        String serverName = avps.getOrDefault(602, "sip:scscf.ims.lab");
-        String scscf = switch (req.commandCode()) {
-            case 301 -> { // SAR
-                try {
-                    yield cx.assignScscf(new et.epc.api.Imsi(digits(user)), serverName);
-                } catch (RuntimeException e) {
-                    yield null;
-                }
-            }
-            case 300, 302 -> { // UAR / LIR
-                try {
-                    yield cx.locatedScscf(new et.epc.api.Imsi(digits(user)));
-                } catch (RuntimeException e) {
-                    yield null;
-                }
-            }
-            default -> null;
+        String impi = avps.getOrDefault(CxAvp.USER_NAME, "");
+        String impu = avps.getOrDefault(CxAvp.PUBLIC_IDENTITY, "");
+        CxResult result = switch (req.commandCode()) {
+            case 300 -> cx.uar(impiOrBlank(impi), impuOrBlank(impu));
+            case 301 -> cx.sar(impiOrBlank(impi), impuOrBlank(impu),
+                    avps.get(CxAvp.SERVER_NAME),
+                    assignmentType(avps.get(CxAvp.SERVER_ASSIGNMENT_TYPE)));
+            case 302 -> cx.lir(impuOrBlank(impu));
+            case 303 -> cx.mar(impiOrBlank(impi), impuOrBlank(impu));
+            default -> CxResult.error(CxAvp.UNABLE_TO_COMPLY);
         };
-        if (scscf == null) {
-            return SendDiameterAnswer.error(req.sessionId(), CX, req.commandCode(),
-                    req.hopByHopId(), req.endToEndId(), 5001L);
+        long rc = result.resultCode();
+        boolean success = rc == CxAvp.SUCCESS
+                || rc == CxAvp.FIRST_REGISTRATION
+                || rc == CxAvp.SUBSEQUENT_REGISTRATION;
+        if (success) {
+            // UAR returns experimental result codes (2002/2003) plus payload; MAA/SAA
+            // carry grouped AVPs (SIP-Auth-Data-Item / Charging-Information).
+            return new SendDiameterAnswer(req.sessionId(), CX, req.commandCode(), rc,
+                    req.hopByHopId(), req.endToEndId(), result.avps(),
+                    result.structuredAvps());
         }
-        return SendDiameterAnswer.ok(req.sessionId(), CX, req.commandCode(),
-                req.hopByHopId(), req.endToEndId(), Map.of(268, "2001", 602, scscf));
+        return SendDiameterAnswer.error(req.sessionId(), CX, req.commandCode(),
+                req.hopByHopId(), req.endToEndId(), rc);
     }
 
-    private static String digits(String user) {
-        if (user == null) {
-            return "000000";
+    private static String impiOrBlank(String impi) {
+        return (impi == null || impi.isBlank()) ? null : impi;
+    }
+
+    private static String impuOrBlank(String impu) {
+        return (impu == null || impu.isBlank()) ? null : impu;
+    }
+
+    private static int assignmentType(String sat) {
+        if (sat == null) {
+            return CxAvp.SAT_REGISTRATION;
         }
-        StringBuilder b = new StringBuilder();
-        for (int i = 0; i < user.length(); i++) {
-            char c = user.charAt(i);
-            if (c >= '0' && c <= '9') {
-                b.append(c);
-            }
+        try {
+            return Integer.parseInt(sat.trim());
+        } catch (NumberFormatException e) {
+            return CxAvp.SAT_REGISTRATION;
         }
-        return b.length() >= 6 ? b.toString() : "000000";
     }
 
     public static final class $Concrete extends DiameterGatewaySbb {
@@ -147,6 +202,10 @@ public abstract class DiameterGatewaySbb extends CmpBackedSbb implements SleeEve
 
         public $Concrete(HssService hss, CxService cx) {
             super(hss, cx);
+        }
+
+        public $Concrete(HssService hss, CxService cx, PcrfPort pcrf) {
+            super(hss, cx, pcrf);
         }
 
         @Override public String getSessionId() { return str("sessionId"); }
