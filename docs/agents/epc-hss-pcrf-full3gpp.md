@@ -86,6 +86,10 @@ Both data planes the user asked for are **already Postgres-soT + ISPN-cached** i
 skeleton (`CachingHssRepository`, `IspnPccCache`). The plan below completes them to
 3GPP and closes the seams — it does **not** rewrite working code.
 
+**Status (2026-08-23 evening):** Phases A–D **implemented and committed** (`7ea761b`,
+274 files; full suite green — 101/101 epc-host + all module tests). The only
+remaining work is **Phase E — wire prove** (open5gs MME attach on the wire).
+
 ### Phase A — HSS data-model completeness (TS 23.008 §2.3 / TS 29.272)
 
 **Verified 2026-08-23 (code read, not assumed):** `HssService.subscriptionDataStructured`
@@ -144,6 +148,16 @@ what remains is data completeness + policy.
    on admin write (same pattern as HSS).
 3. Both caches on `epc-cluster` DIST_SYNC — never `elisa-cluster`. HSS ×2 HA
    invalidation is P2 (single HSS node in P1).
+
+### Known honest gaps after A–D (no silent claims)
+
+- **PCC admin write surface:** `pushRarOnPolicyChange` fires on programmatic/SQL
+  writes to `epc_pcc_rule` — there is no admin-UI PCC-rule editor yet. Direct SQL
+  + cache invalidate is the P1 path; UI later.
+- **Gx wire is config-gated:** `EPC_PCRF_WIRE_MODE=wire` must be set on pgwc and
+  the peer CEA must complete; default stays in-process (lab-safe).
+- **Attach still unproven:** no open5gs MME attach PCAP yet — the only remaining
+  P1 gate. Unit green ≠ wire ≠ attach.
 
 ### Phase E — Wire prove (the actual P1 gate)
 
