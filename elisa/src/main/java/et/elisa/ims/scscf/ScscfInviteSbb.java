@@ -236,63 +236,78 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
         if (metrics != null) {
             metrics.onInvite();
         }
-        String to = e.toUri();
-        boolean terminating = bindings != null && bindings.findLive(to).isPresent();
-        if (mmtel != null) {
-            MmtelService.Decision md = mmtel.evaluate(e.fromUri(), to, terminating);
-            if (md.action() == MmtelService.Action.BARRED) {
-                send(new SendResponse(e.callId(), md.sipStatus(), md.reason()));
-                return;
-            }
-            if (md.action() == MmtelService.Action.DIVERT && md.divertUri() != null) {
-                to = md.divertUri();
-                terminating = bindings != null && bindings.findLive(to).isPresent();
-            }
-        }
+        ensureCmpLoaded(e.callId());
+        // W1-a re-INVITE: never downgrade a live EARLY/CONFIRMED dialog to INVITE
+        // (would break recovery policy + startedAt/duration). Refresh checkpoint only.
+        boolean reInvite = e.callId() != null && e.callId().equals(getSipCallId())
+                && getTrunkUri() != null
+                && (DialogCheckpoint.STATE_EARLY.equals(getDialogState())
+                        || DialogCheckpoint.STATE_CONFIRMED.equals(getDialogState()));
         String target;
         String nextHop = null;
         List<String> asChain = List.of();
-        if (terminating) {
-            ImsBinding b = bindings.findLive(to).orElseThrow();
-            target = b.contact != null ? b.contact : to;
-            if (b.flowDiffersFromContact()) {
-                nextHop = b.flowNextHopUri();
-            }
-        } else if (isMrfDestination(to)) {
-            asChain = isc == null ? List.of() : isc.asChain(null);
-            target = asChain.isEmpty() && isc != null ? isc.asUri() : (asChain.isEmpty() ? to : asChain.getFirst());
+        boolean terminating = false;
+        if (reInvite) {
+            target = getTrunkUri();
+            setUpdatedAtEpochMs(Instant.now().toEpochMilli());
+            flushCmp();
+            LOG.debug("[S-CSCF] re-INVITE callId={} target={}", e.callId(), target);
         } else {
-            String ifc = hss == null ? null : hss.findByImpu(e.fromUri()).map(s -> s.ifcJson).orElse(null);
-            boolean calleeKnown = hss != null && hss.resolveIdentity(to).isPresent();
-            if (calleeKnown) {
-                send(new SendResponse(e.callId(), 480, "Temporarily Unavailable"));
-                LOG.debug("[S-CSCF] INVITE callId={} callee unregistered {}", e.callId(), to);
-                return;
+            String to = e.toUri();
+            terminating = bindings != null && bindings.findLive(to).isPresent();
+            if (mmtel != null) {
+                MmtelService.Decision md = mmtel.evaluate(e.fromUri(), to, terminating);
+                if (md.action() == MmtelService.Action.BARRED) {
+                    send(new SendResponse(e.callId(), md.sipStatus(), md.reason()));
+                    return;
+                }
+                if (md.action() == MmtelService.Action.DIVERT && md.divertUri() != null) {
+                    to = md.divertUri();
+                    terminating = bindings != null && bindings.findLive(to).isPresent();
+                }
             }
-            if (isc != null && isc.shouldInvokeAs(ifc)) {
-                asChain = isc.asChain(ifc);
-                target = asChain.isEmpty() ? isc.asUri() : asChain.getFirst();
-            } else if (isc != null && isc.hasBgcf() && looksLikeBreakout(to)) {
-                target = isc.bgcfUri();
+            if (terminating) {
+                ImsBinding b = bindings.findLive(to).orElseThrow();
+                target = b.contact != null ? b.contact : to;
+                if (b.flowDiffersFromContact()) {
+                    nextHop = b.flowNextHopUri();
+                }
+            } else if (isMrfDestination(to)) {
+                asChain = isc == null ? List.of() : isc.asChain(null);
+                target = asChain.isEmpty() && isc != null ? isc.asUri() : (asChain.isEmpty() ? to : asChain.getFirst());
             } else {
-                target = to;
+                String ifc = hss == null ? null : hss.findByImpu(e.fromUri()).map(s -> s.ifcJson).orElse(null);
+                boolean calleeKnown = hss != null && hss.resolveIdentity(to).isPresent();
+                if (calleeKnown) {
+                    send(new SendResponse(e.callId(), 480, "Temporarily Unavailable"));
+                    LOG.debug("[S-CSCF] INVITE callId={} callee unregistered {}", e.callId(), to);
+                    return;
+                }
+                if (isc != null && isc.shouldInvokeAs(ifc)) {
+                    asChain = isc.asChain(ifc);
+                    target = asChain.isEmpty() ? isc.asUri() : asChain.getFirst();
+                } else if (isc != null && isc.hasBgcf() && looksLikeBreakout(to)) {
+                    target = isc.bgcfUri();
+                } else {
+                    target = to;
+                }
             }
+            String msisdn = hss == null ? null
+                    : hss.resolveIdentity(e.fromUri()).map(s -> s.msisdn != null ? s.msisdn : s.directoryUserId())
+                    .or(() -> hss.resolveIdentity(e.toUri()).map(s -> s.msisdn != null ? s.msisdn : s.directoryUserId()))
+                    .orElse(null);
+            long now = Instant.now().toEpochMilli();
+            applyCmp(new InviteCmpSnapshot(
+                    e.callId(), null, msisdn, e.fromUri(), e.toUri(), target, null,
+                    fsNodeId, nodeId, DialogCheckpoint.STATE_INVITE, now, now));
+            flushCmp();
+            LOG.debug("[S-CSCF] INVITE callId={} target={} terminating={}", e.callId(), target, terminating);
         }
-        String msisdn = hss == null ? null
-                : hss.resolveIdentity(e.fromUri()).map(s -> s.msisdn != null ? s.msisdn : s.directoryUserId())
-                .or(() -> hss.resolveIdentity(e.toUri()).map(s -> s.msisdn != null ? s.msisdn : s.directoryUserId()))
-                .orElse(null);
-        long now = Instant.now().toEpochMilli();
-        applyCmp(new InviteCmpSnapshot(
-                e.callId(), null, msisdn, e.fromUri(), e.toUri(), target, null,
-                fsNodeId, nodeId, DialogCheckpoint.STATE_INVITE, now, now));
-        flushCmp();
-        LOG.debug("[S-CSCF] INVITE callId={} target={} terminating={}", e.callId(), target, terminating);
         Map<String, java.util.List<String>> ims = PChargingVectors.copyIms(e.imsHeaders());
         if (!ims.containsKey("P-Asserted-Identity") && e.fromUri() != null) {
             ims.put("P-Asserted-Identity", java.util.List.of(e.fromUri()));
         }
-        if (mmtel != null) {
+        if (mmtel != null && !reInvite) {
             mmtel.applyPrivacy(ims, e.fromUri());
         }
         ims.put("X-Elisa-Sip-Call-Id", java.util.List.of(e.callId()));
@@ -300,7 +315,7 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
         String realm = roles.realm() != null ? roles.realm() : "ims.lab";
         String icid = PChargingVectors.ensureInvite(ims, e.callId(), realm);
         ims.put(PChargingVectors.X_ELISA_ICID, java.util.List.of(icid));
-        if (hss != null) {
+        if (!reInvite && hss != null) {
             hss.resolveIdentity(e.fromUri()).ifPresent(s -> {
                 if (s.impi != null && !s.impi.isBlank()) {
                     ims.put("X-Elisa-Impi", java.util.List.of(s.impi));
@@ -310,8 +325,9 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
                 }
             });
         }
-        if (charging != null) {
-            OnlineChargingService.Decision d = charging.onInvite(icid, e.callId(), msisdn, to);
+        if (!reInvite && charging != null) {
+            OnlineChargingService.Decision d = charging.onInvite(icid, e.callId(),
+                    getMsisdn(), e.toUri());
             if (d == OnlineChargingService.Decision.REDIRECT_302) {
                 send(new SendResponse(e.callId(), 302, "Moved Temporarily"));
                 return;
@@ -339,6 +355,11 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
 
     void onAck(SipAckEvent e) {
         send(new SendAck(e.callId()));
+        // W1-a: checkpoint ACK-time HA (cseq/tags from RA registry) while CONFIRMED.
+        if (e.callId() != null && e.callId().equals(getSipCallId())) {
+            setUpdatedAtEpochMs(Instant.now().toEpochMilli());
+            flushCmp();
+        }
     }
 
     void onBye(SipByeEvent e) {

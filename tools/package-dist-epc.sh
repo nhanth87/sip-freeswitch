@@ -66,7 +66,12 @@ JAVA_BIN="${JAVA_BIN:-java}"
 ver="$("${JAVA_BIN}" -version 2>&1 | head -1 || true)"
 echo "${ver}" | grep -qE 'version "25' || { echo "error: JDK 25 required (${ver})"; exit 1; }
 cd "${HERE}"
-exec "${JAVA_BIN}" -jar quarkus-run.jar
+# Log4j2-only policy (owner mandate 2026-08-26): JUL + jboss-logging facade
+# route INTO Log4j2; jboss-logmanager stays the silent Quarkus structural jar.
+exec "${JAVA_BIN}" \
+  "-Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager" \
+  "-Dorg.jboss.logging.provider=log4j2" \
+  -jar quarkus-run.jar
 EOF
 chmod +x "${DIST_ROOT}/run.sh"
 

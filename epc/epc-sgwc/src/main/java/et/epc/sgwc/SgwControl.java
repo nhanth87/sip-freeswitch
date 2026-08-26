@@ -158,7 +158,7 @@ public final class SgwControl {
         try {
             S5cSessionResult r = pending.get(S5C_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
             return new CreateSessionResult(r.ue(), r.pgwS5c(), r.pgwS5u(),
-                    ChargingId.NONE, PolicyDecision.staticDefault(), 0L);
+                    ChargingId.NONE, PolicyDecision.staticDefault(), 0L, r.pco());
         } catch (Exception e) {
             throw new IllegalStateException("S5-C create session failed seq=" + seq, e);
         } finally {
@@ -212,7 +212,8 @@ public final class SgwControl {
         Fteid pgwS5c = apiFteid(Gtpv2Ies.decodeFteid(fteid.value()));
         Fteid pgwS5u = apiFteid(Gtpv2Ies.s1uFromBearerContext(response));
         UeAddresses ue = decodePdnAddress(response);
-        return new S5cSessionResult(ue, pgwS5c, pgwS5u);
+        // W3-b: relay PGW PCO (IE 78) verbatim toward the MME.
+        return new S5cSessionResult(ue, pgwS5c, pgwS5u, Gtpv2Ies.pcoFrom(response));
     }
 
     public Fteid modifyAccess(Imsi imsi, String apn, Fteid newEnbS1u) {

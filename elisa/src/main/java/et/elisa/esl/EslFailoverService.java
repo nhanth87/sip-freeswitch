@@ -12,7 +12,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.jboss.logging.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 
 /**
  * C3: when primary ESL is down, walk {@link FsPairRegistry} failover list and rebind.
@@ -22,7 +24,7 @@ import org.jboss.logging.Logger;
 @ApplicationScoped
 public class EslFailoverService {
 
-    private static final Logger LOG = Logger.getLogger(EslFailoverService.class);
+    private static final Logger LOG = LogManager.getLogger(EslFailoverService.class);
 
     @Inject FsPairRegistry pairs;
     @Inject FreeSwitchRaBridge bridge;
@@ -86,21 +88,21 @@ public class EslFailoverService {
                 if (t.fsNodeId().equals(active) && targets.size() > 1) {
                     continue;
                 }
-                LOG.warnf("ESL failover attempting fsNode=%s %s:%d", t.fsNodeId(), t.host(), t.port());
+                LOG.warn("ESL failover attempting fsNode=%s %s:%d", t.fsNodeId(), t.host(), t.port());
                 try {
                     bridge.rebind(t);
                     cursor.set((start + i + 1) % targets.size());
                     if (bridge.live()) {
-                        LOG.infof("ESL failover ok fsNode=%s", t.fsNodeId());
+                        LOG.info("ESL failover ok fsNode=%s", t.fsNodeId());
                         return;
                     }
                 } catch (Exception e) {
-                    LOG.warnf(e, "ESL failover failed fsNode=%s", t.fsNodeId());
+                    LOG.warn("ESL failover failed fsNode=%s", t.fsNodeId(), e);
                 }
             }
             LOG.warn("ESL failover: no live target in pair list");
         } catch (Exception e) {
-            LOG.debugf(e, "ESL failover probe error");
+            LOG.debug("ESL failover probe error", e);
         }
     }
 
@@ -108,18 +110,18 @@ public class EslFailoverService {
     private void retryPinnedHome(String fsNodeId) {
         Optional<FsPairRegistry.EslTarget> home = pairs.targetByFsNodeId(fsNodeId);
         if (home.isEmpty()) {
-            LOG.warnf("R9 pinned home FS unknown fsNode=%s eslLive=false", fsNodeId);
+            LOG.warn("R9 pinned home FS unknown fsNode=%s eslLive=false", fsNodeId);
             return;
         }
         FsPairRegistry.EslTarget t = home.get();
-        LOG.warnf("R9 retry pinned home FS fsNode=%s %s:%d", t.fsNodeId(), t.host(), t.port());
+        LOG.warn("R9 retry pinned home FS fsNode=%s %s:%d", t.fsNodeId(), t.host(), t.port());
         try {
             bridge.rebind(t);
         } catch (Exception e) {
-            LOG.warnf(e, "R9 pinned home retry failed fsNode=%s", t.fsNodeId());
+            LOG.warn("R9 pinned home retry failed fsNode=%s", t.fsNodeId(), e);
         }
         if (!bridge.live()) {
-            LOG.warnf("R9 home FS still down fsNode=%s eslLive=false — not moving RTP", t.fsNodeId());
+            LOG.warn("R9 home FS still down fsNode=%s eslLive=false — not moving RTP", t.fsNodeId());
         }
     }
 }

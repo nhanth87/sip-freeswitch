@@ -11,14 +11,16 @@ import jakarta.transaction.Transactional;
 import java.time.Instant;
 import java.util.Optional;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 
 @ApplicationScoped
 public class PortalAuthService {
     public static final String COOKIE = "sf_session";
     public static final String ROLE_ADMIN = "ADMIN", ROLE_OPS = "OPS", ROLE_TENANT = "TENANT";
 
-    private static final Logger LOG = Logger.getLogger(PortalAuthService.class);
+    private static final Logger LOG = LogManager.getLogger(PortalAuthService.class);
 
     private final String secret;
     private final String bootstrapPassword;

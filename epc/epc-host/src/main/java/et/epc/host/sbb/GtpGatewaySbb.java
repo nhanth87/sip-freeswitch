@@ -252,38 +252,40 @@ public abstract class GtpGatewaySbb extends CmpBackedSbb implements SleeEventHan
         if (profiles != null) {
             return EpcProfiles.findApn(profiles, name)
                     .map(GtpGatewaySbb::toApnConfig)
-                    .orElseGet(() -> named(name));
+                    .orElseGet(() -> et.epc.api.PcoDefaults.named(name));
         }
-        return named(name);
-    }
-
-    private static ApnConfig named(String name) {
-        return "ims".equalsIgnoreCase(name) ? ApnConfig.ims("192.0.2.10") : ApnConfig.internet();
+        return et.epc.api.PcoDefaults.named(name);
     }
 
     private static ApnConfig toApnConfig(ApnProfile row) {
-        String apn = row.getApn();
-        return "ims".equalsIgnoreCase(apn) ? ApnConfig.ims("192.0.2.10") : ApnConfig.internet();
+        return et.epc.api.PcoDefaults.named(row.getApn());
     }
 
     private static Gtpv2Message createSessionResponse(Gtpv2Message req, SgwCreateSessionResult r) {
+        List<com.microjainslee.ra.gtpv2c.Gtpv2Ie> ies = new java.util.ArrayList<>();
+        ies.add(Gtpv2Ies.causeAccepted());
+        ies.add(new Gtpv2Ie(Gtpv2Ie.FTEID, 0, Gtpv2Ies.encodeFteid(gtp(r.sgwS11c()))));
+        ies.add(new Gtpv2Ie(Gtpv2Ie.PDN_ADDRESS, 0, Gtpv2Ies.encodePaa(r.ue().ipv4())));
+        ies.add(bearerContext(gtp(r.sgwS1u())));
+        // W3-b: relay PGW PCO (P-CSCF/DNS) verbatim to the MME.
+        if (!r.pgw().pco().isEmpty()) {
+            ies.add(Gtpv2Ies.pco(r.pgw().pco()));
+        }
         return new Gtpv2Message(Gtpv2MessageType.CREATE_SESSION_RESPONSE,
-                req.teid(), req.sequence(), req.recovery(),
-                List.of(
-                        Gtpv2Ies.causeAccepted(),
-                        new Gtpv2Ie(Gtpv2Ie.FTEID, 0, Gtpv2Ies.encodeFteid(gtp(r.sgwS11c()))),
-                        new Gtpv2Ie(Gtpv2Ie.PDN_ADDRESS, 0, Gtpv2Ies.encodePaa(r.ue().ipv4())),
-                        bearerContext(gtp(r.sgwS1u()))));
+                req.teid(), req.sequence(), req.recovery(), ies);
     }
 
     private static Gtpv2Message pgwCreateSessionResponse(Gtpv2Message req, CreateSessionResult r) {
+        List<com.microjainslee.ra.gtpv2c.Gtpv2Ie> ies = new java.util.ArrayList<>();
+        ies.add(Gtpv2Ies.causeAccepted());
+        ies.add(new Gtpv2Ie(Gtpv2Ie.FTEID, 0, Gtpv2Ies.encodeFteid(gtp(r.pgwS5c()))));
+        ies.add(new Gtpv2Ie(Gtpv2Ie.PDN_ADDRESS, 0, Gtpv2Ies.encodePaa(r.ue().ipv4())));
+        ies.add(bearerContext(gtp(r.pgwS5u())));
+        if (!r.pco().isEmpty()) {
+            ies.add(Gtpv2Ies.pco(r.pco()));
+        }
         return new Gtpv2Message(Gtpv2MessageType.CREATE_SESSION_RESPONSE,
-                req.teid(), req.sequence(), req.recovery(),
-                List.of(
-                        Gtpv2Ies.causeAccepted(),
-                        new Gtpv2Ie(Gtpv2Ie.FTEID, 0, Gtpv2Ies.encodeFteid(gtp(r.pgwS5c()))),
-                        new Gtpv2Ie(Gtpv2Ie.PDN_ADDRESS, 0, Gtpv2Ies.encodePaa(r.ue().ipv4())),
-                        bearerContext(gtp(r.pgwS5u()))));
+                req.teid(), req.sequence(), req.recovery(), ies);
     }
 
     private static Gtpv2Ie bearerContext(GtpFteid s1u) {

@@ -11,7 +11,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 
 /**
  * C3 paired topology: this Elisa node → ordered FreeSWITCH ESL targets.
@@ -22,7 +24,7 @@ import org.jboss.logging.Logger;
 @ApplicationScoped
 public class FsPairRegistry {
 
-    private static final Logger LOG = Logger.getLogger(FsPairRegistry.class);
+    private static final Logger LOG = LogManager.getLogger(FsPairRegistry.class);
 
     @ConfigProperty(name = "sf.cluster.node-id", defaultValue = "elisa-1")
     String nodeId;
@@ -97,7 +99,7 @@ public class FsPairRegistry {
         }
         if (out.isEmpty()) {
             out.add(new EslTarget("fallback", fallbackHost, fallbackPort, fallbackPassword, 0));
-            LOG.debugf("fs_pair empty for node=%s — using props %s:%d", nodeId, fallbackHost, fallbackPort);
+            LOG.debug("fs_pair empty for node=%s — using props %s:%d", nodeId, fallbackHost, fallbackPort);
         }
         return out;
     }

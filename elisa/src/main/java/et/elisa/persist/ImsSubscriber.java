@@ -14,10 +14,7 @@ public class ImsSubscriber extends PanacheEntityBase {
     public String impi;
     @Column(nullable = false)
     public String impu;
-    @Column(nullable = false, length = 64)
-    public String ki;
-    @Column(nullable = false, length = 64)
-    public String opc;
+    // Ki/OPc moved to ims_secret (AES-wrapped, W2-a) — never stored on this row.
     @Column(nullable = false, length = 8)
     public String amf = "8000";
     @Column(nullable = false)

@@ -33,6 +33,13 @@ public class ProfileAdminRoutes {
     @ConfigProperty(name = "sf.admin.api-key")
     String apiKey;
 
+    @ConfigProperty(name = "sf.admin.dev-login", defaultValue = "true")
+    boolean devLogin;
+
+    /** Lab-only AKA defaults; forbidden when dev-login=false (W2-a). */
+    private static final String LAB_KI = "00112233445566778899aabbccddeeff";
+    private static final String LAB_OPC = "000102030405060708090a0b0c0d0e0f";
+
     @ConfigProperty(name = "sf.ims.realm", defaultValue = "ims.lab")
     String realm;
 
@@ -108,14 +115,22 @@ public class ProfileAdminRoutes {
         if (tid != null && SfTenant.findById(tid) == null && !apiKeyOk(key, keyQ)) {
             return Response.seeOther(URI.create("/admin/profiles?error=tenant")).build();
         }
+        // W2-a hardening: no silent default Ki outside dev-login lab.
+        String kiHex = blankToNull(ki);
+        String opcHex = blankToNull(opc);
+        if (kiHex == null || opcHex == null) {
+            if (!devLogin) {
+                return Response.seeOther(URI.create("/admin/profiles?error=keys")).build();
+            }
+            kiHex = LAB_KI;
+            opcHex = LAB_OPC;
+        }
         ImsSubscriber s = new ImsSubscriber();
         s.impi = resolvedImpi;
         s.impu = resolvedImpu;
         s.msisdn = blankToNull(msisdn);
         s.tenantId = blankToNull(tid);
         s.displayName = blankToNull(displayName);
-        s.ki = ki == null || ki.isBlank() ? "00112233445566778899aabbccddeeff" : ki.trim();
-        s.opc = opc == null || opc.isBlank() ? "000102030405060708090a0b0c0d0e0f" : opc.trim();
         s.amf = amf == null || amf.isBlank() ? "8000" : amf.trim();
         if (sipPassword != null && !sipPassword.isBlank() && user != null) {
             s.fsA1Hash = SipDigestHasher.a1Hash(user, realm, sipPassword);
@@ -124,7 +139,7 @@ public class ProfileAdminRoutes {
         }
         s.ifcJson = ifcJson == null || ifcJson.isBlank() ? "{\"skip\":true}" : ifcJson;
         s.enabled = true;
-        ImsSubscriber saved = hss.upsert(s);
+        ImsSubscriber saved = hss.upsert(s, kiHex, opcHex);
         if (sleeProfiles != null) {
             sleeProfiles.upsertSubscriber(saved);
         }

@@ -100,7 +100,8 @@ public final class PgwControl {
                     null, sgwS5u.key(), s5u.key(), charging.value(),
                     Long.toUnsignedString(se), 0, se));
             bySeid.put(se, SessionCheckpoint.pgwId(keys));
-            return new CreateSessionResult(ue, s5c, s5u, charging, policy, se);
+            return new CreateSessionResult(ue, s5c, s5u, charging, policy, se,
+                    apn.pcoContainers());
         } catch (RuntimeException e) {
             ipam.release(imsi);
             bySeid.remove(se);

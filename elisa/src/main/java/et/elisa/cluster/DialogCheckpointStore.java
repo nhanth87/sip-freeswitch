@@ -8,7 +8,9 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import org.infinispan.Cache;
-import org.jboss.logging.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 
 /**
  * C1: Infinispan (shared {@link ElisaInfinispanManager}) for SIP dialog checkpoints.
@@ -19,7 +21,7 @@ import org.jboss.logging.Logger;
 @ApplicationScoped
 public class DialogCheckpointStore {
 
-    private static final Logger LOG = Logger.getLogger(DialogCheckpointStore.class);
+    private static final Logger LOG = LogManager.getLogger(DialogCheckpointStore.class);
 
     @Inject ElisaInfinispanManager cluster;
 
@@ -54,7 +56,7 @@ public class DialogCheckpointStore {
             return;
         }
         cache = cluster.cache(ElisaInfinispanManager.CACHE_DIALOGS);
-        LOG.infof("DialogCheckpointStore ready cache=%s mode=%s",
+        LOG.info("DialogCheckpointStore ready cache=%s mode=%s",
                 ElisaInfinispanManager.CACHE_DIALOGS, cluster.modeLabel());
     }
 

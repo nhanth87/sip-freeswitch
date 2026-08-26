@@ -28,18 +28,19 @@
 <p class="eyebrow">User profile</p>
 <div class="ops-section-indent">
   <h1>Telephony profiles (IMS-first)</h1>
-  <p class="hint">MSISDN + IMPI/IMPU SoT. Sofia directory derives from these rows (<code>fs_a1_hash</code>). AKA Ki/OPc separate from FS digest.</p>
+  <p class="hint">SIP user + password for Linphone/Zoiper. IMPI/IMPU are filled from the SIP user. HD call: Opus or G.722 on both clients. A dials <code class="mono">sip:&lt;B&gt;@ims.lab</code>.</p>
   <form class="panel" method="post" action="/admin/profiles" style="margin:1rem 0;display:grid;gap:.5rem;max-width:36rem">
     <label>Tenant id <input name="tenantId" class="mono" placeholder="lab-1"/></label>
+    <label>SIP user <input name="sipUser" class="mono" placeholder="alice"/></label>
+    <label>SIP password <input name="sipPassword" type="password"/></label>
     <label>MSISDN <input name="msisdn" class="mono" placeholder="2519…"/></label>
     <label>Display name <input name="displayName"/></label>
-    <label>IMPI <input name="impi" class="mono" required placeholder="user@ims.lab"/></label>
-    <label>IMPU <input name="impu" class="mono" required placeholder="sip:user@ims.lab"/></label>
+    <label>IMPI <input name="impi" class="mono" placeholder="alice@ims.lab"/></label>
+    <label>IMPU <input name="impu" class="mono" placeholder="sip:alice@ims.lab"/></label>
     <label>Ki (hex) <input name="ki" class="mono" placeholder="001122…"/></label>
     <label>OPc (hex) <input name="opc" class="mono"/></label>
     <label>AMF <input name="amf" class="mono" value="8000"/></label>
-    <label>FS a1-hash <input name="fsA1Hash" class="mono" placeholder="MD5(user:realm:pass)"/></label>
-    <label>iFC JSON <textarea name="ifcJson" class="mono" rows="2">{"as":"mrf"}</textarea></label>
+    <label>iFC JSON <textarea name="ifcJson" class="mono" rows="2">{"skip":true}</textarea></label>
     <button class="btn btn-primary" type="submit">Save profile</button>
   </form>
   <div class="table-wrap" hx-get="/admin/partial/profile-rows" hx-trigger="load" hx-swap="innerHTML">Loading…</div>

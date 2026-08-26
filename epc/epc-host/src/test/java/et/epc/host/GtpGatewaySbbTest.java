@@ -126,8 +126,37 @@ class GtpGatewaySbbTest {
         assertNotNull(rsp.first(Gtpv2Ie.BEARER_CONTEXT));
         assertEquals("001010000000001", sbb.getImsi());
         assertEquals("internet", sbb.getApn());
+        // W3-b: internet APN carries no PCO.
+        assertEquals(null, rsp.first(Gtpv2Ie.PCO));
         assertNotNull(sbb.getS11cTeid());
         assertNotNull(sbb.getPfcpSeid());
+    }
+
+    @Test
+    void imsApnCreateSessionResponseCarriesPcscfPco() throws Exception {
+        et.epc.api.PcoDefaults.configure("172.31.255.10", "10.10.0.53");
+        try {
+            sbb = new GtpGatewaySbb.$Concrete(sgw(), null, null);
+            inject(sbb, "gtpRa", gtpPort);
+            Gtpv2Message req = new Gtpv2Message(
+                    Gtpv2MessageType.CREATE_SESSION_REQUEST, 0, 11, (byte) 1,
+                    List.of(
+                            new Gtpv2Ie(Gtpv2Ie.IMSI, 0, Gtpv2Ies.tbcd("001010000000001")),
+                            new Gtpv2Ie(Gtpv2Ie.APN, 0, Gtpv2Ies.encodeApn("ims")),
+                            new Gtpv2Ie(Gtpv2Ie.FTEID, 0, Gtpv2Ies.encodeFteid(
+                                    new GtpFteid(0x1111, InetAddress.getByName("192.0.2.50"), 0)))));
+            sbb.onEvent(new Gtpv2MessageEvent(req, MME), null);
+            Gtpv2Message rsp = last();
+            Gtpv2Ie pcoIe = rsp.first(Gtpv2Ie.PCO);
+            assertNotNull(pcoIe, "IMS APN CSR must carry message-level PCO (IE 78)");
+            List<Gtpv2Ies.PcoContainer> pco = Gtpv2Ies.decodePcoValue(pcoIe.value());
+            assertEquals(InetAddress.getByName("172.31.255.10"),
+                    Gtpv2Ies.pcoIpv4(pco, Gtpv2Ies.PCO_P_CSCF_IPV4));
+            assertEquals(InetAddress.getByName("10.10.0.53"),
+                    Gtpv2Ies.pcoIpv4(pco, Gtpv2Ies.PCO_DNS_SERVER_IPV4));
+        } finally {
+            et.epc.api.PcoDefaults.configure(null, null);
+        }
     }
 
     @Test

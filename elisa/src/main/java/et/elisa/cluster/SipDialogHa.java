@@ -33,6 +33,37 @@ public record SipDialogHa(
                 && (remoteContactUri == null || remoteContactUri.isBlank());
     }
 
+    /**
+     * Field-wise merge — newer non-blank wins, older fills blanks. Guarantees a
+     * later save with partial/empty RA export can never degrade an already
+     * checkpointed tag set (W1-a monotonic HA). A partial newer block (e.g. only
+     * fresh cseq + to-tag from an early response) still contributes its fields.
+     */
+    public SipDialogHa merge(SipDialogHa newer) {
+        if (newer == null) {
+            return this;
+        }
+        if (this.isEmpty()) {
+            return newer == null ? this : newer;
+        }
+        return new SipDialogHa(
+                firstNonBlank(newer.remotePeer, this.remotePeer),
+                firstNonBlank(newer.transport, this.transport),
+                firstNonBlank(newer.remoteTransport, this.remoteTransport),
+                newer.cseq > 0 ? newer.cseq : this.cseq,
+                firstNonBlank(newer.fromTag, this.fromTag),
+                firstNonBlank(newer.toTag, this.toTag),
+                firstNonBlank(newer.contactUri, this.contactUri),
+                firstNonBlank(newer.remoteContactUri, this.remoteContactUri),
+                firstNonBlank(newer.method, this.method),
+                firstNonBlank(newer.farFromUri, this.farFromUri),
+                firstNonBlank(newer.farFromTag, this.farFromTag));
+    }
+
+    private static String firstNonBlank(String prefer, String fallback) {
+        return prefer != null && !prefer.isBlank() ? prefer : fallback;
+    }
+
     public static SipDialogHa fromPortable(DialogRegistry.PortableDialogMeta meta) {
         if (meta == null) {
             return EMPTY;

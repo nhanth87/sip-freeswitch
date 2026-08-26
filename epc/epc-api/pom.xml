@@ -13,6 +13,11 @@
   <dependencies>
 
     <dependency>
+      <groupId>com.microjainslee</groupId>
+      <artifactId>ra-gtpv2c</artifactId>
+    </dependency>
+
+    <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>

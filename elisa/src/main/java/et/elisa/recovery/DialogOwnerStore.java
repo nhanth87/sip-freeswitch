@@ -13,7 +13,9 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.function.Consumer;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.infinispan.Cache;
-import org.jboss.logging.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 
 /**
  * Infinispan (or memory) ownership fence for dialog correlates (R2/R3).
@@ -23,7 +25,7 @@ import org.jboss.logging.Logger;
 @ApplicationScoped
 public class DialogOwnerStore {
 
-    private static final Logger LOG = Logger.getLogger(DialogOwnerStore.class);
+    private static final Logger LOG = LogManager.getLogger(DialogOwnerStore.class);
 
     @Inject ElisaInfinispanManager cluster;
 
@@ -32,6 +34,7 @@ public class DialogOwnerStore {
 
     private Cache<String, DialogOwner> cache;
     private final ConcurrentMap<String, DialogOwner> memory = new ConcurrentHashMap<>();
+    private ConcurrentMap<String, DialogOwner> sharedMemory;
     private volatile boolean useMemoryOnly;
 
     /** Unit-test ctor — memory fence only. */
@@ -41,6 +44,15 @@ public class DialogOwnerStore {
     public DialogOwnerStore memoryOnly(String nodeId) {
         this.localNodeId = nodeId == null ? "elisa-1" : nodeId;
         this.useMemoryOnly = true;
+        this.cluster = null;
+        return this;
+    }
+
+    /** Two nodes → one map = DIST_SYNC ownership-fence sim (unit tests). */
+    public DialogOwnerStore shareMemory(String nodeId, ConcurrentMap<String, DialogOwner> shared) {
+        this.localNodeId = nodeId == null ? "elisa-1" : nodeId;
+        this.useMemoryOnly = true;
+        this.sharedMemory = shared;
         this.cluster = null;
         return this;
     }
@@ -56,12 +68,16 @@ public class DialogOwnerStore {
             return;
         }
         cache = cluster.cache(ElisaInfinispanManager.CACHE_DIALOG_OWNERS);
-        LOG.infof("DialogOwnerStore ready mode=%s node=%s", cluster.modeLabel(), localNodeId);
+        LOG.info("DialogOwnerStore ready mode=%s node=%s", cluster.modeLabel(), localNodeId);
     }
 
     @PreDestroy
     void stop() {
         cache = null;
+    }
+
+    private ConcurrentMap<String, DialogOwner> map() {
+        return sharedMemory != null ? sharedMemory : memory;
     }
 
     public String localNodeId() {
@@ -89,7 +105,7 @@ public class DialogOwnerStore {
             var members = manager.getMembers();
             return members != null && !members.isEmpty();
         } catch (RuntimeException ex) {
-            LOG.debugf(ex, "membership check failed — refuse claim");
+            LOG.debug("membership check failed — refuse claim", ex);
             return false;
         }
     }
@@ -103,14 +119,14 @@ public class DialogOwnerStore {
         if (cache != null) {
             return cache.putIfAbsent(callId, owner) == null;
         }
-        return memory.putIfAbsent(callId, owner) == null;
+        return map().putIfAbsent(callId, owner) == null;
     }
 
     public Optional<DialogOwner> get(String callId) {
         if (callId == null) {
             return Optional.empty();
         }
-        DialogOwner o = cache != null ? cache.get(callId) : memory.get(callId);
+        DialogOwner o = cache != null ? cache.get(callId) : map().get(callId);
         return Optional.ofNullable(o);
     }
 
@@ -121,7 +137,7 @@ public class DialogOwnerStore {
         if (cache != null) {
             cache.put(owner.callId(), owner);
         } else {
-            memory.put(owner.callId(), owner);
+            map().put(owner.callId(), owner);
         }
     }
 
@@ -132,7 +148,7 @@ public class DialogOwnerStore {
         if (cache != null) {
             cache.remove(callId);
         }
-        memory.remove(callId);
+        map().remove(callId);
     }
 
     /**
@@ -148,7 +164,7 @@ public class DialogOwnerStore {
         if (cache != null) {
             return cache.replace(expected.callId(), expected, next);
         }
-        return memory.replace(expected.callId(), expected, next);
+        return map().replace(expected.callId(), expected, next);
     }
 
     /**
@@ -163,7 +179,7 @@ public class DialogOwnerStore {
             if (cache != null) {
                 return cache.putIfAbsent(callId, created) == null;
             }
-            return memory.putIfAbsent(callId, created) == null;
+            return map().putIfAbsent(callId, created) == null;
         }
         DialogOwner owner = cur.get();
         if (owner.generation() != expectedGeneration) {
@@ -185,7 +201,7 @@ public class DialogOwnerStore {
         if (cache != null) {
             cache.values().forEach(collect);
         } else {
-            memory.values().forEach(collect);
+            map().values().forEach(collect);
         }
         return out;
     }
@@ -194,6 +210,6 @@ public class DialogOwnerStore {
         if (cache != null) {
             return new ArrayList<>(cache.values());
         }
-        return new ArrayList<>(memory.values());
+        return new ArrayList<>(map().values());
     }
 }

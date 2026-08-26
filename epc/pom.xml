@@ -27,7 +27,7 @@
     <maven.compiler.release>25</maven.compiler.release>
     <microjainslee.version>1.2.0-SNAPSHOT</microjainslee.version>
     <junit.version>5.11.4</junit.version>
-    <log4j.version>2.24.3</log4j.version>
+    <log4j.version>2.26.1</log4j.version>
     <surefire.version>3.5.4</surefire.version>
     <compiler.plugin.version>3.14.0</compiler.plugin.version>
     <enforcer.plugin.version>3.5.0</enforcer.plugin.version>
@@ -127,6 +127,14 @@
         <groupId>com.microjainslee</groupId>
         <artifactId>ra-diameter</artifactId>
         <version>${microjainslee.version}</version>
+        <exclusions>
+          <!-- Log4j2-only policy (owner mandate 2026-08-26): jdiameter/sctp legacy
+               log4j1 backends banned reactor-wide — their slf4j/log4j1 calls route
+               into Log4j2 via the inherited bridge jars (log4j-slf4j2-impl /
+               log4j-1.2-api). jboss-logmanager stays the silent Quarkus jar. -->
+          <exclusion><groupId>org.slf4j</groupId><artifactId>slf4j-log4j12</artifactId></exclusion>
+          <exclusion><groupId>log4j</groupId><artifactId>log4j</artifactId></exclusion>
+        </exclusions>
       </dependency>
       <dependency>
         <groupId>org.infinispan</groupId>
@@ -158,6 +166,18 @@
         <artifactId>log4j-core</artifactId>
         <version>${log4j.version}</version>
       </dependency>
+      <!-- Log4j2-only policy bridges: JUL + slf4j route INTO Log4j2;
+           jboss-logmanager stays a silent Quarkus structural jar (epc-host). -->
+      <dependency>
+        <groupId>org.apache.logging.log4j</groupId>
+        <artifactId>log4j-jul</artifactId>
+        <version>${log4j.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.logging.log4j</groupId>
+        <artifactId>log4j-slf4j2-impl</artifactId>
+        <version>${log4j.version}</version>
+      </dependency>
       <dependency>
         <groupId>org.junit.jupiter</groupId>
         <artifactId>junit-jupiter</artifactId>
@@ -182,6 +202,14 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-surefire-plugin</artifactId>
           <version>${surefire.version}</version>
+          <configuration>
+            <systemPropertyVariables>
+              <!-- Log4j2-only policy: JUL routes into Log4j2 (log4j-jul);
+                   jboss-logging facade pinned to the Log4j2 provider. -->
+              <java.util.logging.manager>org.apache.logging.log4j.jul.LogManager</java.util.logging.manager>
+              <org.jboss.logging.provider>log4j2</org.jboss.logging.provider>
+            </systemPropertyVariables>
+          </configuration>
         </plugin>
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
@@ -196,6 +224,17 @@
                   <requireJavaVersion>
                     <version>[25,26)</version>
                   </requireJavaVersion>
+                  <bannedDependencies>
+                    <excludes>
+                      <!-- Log4j2-only policy (owner mandate 2026-08-26). -->
+                      <exclude>log4j:log4j</exclude>
+                      <exclude>org.slf4j:slf4j-log4j12</exclude>
+                      <exclude>ch.qos.reload4j:reload4j</exclude>
+                      <exclude>org.jboss.slf4j:slf4j-jboss-logmanager</exclude>
+                      <exclude>commons-logging:commons-logging</exclude>
+                    </excludes>
+                    <message>Log4j2-only policy violation: a forbidden logging backend was resolved.</message>
+                  </bannedDependencies>
                 </rules>
               </configuration>
             </execution>
@@ -214,4 +253,18 @@
       </plugin>
     </plugins>
   </build>
+
+  <!-- Inherited by every module: Log4j2-only bridge jars so the surefire
+       java.util.logging.manager / org.jboss.logging.provider routing always
+       has its provider on the classpath. -->
+  <dependencies>
+    <dependency>
+      <groupId>org.apache.logging.log4j</groupId>
+      <artifactId>log4j-jul</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.logging.log4j</groupId>
+      <artifactId>log4j-slf4j2-impl</artifactId>
+    </dependency>
+  </dependencies>
 </project>

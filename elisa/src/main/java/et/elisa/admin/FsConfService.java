@@ -16,7 +16,9 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 
 /**
  * Path-jailed FreeSWITCH conf editor (grill G13c: freeswitch/conf only).
@@ -24,7 +26,7 @@ import org.jboss.logging.Logger;
 @ApplicationScoped
 public class FsConfService {
 
-    private static final Logger LOG = Logger.getLogger(FsConfService.class);
+    private static final Logger LOG = LogManager.getLogger(FsConfService.class);
     private static final long MAX_FILE_BYTES = 512 * 1024;
 
     private final Path confRoot;
@@ -99,7 +101,7 @@ public class FsConfService {
             throw new IOException("Target is not a file");
         }
         Files.writeString(file, content, StandardCharsets.UTF_8);
-        LOG.infof("fs_conf_write path=%s bytes=%d at=%s", relativize(file), bytes.length, Instant.now());
+        LOG.info("fs_conf_write path=%s bytes=%d at=%s", relativize(file), bytes.length, Instant.now());
     }
 
     public void mkdir(String relative) throws IOException {
@@ -108,7 +110,7 @@ public class FsConfService {
             throw new IOException("Already exists: " + relative);
         }
         Files.createDirectories(dir);
-        LOG.infof("fs_conf_mkdir path=%s", relativize(dir));
+        LOG.info("fs_conf_mkdir path=%s", relativize(dir));
     }
 
     public Map<String, Object> hardRestart() throws IOException, InterruptedException {
@@ -127,7 +129,7 @@ public class FsConfService {
             return Map.of("ok", false, "message", "Hard restart timed out", "output", truncate(out, 2000));
         }
         int code = p.exitValue();
-        LOG.warnf("fs_hard_restart exit=%d cmd=%s", code, hardRestartCmd);
+        LOG.warn("fs_hard_restart exit=%d cmd=%s", code, hardRestartCmd);
         return Map.of(
                 "ok", code == 0,
                 "message", code == 0 ? "Hard restart completed" : "Hard restart failed exit=" + code,

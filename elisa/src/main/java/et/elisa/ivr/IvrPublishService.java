@@ -12,7 +12,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 
 /**
  * T9 optional: write IVR dialplan under conf jail + ESL {@code reloadxml}.
@@ -21,7 +23,7 @@ import org.jboss.logging.Logger;
 @ApplicationScoped
 public class IvrPublishService {
 
-    private static final Logger LOG = Logger.getLogger(IvrPublishService.class);
+    private static final Logger LOG = LogManager.getLogger(IvrPublishService.class);
 
     @Inject FsConfService conf;
     @Inject EslClient esl;
@@ -65,7 +67,7 @@ public class IvrPublishService {
         out.put("path", relative);
         out.put("reloadxml", reload);
         out.put("message", "exported + reloadxml");
-        LOG.infof("ivr_publish tenant=%s name=%s path=%s", menu.tenantId, menu.name, relative);
+        LOG.info("ivr_publish tenant=%s name=%s path=%s", menu.tenantId, menu.name, relative);
         return out;
     }
 

@@ -4,7 +4,9 @@ import et.elisa.cluster.FsPairRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.Optional;
-import org.jboss.logging.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 
 /**
  * R9: on S-CSCF failover, bind ESL to the dialog's <em>home</em> FreeSWITCH
@@ -16,7 +18,7 @@ import org.jboss.logging.Logger;
 @ApplicationScoped
 public class HomeEslRemapService {
 
-    private static final Logger LOG = Logger.getLogger(HomeEslRemapService.class);
+    private static final Logger LOG = LogManager.getLogger(HomeEslRemapService.class);
 
     @Inject FsPairRegistry pairs;
     @Inject FreeSwitchRaBridge bridge;
@@ -63,7 +65,7 @@ public class HomeEslRemapService {
         }
         Optional<FsPairRegistry.EslTarget> home = pairs.targetForHome(homeElisaNodeId, homeFsNodeId);
         if (home.isEmpty()) {
-            LOG.warnf("R9 home FS unknown fsNode=%s — not rebinding", homeFsNodeId);
+            LOG.warn("R9 home FS unknown fsNode=%s — not rebinding", homeFsNodeId);
             return Outcome.SKIPPED_UNKNOWN_FS;
         }
         FsPairRegistry.EslTarget target = home.get();
@@ -73,7 +75,7 @@ public class HomeEslRemapService {
         if (primaryIsHome) {
             pinnedHomeFsNodeId = null;
             if (homeFsNodeId.equals(bridge.activeFsNodeId()) && !bridge.live()) {
-                LOG.warnf("R9 home FS ESL down fsNode=%s eslLive=false — media stays home",
+                LOG.warn("R9 home FS ESL down fsNode=%s eslLive=false — media stays home",
                         homeFsNodeId);
                 return Outcome.HOME_DOWN;
             }
@@ -82,22 +84,22 @@ public class HomeEslRemapService {
         pinnedHomeFsNodeId = homeFsNodeId;
         if (homeFsNodeId.equals(bridge.activeFsNodeId())) {
             if (!bridge.live() && !bridge.probeLive()) {
-                LOG.warnf("R9 home FS ESL down fsNode=%s eslLive=false — not moving RTP",
+                LOG.warn("R9 home FS ESL down fsNode=%s eslLive=false — not moving RTP",
                         homeFsNodeId);
                 return Outcome.HOME_DOWN;
             }
             return Outcome.ALREADY_ON_HOME;
         }
-        LOG.infof("R9 ESL remap to home FS fsNode=%s %s:%d",
+        LOG.info("R9 ESL remap to home FS fsNode=%s %s:%d",
                 target.fsNodeId(), target.host(), target.port());
         try {
             bridge.rebind(target);
         } catch (RuntimeException ex) {
-            LOG.warnf(ex, "R9 ESL remap failed fsNode=%s eslLive=false", homeFsNodeId);
+            LOG.warn("R9 ESL remap failed fsNode=%s eslLive=false", homeFsNodeId, ex);
             return Outcome.HOME_DOWN;
         }
         if (!bridge.live()) {
-            LOG.warnf("R9 home FS ESL down fsNode=%s %s:%d eslLive=false — not moving RTP",
+            LOG.warn("R9 home FS ESL down fsNode=%s %s:%d eslLive=false — not moving RTP",
                     target.fsNodeId(), target.host(), target.port());
             return Outcome.HOME_DOWN;
         }

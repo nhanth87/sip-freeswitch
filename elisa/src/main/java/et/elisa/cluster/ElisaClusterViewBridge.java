@@ -14,7 +14,9 @@ import org.infinispan.notifications.Listener;
 import org.infinispan.notifications.cachemanagerlistener.annotation.ViewChanged;
 import org.infinispan.notifications.cachemanagerlistener.event.ViewChangedEvent;
 import org.infinispan.remoting.transport.Address;
-import org.jboss.logging.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 
 /**
  * DIST_SYNC membership → {@link SbbRecoveryManagerImpl#onClusterViewChange}.
@@ -24,7 +26,7 @@ import org.jboss.logging.Logger;
 @ApplicationScoped
 public class ElisaClusterViewBridge {
 
-    private static final Logger LOG = Logger.getLogger(ElisaClusterViewBridge.class);
+    private static final Logger LOG = LogManager.getLogger(ElisaClusterViewBridge.class);
 
     @Inject ElisaInfinispanManager cluster;
     @Inject SbbRecoveryManagerImpl recovery;
@@ -41,7 +43,7 @@ public class ElisaClusterViewBridge {
         }
         listener = new ViewListener(cluster, recovery);
         manager.addListener(listener);
-        LOG.infof("ElisaClusterViewBridge attached cluster=%s node=%s",
+        LOG.info("ElisaClusterViewBridge attached cluster=%s node=%s",
                 cluster.clusterName(), cluster.nodeId());
     }
 
@@ -54,7 +56,7 @@ public class ElisaClusterViewBridge {
         try {
             cluster.manager().removeListener(l);
         } catch (RuntimeException ex) {
-            LOG.debugf(ex, "remove view listener");
+            LOG.debug("remove view listener", ex);
         }
         listener = null;
     }
@@ -116,7 +118,7 @@ public class ElisaClusterViewBridge {
             boolean primary = !newIds.isEmpty();
             ClusterView view = new ClusterView(local, newIds, departed, primary);
             if (!departed.isEmpty()) {
-                LOG.infof("ISPN view change local=%s departed=%s members=%s", local, departed, newIds);
+                LOG.info("ISPN view change local=%s departed=%s members=%s", local, departed, newIds);
             }
             recovery.onClusterViewChange(view);
         }

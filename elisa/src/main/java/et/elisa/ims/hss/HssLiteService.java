@@ -19,6 +19,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 public class HssLiteService {
 
     @Inject ImsRoleFlags roles;
+    @Inject et.elisa.security.ImsSecretStore secrets;
 
     @ConfigProperty(name = "sf.cluster.node-id", defaultValue = "elisa-1")
     String nodeId;
@@ -99,8 +100,14 @@ public class HssLiteService {
         if (sub == null || !sub.enabled) {
             return Map.of(CxCodec.RESULT_CODE, "5001");
         }
-        byte[] ki = AkaMd5.parseHex(sub.ki);
-        byte[] opc = AkaMd5.parseHex(sub.opc);
+        // W2-a fail-closed: auth material only from AES-wrapped ims_secret.
+        et.elisa.security.ImsSecretStore.StoredSecret material =
+                secrets.find(impi).orElse(null);
+        if (material == null) {
+            return Map.of(CxCodec.RESULT_CODE, "5001");
+        }
+        byte[] ki = material.ki();
+        byte[] opc = material.opc();
         byte[] amf = AkaMd5.parseHex(sub.amf == null ? "8000" : sub.amf);
         AkaMd5.Vector v = AkaMd5.generate(ki, opc, amf, sub.sqn);
         pending.put(callId == null ? impi : callId, new PendingAuth(impi, impu, v.xres(), v.nextSqn()));
@@ -158,11 +165,20 @@ public class HssLiteService {
 
     /**
      * Admin upsert by IMPI (then IMPU). Dashboard SIP password → {@code fsA1Hash}.
+     * Ki/OPc (hex) go to the AES-wrapped {@code ims_secret} store, never the row.
      */
     @Transactional
     public ImsSubscriber upsert(ImsSubscriber incoming) {
+        return upsert(incoming, null, null);
+    }
+
+    @Transactional
+    public ImsSubscriber upsert(ImsSubscriber incoming, String kiHex, String opcHex) {
         if (incoming == null || incoming.impi == null || incoming.impi.isBlank()) {
             throw new IllegalArgumentException("impi required");
+        }
+        if (kiHex != null && !kiHex.isBlank() && opcHex != null && !opcHex.isBlank()) {
+            secrets.putHex(incoming.impi.trim(), kiHex.trim(), opcHex.trim());
         }
         ImsSubscriber existing = findByImpi(incoming.impi.trim())
                 .or(() -> incoming.impu == null ? Optional.empty() : findByImpu(incoming.impu.trim()))
@@ -190,12 +206,6 @@ public class HssLiteService {
         }
         if (incoming.tenantId != null) {
             existing.tenantId = incoming.tenantId.isBlank() ? null : incoming.tenantId.trim();
-        }
-        if (incoming.ki != null && !incoming.ki.isBlank()) {
-            existing.ki = incoming.ki.trim();
-        }
-        if (incoming.opc != null && !incoming.opc.isBlank()) {
-            existing.opc = incoming.opc.trim();
         }
         if (incoming.amf != null && !incoming.amf.isBlank()) {
             existing.amf = incoming.amf.trim();

@@ -121,6 +121,11 @@ JVM_ARGS+=(
   "-XX:+HeapDumpOnOutOfMemoryError"
   "-XX:HeapDumpPath=${SF_LOG_DIR}/heap.hprof"
   "-Djava.net.preferIPv4Stack=true"
+  # Log4j2-only policy (owner mandate 2026-08-26): JUL + jboss-logging facade
+  # route INTO Log4j2; jboss-logmanager stays on the classpath as the silent
+  # Quarkus-entrypoint structural jar and must never receive an event.
+  "-Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager"
+  "-Dorg.jboss.logging.provider=log4j2"
 )
 extra="${JAVA_OPTS:-${SF_JAVA_OPTS:-}}"
 if [[ -n "${extra}" ]]; then

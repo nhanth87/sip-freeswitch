@@ -11,7 +11,9 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 
 /**
  * Cx client: when this JVM is HSS ({@code sf.ims.role.hss=true}), short-circuit
@@ -22,7 +24,7 @@ import org.jboss.logging.Logger;
 @ApplicationScoped
 public class CxClient {
 
-    private static final Logger LOG = Logger.getLogger(CxClient.class);
+    private static final Logger LOG = LogManager.getLogger(CxClient.class);
 
     @Inject ImsRoleFlags roles;
     @Inject HssLiteService hss;
@@ -75,7 +77,7 @@ public class CxClient {
             return sendSync(cmd, avps);
         }
         if (hss != null) {
-            LOG.warnf("Cx remote cmd=%d peerReady=false — HSS-lite fallback (LISTEN≠peer)", cmd);
+            LOG.warn("Cx remote cmd=%d peerReady=false — HSS-lite fallback (LISTEN≠peer)", cmd);
             return local.get();
         }
         return sendSync(cmd, avps);
@@ -93,7 +95,7 @@ public class CxClient {
         // Peer truth = CER/CEA ready — not RA bound / LISTEN alone.
         if (diameter != null && !diameter.peerReady()) {
             boolean bound = diameter.bound();
-            LOG.warnf("Cx remote refused cmd=%d: peerReady=false bound=%s (LISTEN≠ready)",
+            LOG.warn("Cx remote refused cmd=%d: peerReady=false bound=%s (LISTEN≠ready)",
                     cmd, bound);
             return Map.of(CxCodec.RESULT_CODE, "5012");
         }

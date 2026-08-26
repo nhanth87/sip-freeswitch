@@ -17,13 +17,15 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 
 /** Dual-write CallSession (ISPN + PG + SLEE Profile) — grill P2 / JP1. */
 @ApplicationScoped
 public class CallSessionService {
 
-    private static final Logger LOG = Logger.getLogger(CallSessionService.class);
+    private static final Logger LOG = LogManager.getLogger(CallSessionService.class);
 
     @Inject CallSessionStore hot;
     @Inject DialogCmpPersistence dialogCmp;
@@ -85,7 +87,7 @@ public class CallSessionService {
                         fsNodeId, elisaNodeId, dialogState, ms, ms));
             }
         }
-        LOG.debugf("call_session upsert fs=%s sip=%s msisdn=%s state=%s", fsUuid, sip, msisdn, state);
+        LOG.debug("call_session upsert fs=%s sip=%s msisdn=%s state=%s", fsUuid, sip, msisdn, state);
         return session;
     }
 

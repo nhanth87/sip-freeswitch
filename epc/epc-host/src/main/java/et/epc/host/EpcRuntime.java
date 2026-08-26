@@ -72,6 +72,12 @@ public class EpcRuntime {
     @ConfigProperty(name = "epc.s5c.wire", defaultValue = "false")
     boolean s5cWire;
 
+    @ConfigProperty(name = "epc.pco.pcscf-ipv4", defaultValue = "")
+    java.util.Optional<String> pcoPcscfIpv4;
+
+    @ConfigProperty(name = "epc.pco.dns-ipv4", defaultValue = "")
+    java.util.Optional<String> pcoDnsIpv4;
+
     @ConfigProperty(name = "epc.s5c.pgwc.peer.host", defaultValue = "127.0.0.1")
     String s5cPgwcPeerHost;
 
@@ -140,6 +146,7 @@ public class EpcRuntime {
 
     void onStart(@Observes StartupEvent ev) {
         EpcJdbc.requirePostgres(jdbcUrl);
+        et.epc.api.PcoDefaults.configure(pcoPcscfIpv4.orElse(null), pcoDnsIpv4.orElse(null));
         EpcRoles roles = EpcRoles.fromEnv(roleHss, roleSgwc, rolePgwc, rolePcrf, rolePcef, roleUp);
         EpcClusterConfig cfg = new EpcClusterConfig(
                 nodeId, ClusterMode.valueOf(mode), clusterName, nodeIndex);

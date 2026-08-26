@@ -34,7 +34,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-import org.jboss.logging.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 
 /**
  * CDI orchestrator for dead-SBB detect → decide → restore → spawn (R1–R10).
@@ -45,7 +47,7 @@ import org.jboss.logging.Logger;
 @ApplicationScoped
 public class SbbRecoveryManagerImpl implements SbbRecoveryManager {
 
-    private static final Logger LOG = Logger.getLogger(SbbRecoveryManagerImpl.class);
+    private static final Logger LOG = LogManager.getLogger(SbbRecoveryManagerImpl.class);
 
     /** R10 — prevent nested unbounded respawns on the same thread. */
     private static final ThreadLocal<Boolean> RECOVERING =
@@ -196,7 +198,7 @@ public class SbbRecoveryManagerImpl implements SbbRecoveryManager {
             return false;
         }
         if (Boolean.TRUE.equals(RECOVERING.get())) {
-            LOG.debugf("R10 nested recovery blocked correlate=%s", key.correlate());
+            LOG.debug("R10 nested recovery blocked correlate=%s", key.correlate());
             return false;
         }
         if (!inFlight.add(key.correlate())) {
@@ -250,7 +252,7 @@ public class SbbRecoveryManagerImpl implements SbbRecoveryManager {
             boolean won = owners.tryClaim(key.correlate(), localNodeId(), expectedGeneration);
             if (!won) {
                 claimLost.incrementAndGet();
-                LOG.debugf("fence claim lost callId=%s expectedGen=%d", key.correlate(), expectedGeneration);
+                LOG.debug("fence claim lost callId=%s expectedGen=%d", key.correlate(), expectedGeneration);
                 return false;
             }
             claimWon.incrementAndGet();
@@ -258,7 +260,7 @@ public class SbbRecoveryManagerImpl implements SbbRecoveryManager {
             boolean ok = spawnAndRestore(key, /*failover*/ true);
             if (ok && sipRa != null && !hasRestoredWire(key.correlate())) {
                 blockedSipHa.incrementAndGet();
-                LOG.infof("failover spawn ok callId=%s but SIP HA blocked until wire rebuild",
+                LOG.info("failover spawn ok callId=%s but SIP HA blocked until wire rebuild",
                         key.correlate());
             } else if (ok && sipRa == null) {
                 blockedSipHa.incrementAndGet();
@@ -411,7 +413,7 @@ public class SbbRecoveryManagerImpl implements SbbRecoveryManager {
     private boolean spawnInvite(String callId, boolean failover) {
         Optional<InviteCmpSnapshot> snap = dialogCmp != null ? dialogCmp.load(callId) : Optional.empty();
         if (snap.isEmpty()) {
-            LOG.debugf("no CMP for callId=%s — cannot spawn", callId);
+            LOG.debug("no CMP for callId=%s — cannot spawn", callId);
             return false;
         }
         if (DialogCheckpoint.STATE_TERMINATED.equals(snap.get().dialogState())) {
@@ -465,7 +467,7 @@ public class SbbRecoveryManagerImpl implements SbbRecoveryManager {
             }
             return false;
         } catch (RuntimeException ex) {
-            LOG.warnf(ex, "spawnInvite failed callId=%s", callId);
+            LOG.warn("spawnInvite failed callId=%s", callId, ex);
             return false;
         }
     }
@@ -503,7 +505,7 @@ public class SbbRecoveryManagerImpl implements SbbRecoveryManager {
                 return false;
             }
         } catch (RuntimeException ex) {
-            LOG.warnf(ex, "spawnCallSession failed fs=%s", fsUuid);
+            LOG.warn("spawnCallSession failed fs=%s", fsUuid, ex);
             return false;
         }
     }
@@ -519,7 +521,7 @@ public class SbbRecoveryManagerImpl implements SbbRecoveryManager {
                     session.startedAt() != null ? session.startedAt().toEpochMilli() : 0L,
                     session.updatedAt() != null ? session.updatedAt().toEpochMilli() : 0L);
         } catch (RuntimeException ex) {
-            LOG.debugf(ex, "profile warm failed fs=%s", session.fsUuid());
+            LOG.debug("profile warm failed fs=%s", session.fsUuid(), ex);
         }
     }
 

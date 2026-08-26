@@ -8,13 +8,15 @@ import et.elisa.ims.hss.HssLiteService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.Map;
-import org.jboss.logging.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 
 /** Cx server side when sf.ims.role.hss=true — answers UAR/MAR/SAR/LIR. */
 @ApplicationScoped
 public class CxServer {
 
-    private static final Logger LOG = Logger.getLogger(CxServer.class);
+    private static final Logger LOG = LogManager.getLogger(CxServer.class);
 
     @Inject ImsRoleFlags roles;
     @Inject HssLiteService hss;

@@ -205,7 +205,7 @@ private void createSession(Gtpv2MessageEvent ev) {
     }
 
     private static ApnConfig apnOf(String name) {
-        return "ims".equalsIgnoreCase(name) ? ApnConfig.ims("192.0.2.10") : ApnConfig.internet();
+        return et.epc.api.PcoDefaults.named(name);
     }
 
     private static Gtpv2Message error(Gtpv2Message req, int cause) {
@@ -226,6 +226,10 @@ private void createSession(Gtpv2MessageEvent ev) {
             ies.add(new Gtpv2Ie(Gtpv2Ie.PDN_ADDRESS, 0, Gtpv2Ies.encodePaa(r.ue().ipv4())));
         }
         ies.add(bearerContext(gtp(r.pgwS5u())));
+        // W3-b: emit P-CSCF / DNS PCO on the IMS APN.
+        if (!r.pco().isEmpty()) {
+            ies.add(Gtpv2Ies.pco(r.pco()));
+        }
         return new Gtpv2Message(Gtpv2MessageType.CREATE_SESSION_RESPONSE,
                 req.teid(), req.sequence(), req.recovery(), ies);
     }

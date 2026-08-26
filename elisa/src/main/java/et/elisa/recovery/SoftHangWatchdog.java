@@ -11,7 +11,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 
 /**
  * Soft-hang: locally owned EARLY/CONFIRMED dialogs with stale CMP {@code updatedAt}
@@ -20,7 +22,7 @@ import org.jboss.logging.Logger;
 @ApplicationScoped
 public class SoftHangWatchdog {
 
-    private static final Logger LOG = Logger.getLogger(SoftHangWatchdog.class);
+    private static final Logger LOG = LogManager.getLogger(SoftHangWatchdog.class);
 
     @Inject SbbRecoveryManagerImpl recovery;
     @Inject DialogOwnerStore owners;
@@ -51,7 +53,7 @@ public class SoftHangWatchdog {
         });
         long period = Math.max(5L, intervalSeconds);
         scheduler.scheduleWithFixedDelay(this::scan, period, period, TimeUnit.SECONDS);
-        LOG.infof("SoftHangWatchdog interval=%ds stale=%ds", period, staleSeconds);
+        LOG.info("SoftHangWatchdog interval=%ds stale=%ds", period, staleSeconds);
     }
 
     @PreDestroy
@@ -65,7 +67,7 @@ public class SoftHangWatchdog {
         try {
             scanAt(System.currentTimeMillis());
         } catch (RuntimeException ex) {
-            LOG.debugf(ex, "soft-hang scan failed");
+            LOG.debug("soft-hang scan failed", ex);
         }
     }
 
@@ -98,7 +100,7 @@ public class SoftHangWatchdog {
             suspects++;
         }
         if (suspects > 0) {
-            LOG.infof("soft-hang suspects=%d node=%s", suspects, local);
+            LOG.info("soft-hang suspects=%d node=%s", suspects, local);
         }
         return suspects;
     }

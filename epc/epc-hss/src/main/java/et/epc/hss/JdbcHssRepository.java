@@ -529,7 +529,7 @@ public final class JdbcHssRepository implements HssRepository {
         for (String part : csv.split(",")) {
             String[] bits = part.split(":");
             if (bits.length > 1 && "ims".equalsIgnoreCase(bits[1])) {
-                out.add(ApnConfig.ims("192.0.2.10"));
+                out.add(et.epc.api.PcoDefaults.named("ims"));
             } else {
                 out.add(ApnConfig.internet());
             }

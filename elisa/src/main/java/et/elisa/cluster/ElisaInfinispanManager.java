@@ -13,7 +13,9 @@ import org.infinispan.configuration.cache.ConfigurationBuilder;
 import org.infinispan.configuration.global.GlobalConfigurationBuilder;
 import org.infinispan.manager.DefaultCacheManager;
 import org.infinispan.manager.EmbeddedCacheManager;
-import org.jboss.logging.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 
 /**
  * Single embedded Infinispan manager for Elisa N–N (grill I7 / C1).
@@ -24,7 +26,7 @@ import org.jboss.logging.Logger;
 @ApplicationScoped
 public class ElisaInfinispanManager {
 
-    private static final Logger LOG = Logger.getLogger(ElisaInfinispanManager.class);
+    private static final Logger LOG = LogManager.getLogger(ElisaInfinispanManager.class);
 
     public static final String CACHE_DIALOGS = "elisa-dialog-checkpoints";
     public static final String CACHE_CALL_SESSIONS = "elisa-call-sessions";
@@ -80,7 +82,7 @@ public class ElisaInfinispanManager {
         defineCache(CACHE_CALL_SESSIONS, 200_000);
         defineCache(CACHE_REG_HOME, 200_000);
         defineCache(CACHE_DIALOG_OWNERS, 200_000);
-        LOG.infof("ElisaInfinispanManager ready cluster=%s mode=%s ttl=%ds caches=[%s,%s,%s,%s]",
+        LOG.info("ElisaInfinispanManager ready cluster=%s mode=%s ttl=%ds caches=[%s,%s,%s,%s]",
                 dist ? clusterName : "(local)",
                 dist ? "DIST_SYNC" : "LOCAL",
                 ttlSeconds,

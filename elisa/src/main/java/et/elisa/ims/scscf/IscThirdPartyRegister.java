@@ -4,7 +4,9 @@ import et.elisa.ims.config.ImsRoleFlags;
 import et.elisa.esl.EslClient;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.jboss.logging.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 
 /**
  * Third-party REGISTER toward FreeSWITCH AS after S-CSCF 200 OK (lab: ESL notify / sofia status).
@@ -12,7 +14,7 @@ import org.jboss.logging.Logger;
 @ApplicationScoped
 public class IscThirdPartyRegister {
 
-    private static final Logger LOG = Logger.getLogger(IscThirdPartyRegister.class);
+    private static final Logger LOG = LogManager.getLogger(IscThirdPartyRegister.class);
 
     @Inject ImsRoleFlags roles;
     @Inject IscAsRouter isc;
@@ -23,7 +25,7 @@ public class IscThirdPartyRegister {
             return;
         }
         String as = isc.asUri();
-        LOG.infof("ISC third-party REGISTER notify as=%s impu=%s contact=%s expires=%d",
+        LOG.info("ISC third-party REGISTER notify as=%s impu=%s contact=%s expires=%d",
                 as, impu, contact, expires);
         // Soft path: refresh FS directory/xml_curl cache when ESL live (lab AS notify)
         if (esl.live()) {

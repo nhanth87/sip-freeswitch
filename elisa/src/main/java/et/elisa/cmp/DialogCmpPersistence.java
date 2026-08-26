@@ -12,7 +12,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Function;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 
 /**
  * Dual-write CMP recovery store for invite/dialog SBB state.
@@ -26,7 +28,7 @@ import org.jboss.logging.Logger;
 @ApplicationScoped
 public class DialogCmpPersistence {
 
-    private static final Logger LOG = Logger.getLogger(DialogCmpPersistence.class);
+    private static final Logger LOG = LogManager.getLogger(DialogCmpPersistence.class);
 
     @Inject DialogCheckpointStore hot;
     @Inject DialogOwnerStore owners;
@@ -88,8 +90,11 @@ public class DialogCmpPersistence {
             return;
         }
         InviteCmpSnapshot enriched = enrichFromRa(snap);
-        DialogCheckpoint cp = enriched.toCheckpoint();
         boolean ended = DialogCheckpoint.STATE_TERMINATED.equals(enriched.dialogState());
+        if (!ended) {
+            enriched = mergeMonotonicHa(enriched);
+        }
+        DialogCheckpoint cp = enriched.toCheckpoint();
         if (hot != null && hot.enabled()) {
             if (ended) {
                 hot.remove(enriched.sipCallId());
@@ -110,9 +115,41 @@ public class DialogCmpPersistence {
         if (usePg()) {
             durable.persist(cp);
         }
-        LOG.debugf("cmp save callId=%s state=%s fs=%s haEmpty=%s",
+        LOG.debug("cmp save callId=%s state=%s fs=%s haEmpty=%s",
                 enriched.sipCallId(), enriched.dialogState(), enriched.fsUuid(),
                 enriched.effectiveSipHa().isEmpty());
+    }
+
+    /**
+     * W1-a monotonic HA: a later save with partial/empty RA export merges over
+     * the previously stored checkpoint instead of replacing it — tags/contacts
+     * already checkpointed are never lost mid-dialog.
+     */
+    private InviteCmpSnapshot mergeMonotonicHa(InviteCmpSnapshot enriched) {
+        return storedSnapshot(enriched.sipCallId())
+                .map(prev -> {
+                    SipDialogHa existing = enriched.effectiveSipHa();
+                    SipDialogHa merged = prev.effectiveSipHa().merge(existing);
+                    // merge returns `existing` by reference when prev contributes nothing.
+                    InviteCmpSnapshot out = merged == existing
+                            ? enriched : enriched.withSipHa(merged);
+                    String peer = isBlank(enriched.peer()) && !isBlank(prev.peer())
+                            ? prev.peer() : enriched.peer();
+                    return peer != null && !peer.equals(enriched.peer())
+                            ? out.withPeer(peer) : out;
+                })
+                .orElse(enriched);
+    }
+
+    private java.util.Optional<InviteCmpSnapshot> storedSnapshot(String sipCallId) {
+        if (hot != null && hot.enabled()) {
+            return hot.get(sipCallId).map(InviteCmpSnapshot::fromCheckpoint);
+        }
+        return java.util.Optional.ofNullable(memoryFallback.get(sipCallId));
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.isBlank();
     }
 
     private InviteCmpSnapshot enrichFromRa(InviteCmpSnapshot snap) {
@@ -134,7 +171,7 @@ public class DialogCmpPersistence {
             InviteCmpSnapshot withHa = snap.withSipHa(ha);
             return peer != null && !peer.equals(snap.peer()) ? withHa.withPeer(peer) : withHa;
         } catch (RuntimeException ex) {
-            LOG.debugf(ex, "sip HA enrich failed callId=%s", snap.sipCallId());
+            LOG.debug("sip HA enrich failed callId=%s", snap.sipCallId(), ex);
             return snap;
         }
     }

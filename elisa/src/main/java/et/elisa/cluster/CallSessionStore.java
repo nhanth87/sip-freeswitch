@@ -9,13 +9,15 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.infinispan.Cache;
-import org.jboss.logging.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 
 /** P2 hot map: keyed by fs_uuid and sip_call_id (dual keys → same CallSession). */
 @ApplicationScoped
 public class CallSessionStore {
 
-    private static final Logger LOG = Logger.getLogger(CallSessionStore.class);
+    private static final Logger LOG = LogManager.getLogger(CallSessionStore.class);
 
     @Inject ElisaInfinispanManager cluster;
 
@@ -27,7 +29,7 @@ public class CallSessionStore {
             return;
         }
         cache = cluster.cache(ElisaInfinispanManager.CACHE_CALL_SESSIONS);
-        LOG.infof("CallSessionStore ready mode=%s", cluster.modeLabel());
+        LOG.info("CallSessionStore ready mode=%s", cluster.modeLabel());
     }
 
     @PreDestroy

@@ -6,13 +6,15 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.Optional;
 import org.infinispan.Cache;
-import org.jboss.logging.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 
 /** C1/C4: IMPU → home S-CSCF node id (registration sticky). Shared cluster plane. */
 @ApplicationScoped
 public class RegistrationHomeStore {
 
-    private static final Logger LOG = Logger.getLogger(RegistrationHomeStore.class);
+    private static final Logger LOG = LogManager.getLogger(RegistrationHomeStore.class);
 
     @Inject ElisaInfinispanManager cluster;
 
@@ -24,7 +26,7 @@ public class RegistrationHomeStore {
             return;
         }
         cache = cluster.cache(ElisaInfinispanManager.CACHE_REG_HOME);
-        LOG.infof("RegistrationHomeStore ready mode=%s", cluster.modeLabel());
+        LOG.info("RegistrationHomeStore ready mode=%s", cluster.modeLabel());
     }
 
     @PreDestroy

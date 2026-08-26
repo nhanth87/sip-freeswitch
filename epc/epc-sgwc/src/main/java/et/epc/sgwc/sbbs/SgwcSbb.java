@@ -177,17 +177,21 @@ public abstract class SgwcSbb extends CmpBackedSbb implements SleeEventHandler {
     }
 
     private static ApnConfig apnOf(String name) {
-        return "ims".equalsIgnoreCase(name) ? ApnConfig.ims("192.0.2.10") : ApnConfig.internet();
+        return et.epc.api.PcoDefaults.named(name);
     }
 
     private static Gtpv2Message createSessionResponse(Gtpv2Message req, SgwCreateSessionResult r) {
+        List<Gtpv2Ie> ies = new java.util.ArrayList<>();
+        ies.add(Gtpv2Ies.causeAccepted());
+        ies.add(new Gtpv2Ie(Gtpv2Ie.FTEID, 0, Gtpv2Ies.encodeFteid(gtp(r.sgwS11c()))));
+        ies.add(new Gtpv2Ie(Gtpv2Ie.PDN_ADDRESS, 0, Gtpv2Ies.encodePaa(r.ue().ipv4())));
+        ies.add(bearerContext(gtp(r.sgwS1u())));
+        // W3-b: relay PGW PCO (P-CSCF/DNS) verbatim to the MME.
+        if (!r.pgw().pco().isEmpty()) {
+            ies.add(Gtpv2Ies.pco(r.pgw().pco()));
+        }
         return new Gtpv2Message(Gtpv2MessageType.CREATE_SESSION_RESPONSE,
-                req.teid(), req.sequence(), req.recovery(),
-                List.of(
-                        Gtpv2Ies.causeAccepted(),
-                        new Gtpv2Ie(Gtpv2Ie.FTEID, 0, Gtpv2Ies.encodeFteid(gtp(r.sgwS11c()))),
-                        new Gtpv2Ie(Gtpv2Ie.PDN_ADDRESS, 0, Gtpv2Ies.encodePaa(r.ue().ipv4())),
-                        bearerContext(gtp(r.sgwS1u()))));
+                req.teid(), req.sequence(), req.recovery(), ies);
     }
 
     private static Gtpv2Ie bearerContext(GtpFteid s1u) {

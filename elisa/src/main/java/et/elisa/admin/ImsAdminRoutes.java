@@ -44,6 +44,13 @@ public class ImsAdminRoutes {
     @ConfigProperty(name = "sf.admin.api-key")
     String apiKey;
 
+    @ConfigProperty(name = "sf.admin.dev-login", defaultValue = "true")
+    boolean devLogin;
+
+    /** Lab-only AKA defaults (TS 35.208-style); forbidden when dev-login=false. */
+    private static final String LAB_KI = "00112233445566778899aabbccddeeff";
+    private static final String LAB_OPC = "000102030405060708090a0b0c0d0e0f";
+
     @ConfigProperty(name = "sf.cluster.node-id", defaultValue = "elisa-1")
     String nodeId;
 
@@ -271,23 +278,38 @@ public class ImsAdminRoutes {
         if (user == null || user.isBlank()) {
             throw new WebApplicationException("SIP user required", Response.Status.BAD_REQUEST);
         }
+        // W2-a hardening: no silent default Ki in prod — explicit material required.
+        boolean labDefaults = devLogin;
+        String kiHex = blankToNull(ki);
+        String opcHex = blankToNull(opc);
+        if (kiHex == null || opcHex == null) {
+            if (!labDefaults) {
+                throw new WebApplicationException(
+                        "ki and opc required (no default keys outside dev-login lab)",
+                        Response.Status.BAD_REQUEST);
+            }
+            kiHex = LAB_KI;
+            opcHex = LAB_OPC;
+        }
         ImsSubscriber s = new ImsSubscriber();
         s.impi = impi != null && !impi.isBlank() ? impi.trim() : ImsIdentityKeys.impi(user, realm);
         s.impu = impu != null && !impu.isBlank() ? impu.trim() : ImsIdentityKeys.impu(user, realm);
         s.displayName = displayName == null || displayName.isBlank() ? user : displayName.trim();
         s.msisdn = msisdn == null || msisdn.isBlank() ? null : msisdn.trim();
-        s.ki = ki == null || ki.isBlank() ? "00112233445566778899aabbccddeeff" : ki.trim();
-        s.opc = opc == null || opc.isBlank() ? "000102030405060708090a0b0c0d0e0f" : opc.trim();
         s.amf = amf == null || amf.isBlank() ? "8000" : amf.trim();
         s.ifcJson = ifcJson == null || ifcJson.isBlank() ? "{\"skip\":true}" : ifcJson;
         s.enabled = true;
         if (sipPassword != null && !sipPassword.isBlank()) {
             s.fsA1Hash = SipDigestHasher.a1Hash(user, realm, sipPassword);
         }
-        ImsSubscriber saved = hss.upsert(s);
+        ImsSubscriber saved = hss.upsert(s, kiHex, opcHex);
         if (sleeProfiles != null) {
             sleeProfiles.upsertSubscriber(saved);
         }
+    }
+
+    private static String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s.trim();
     }
 
     @GET
