@@ -84,3 +84,10 @@ Plan + Phase A/B stub: [`elisa-improve-plan.md`](elisa-improve-plan.md).
 - **G2 offline:** dual-write behind `sf.charging.dual-write` → CDRsV1 (`sf.cgrates.*`) + Rf ACR stub (`sf.rf.enabled`).
 - **G4 account key:** default **`msisdn`** (HssLite / `ims_subscriber`); null → soft `impi`. Optional compose profile `cgrates`.
 - **G5 pool:** `sbb-pool-max=40960` set; no 10k CPS claim until SIPp green.
+
+## 2026-10-19 — Web UI wire: cache + compress + measure from the far end (cross-project, from GMLC)
+
+- Over our ~335 ms RTT / ~15 KB/s links a page that **renders in 6–55 ms** took **~3 s per page change** in GMLC: every asset (142 KB CSS/JS) was re-downloaded with **no `Cache-Control`, no `ETag`, no gzip**. "Next.js feels faster" was the wire, not the framework.
+- Any page this app serves: **content-hashed asset URLs + `Cache-Control: public, max-age=31536000, immutable`**; unversioned → `no-cache` + `ETag` → **304**; **gzip ≥ 1 KB** in the app (`Vary: Accept-Encoding`) — nginx `gzip on` does not compress proxied responses without `gzip_proxied any`; never pass a compressed body through `new String(...)`; **HTTP/2** on the TLS front.
+- **Measure from the user side**, before and after: `curl -w "%{time_connect} %{time_appconnect} %{time_starttransfer} %{time_total} %{size_download}"` + `curl -I` (cache-control / etag / content-encoding). Server time is not page time.
+- Law: root `AGENTS.md` § 5 · detail: root `docs/agents/lessons.md` · reference code: GMLC `AdminWire` + `AdminPageRenderer.versionStaticUrls`.
