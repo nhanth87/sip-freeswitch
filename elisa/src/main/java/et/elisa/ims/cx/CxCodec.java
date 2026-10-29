@@ -32,6 +32,17 @@ public final class CxCodec {
 
     private CxCodec() {}
 
+    /**
+     * MAR for re-synchronisation (TS 29.229 §6.3.13 / TS 33.203): the SIP-Auth-Data-Item
+     * carries SIP-Authorization = RAND ‖ AUTS (hex here) from the UE's {@code auts}.
+     */
+    public static Map<Integer, String> marResyncAvps(String impi, String impu, String serverName,
+                                                     String randAutsHex) {
+        Map<Integer, String> m = new java.util.LinkedHashMap<>(marAvps(impi, impu, serverName));
+        m.put(SIP_AUTHORIZATION, randAutsHex);
+        return m;
+    }
+
     public static Map<Integer, String> marAvps(String impi, String impu, String serverName) {
         Map<Integer, String> m = new LinkedHashMap<>();
         m.put(USER_NAME, impi);

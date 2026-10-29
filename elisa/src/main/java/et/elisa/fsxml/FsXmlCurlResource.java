@@ -32,7 +32,7 @@ public class FsXmlCurlResource {
         sec = sec.replaceAll("[^A-Za-z0-9_-]", "");
         return switch (sec) {
             case "directory" -> directoryXml(keyValue);
-            case "dialplan" -> dialplanXml();
+            case "dialplan" -> cachedDialplanXml();
             default -> notFound(sec);
         };
     }
@@ -101,6 +101,22 @@ public class FsXmlCurlResource {
         }
         sb.append("</params></user>");
         return sb.toString();
+    }
+
+    /** FS fetches the dialplan once per call; rules change on admin edits only. */
+    private static final long DIALPLAN_TTL_NANOS = 2_000_000_000L;
+    private record DialplanSnapshot(String xml, long expiresAtNanos) {}
+    private static volatile DialplanSnapshot dialplanCache;
+
+    private String cachedDialplanXml() {
+        DialplanSnapshot snap = dialplanCache;
+        long now = System.nanoTime();
+        if (snap != null && now - snap.expiresAtNanos() < 0) {
+            return snap.xml();
+        }
+        String xml = dialplanXml();
+        dialplanCache = new DialplanSnapshot(xml, now + DIALPLAN_TTL_NANOS);
+        return xml;
     }
 
     private static String dialplanXml() {

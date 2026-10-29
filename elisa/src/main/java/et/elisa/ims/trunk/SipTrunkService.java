@@ -30,6 +30,11 @@ public class SipTrunkService {
     private final CopyOnWriteArrayList<SipTrunkEntity> memory = new CopyOnWriteArrayList<>();
     private volatile boolean memoryOnly;
 
+    /** pickPrimary runs per INVITE (ISC/MRF resolve); trunks change on admin writes only. */
+    private static final long ENABLED_TTL_NANOS = 2_000_000_000L;
+    private record EnabledSnapshot(List<SipTrunkEntity> rows, long expiresAtNanos) {}
+    private volatile EnabledSnapshot enabledCache;
+
     public SipTrunkService() {}
 
     /** Test ctor — memory-only rows + props fallback. */
@@ -60,7 +65,15 @@ public class SipTrunkService {
                     .thenComparing(t -> t.id == null ? "" : t.id));
             return out;
         }
-        return SipTrunkEntity.find("enabled = true order by priority, id").list();
+        EnabledSnapshot snap = enabledCache;
+        long now = System.nanoTime();
+        if (snap != null && now - snap.expiresAtNanos() < 0) {
+            return snap.rows();
+        }
+        List<SipTrunkEntity> rows = List.copyOf(
+                SipTrunkEntity.<SipTrunkEntity>find("enabled = true order by priority, id").list());
+        enabledCache = new EnabledSnapshot(rows, now + ENABLED_TTL_NANOS);
+        return rows;
     }
 
     @Transactional
@@ -145,6 +158,7 @@ public class SipTrunkService {
             throw new IllegalArgumentException("sipUri required");
         }
         String tid = id.trim();
+        enabledCache = null;
         SipTrunkEntity e;
         if (memoryOnly) {
             e = byId(tid).orElseGet(SipTrunkEntity::new);
@@ -186,6 +200,7 @@ public class SipTrunkService {
         if (memoryOnly) {
             return memory.removeIf(t -> id.equals(t.id));
         }
+        enabledCache = null;
         return SipTrunkEntity.deleteById(id.trim());
     }
 

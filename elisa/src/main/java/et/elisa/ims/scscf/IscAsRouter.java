@@ -7,6 +7,7 @@ import jakarta.inject.Inject;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -35,8 +36,9 @@ public class IscAsRouter {
     @ConfigProperty(name = "sip.trunk.freeswitch-uri", defaultValue = "sip:1000@127.0.0.1:5062")
     String fallbackTrunk;
 
-    @ConfigProperty(name = "sf.ims.bgcf.uri", defaultValue = "")
-    String bgcfUri;
+    /** Optional: empty = BGCF disabled (a blank String property fails boot). */
+    @ConfigProperty(name = "sf.ims.bgcf.uri")
+    Optional<String> bgcfUri = Optional.empty();
 
     /** Default configured AS (FS / trunk). */
     public String asUri() {
@@ -99,11 +101,11 @@ public class IscAsRouter {
 
     /** BGCF breakout URI when configured (E.164 / tel:). */
     public String bgcfUri() {
-        return bgcfUri == null ? "" : bgcfUri.trim();
+        return bgcfUri.map(String::trim).orElse("");
     }
 
     public boolean hasBgcf() {
-        return bgcfUri != null && !bgcfUri.isBlank();
+        return !bgcfUri().isEmpty();
     }
 
     static List<String> parseAsChain(String ifcJson) {

@@ -45,7 +45,13 @@ public class CxClient {
 
     public Map<Integer, String> mar(String impi, String impu, String callId) {
         return dispatch(CxCodec.MAR, CxCodec.marAvps(impi, impu, roles.scscfUri()),
-                () -> hss.handleMar(impi, impu, callId));
+                () -> hss.handleMar(impi, impu, callId, null));
+    }
+
+    /** Synchronisation-failure MAR: RAND ‖ AUTS from the UE (TS 33.203 §6.1.2). */
+    public Map<Integer, String> marResync(String impi, String impu, String callId, String randAutsHex) {
+        return dispatch(CxCodec.MAR, CxCodec.marResyncAvps(impi, impu, roles.scscfUri(), randAutsHex),
+                () -> hss.handleMar(impi, impu, callId, randAutsHex));
     }
 
     public Map<Integer, String> uar(String impi, String impu) {

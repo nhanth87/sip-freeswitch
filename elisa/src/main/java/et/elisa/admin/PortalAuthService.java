@@ -19,6 +19,8 @@ import org.apache.logging.log4j.Logger;
 public class PortalAuthService {
     public static final String COOKIE = "sf_session";
     public static final String ROLE_ADMIN = "ADMIN", ROLE_OPS = "OPS", ROLE_TENANT = "TENANT";
+    /** MVNO hierarchy (jainslee-authz tenant-admin / user); legacy TENANT logins act as GD. */
+    public static final String ROLE_GD = "GD", ROLE_USER = "USER";
 
     private static final Logger LOG = LogManager.getLogger(PortalAuthService.class);
 
@@ -102,6 +104,20 @@ public class PortalAuthService {
 
         public boolean isOps() {
             return ROLE_OPS.equals(role);
+        }
+
+        /** GD (or legacy TENANT): director of one MVNO tenant. */
+        public boolean isGd() {
+            return ROLE_GD.equals(role) || ROLE_TENANT.equals(role);
+        }
+
+        public boolean isUser() {
+            return ROLE_USER.equals(role);
+        }
+
+        /** Any login bound to one tenant (GD, legacy TENANT, USER) — portal rail. */
+        public boolean isTenantScoped() {
+            return isGd() || isUser();
         }
     }
 

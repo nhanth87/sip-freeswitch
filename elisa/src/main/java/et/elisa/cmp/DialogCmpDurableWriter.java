@@ -6,18 +6,45 @@ import et.elisa.persist.SfDialogCheckpoint;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.transaction.Transactional;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /**
- * Postgres dual-write for dialog CMP. Invoked off the INVITE hot path when
- * {@code sf.cmp.pg-sync=false} (cluster-1m profile). Own bean so {@code @Transactional}
- * is not a no-op self-invoke from {@link DialogCmpPersistence}.
+ * Postgres dual-write for dialog CMP. Skipped entirely when {@code sf.cmp.pg-sync=false}
+ * (cluster-1m profile); otherwise fed off the SBB thread by {@link DialogCmpWriteBehind}
+ * via {@link #writeBatch}. Own bean so {@code @Transactional} is not a no-op self-invoke
+ * from {@link DialogCmpPersistence}.
  */
 @ApplicationScoped
 public class DialogCmpDurableWriter {
 
     @Transactional
     public void persist(DialogCheckpoint cp) {
+        upsert(cp);
+    }
+
+    /** One transaction per write-behind drain: N upserts + M end marks. */
+    @Transactional
+    public void writeBatch(List<DialogCheckpoint> upserts, List<String> ended) {
+        List<String> ids = new ArrayList<>(upserts.size() + ended.size());
+        upserts.forEach(cp -> ids.add(cp.callId()));
+        ids.addAll(ended);
+        if (ids.isEmpty()) {
+            return;
+        }
+        // One IN-select warms the persistence context; findById below then hits it
+        // instead of issuing one SELECT per row.
+        SfDialogCheckpoint.list("sipCallId in ?1", ids);
+        for (DialogCheckpoint cp : upserts) {
+            upsert(cp);
+        }
+        for (String callId : ended) {
+            end(callId);
+        }
+    }
+
+    private static void upsert(DialogCheckpoint cp) {
         SfDialogCheckpoint row = SfDialogCheckpoint.findById(cp.callId());
         if (row == null) {
             row = new SfDialogCheckpoint();
@@ -52,6 +79,10 @@ public class DialogCmpDurableWriter {
 
     @Transactional
     public void markEnded(String sipCallId) {
+        end(sipCallId);
+    }
+
+    private static void end(String sipCallId) {
         SfDialogCheckpoint row = SfDialogCheckpoint.findById(sipCallId);
         if (row == null) {
             return;

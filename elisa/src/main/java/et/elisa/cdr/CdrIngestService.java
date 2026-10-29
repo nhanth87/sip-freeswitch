@@ -12,13 +12,18 @@ import et.elisa.persist.SfCdr;
 import et.elisa.persist.SfExtension;
 import et.elisa.persist.SfTenant;
 import et.elisa.session.CallSessionService;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.inject.Provider;
 import jakarta.transaction.Transactional;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Optional;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -31,6 +36,47 @@ public class CdrIngestService {
     @Inject CallSessionService callSessions;
     @Inject ChargingDualWrite chargingDualWrite;
     @Inject HssLiteService hss;
+    /** Own client proxy so async ingest still runs inside {@code @Transactional}. */
+    @Inject Provider<CdrIngestService> self;
+
+    /**
+     * SIP-dialog-end CDRs written off the S-CSCF BYE path (merge SELECT + INSERT + HSS
+     * enrich per call). Bounded: a full queue runs the write on the caller thread
+     * (backpressure) instead of dropping CDRs.
+     */
+    private final ThreadPoolExecutor sipDialogEndWriter = new ThreadPoolExecutor(
+            2, 2, 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(50_000),
+            r -> {
+                Thread t = new Thread(r, "elisa-cdr-writer");
+                t.setDaemon(true);
+                return t;
+            },
+            new ThreadPoolExecutor.CallerRunsPolicy());
+
+    @PreDestroy
+    void shutdown() {
+        sipDialogEndWriter.shutdown();
+        try {
+            sipDialogEndWriter.awaitTermination(10, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /** {@link #ingestSipDialogEnd} on the CDR writer pool; never blocks the SBB unless saturated. */
+    public void ingestSipDialogEndAsync(String sipCallId, String fromUri, String toUri, String msisdn,
+                                        String icid, String chargingVector, String impi, String impu,
+                                        String cscfRole, Integer durationSec) {
+        CdrIngestService tx = self != null ? self.get() : this;
+        sipDialogEndWriter.execute(() -> {
+            try {
+                tx.ingestSipDialogEnd(sipCallId, fromUri, toUri, msisdn, icid, chargingVector,
+                        impi, impu, cscfRole, durationSec);
+            } catch (RuntimeException ex) {
+                LOG.warn("SIP dialog CDR write failed callId={}: {}", sipCallId, ex.toString());
+            }
+        });
+    }
 
     @Transactional
     public SfCdr ingest(JsonNode cdr) {

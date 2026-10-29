@@ -101,6 +101,7 @@ final class ElisaBootstrap {
     @Inject DiameterRaBridge diameterRaBridge;
     @Inject CallSessionService callSessionService;
     @Inject ElisaProfileService elisaProfiles;
+    @Inject et.elisa.tenant.TenantService tenantService;
     @Inject SbbRecoveryManagerImpl sbbRecovery;
     @Inject ElisaInfinispanManager elisaIspn;
     @Inject ElisaClusterViewBridge clusterViewBridge;
@@ -155,6 +156,8 @@ final class ElisaBootstrap {
         try {
             int warmed = elisaProfiles.warmSubscribers(hssLite.listSubscribers());
             LOG.info("SLEE Profile warm ImsSubscriber count={}", warmed);
+            int tenantsWarmed = elisaProfiles.warmTenants(tenantService.listAll());
+            LOG.info("SLEE Profile warm MvnoTenant count={}", tenantsWarmed);
         } catch (RuntimeException ex) {
             LOG.warn("SLEE Profile warm skipped (DB not ready?): {}", ex.toString());
         }
@@ -445,7 +448,9 @@ final class ElisaBootstrap {
                             onlineCharging, mmtelService, cdrIngest,
                             nodeId,
                             freeSwitchRaBridge.activeFsNodeId() != null
-                                    ? freeSwitchRaBridge.activeFsNodeId() : "fallback"));
+                                    ? freeSwitchRaBridge.activeFsNodeId() : "fallback")
+                            .withTenantGate(tenantId -> elisaProfiles.getTenant(tenantId)
+                                    .map(et.elisa.profile.MvnoTenantProfile::isEnabled).orElse(true)));
         }
         if (imsRoles.pcscf()) {
             container.registerSbbType(PcscfProxySbb.class, () -> new PcscfProxySbb(imsRoles, cpsMetrics, bindingStore));

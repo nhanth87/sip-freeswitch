@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -42,6 +44,20 @@ public class MmtelService {
     }
 
     @Inject ImsRoleFlags roles;
+
+    /** evaluate + applyPrivacy hit PG 2–4× per INVITE; short TTL (positive + negative). 0 disables. */
+    @ConfigProperty(name = "sf.ims.mmtel.cache-ms", defaultValue = "2000")
+    long cacheMs = 2000L;
+
+    private record Cached(Optional<ImsMmtelSettings> value, long expiresAtNanos) {}
+
+    private static final int CACHE_MAX = 100_000;
+    private final ConcurrentHashMap<String, Cached> cache = new ConcurrentHashMap<>();
+
+    /** Drop cached settings (provisioning writes). */
+    public void invalidate() {
+        cache.clear();
+    }
 
     @Transactional
     public Decision evaluate(String fromUri, String toUri, boolean terminating) {
@@ -92,6 +108,23 @@ public class MmtelService {
         if (uriOrImpu == null || uriOrImpu.isBlank()) {
             return Optional.empty();
         }
+        if (cacheMs <= 0) {
+            return findUncached(uriOrImpu);
+        }
+        long now = System.nanoTime();
+        Cached hit = cache.get(uriOrImpu);
+        if (hit != null && now - hit.expiresAtNanos() < 0) {
+            return hit.value();
+        }
+        Optional<ImsMmtelSettings> found = findUncached(uriOrImpu);
+        if (cache.size() >= CACHE_MAX) {
+            cache.clear();
+        }
+        cache.put(uriOrImpu, new Cached(found, now + cacheMs * 1_000_000L));
+        return found;
+    }
+
+    private Optional<ImsMmtelSettings> findUncached(String uriOrImpu) {
         try {
             ImsMmtelSettings exact = ImsMmtelSettings.find("impu", uriOrImpu.trim()).firstResult();
             if (exact != null) {

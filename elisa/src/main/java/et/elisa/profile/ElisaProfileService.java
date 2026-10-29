@@ -52,6 +52,27 @@ public class ElisaProfileService {
         return n;
     }
 
+    public Optional<MvnoTenantProfile> upsertTenant(et.elisa.persist.SfTenant row) {
+        return ElisaProfiles.upsertTenant(facility(), row);
+    }
+
+    public Optional<MvnoTenantProfile> getTenant(String tenantId) {
+        return ElisaProfiles.getTenant(facility(), tenantId);
+    }
+
+    /** Boot-time warm of every tenant's service config (never per INVITE). */
+    public int warmTenants(Iterable<et.elisa.persist.SfTenant> rows) {
+        int n = 0;
+        if (rows != null) {
+            for (et.elisa.persist.SfTenant row : rows) {
+                if (upsertTenant(row).isPresent()) {
+                    n++;
+                }
+            }
+        }
+        return n;
+    }
+
     public Optional<ImsSubscriberProfile> getSubscriber(String profileKey) {
         return ElisaProfiles.getSubscriber(facility(), profileKey);
     }

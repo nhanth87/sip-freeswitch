@@ -1,6 +1,7 @@
 package et.elisa.ims.config;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import java.util.Optional;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 /**
@@ -41,8 +42,9 @@ public class ImsRoleFlags {
     @ConfigProperty(name = "sf.ims.pcscf-uri", defaultValue = "sip:pcscf.ims.lab:5060")
     String pcscfUri;
 
-    @ConfigProperty(name = "sf.ims.isc.as-uri", defaultValue = "")
-    String iscAsUri;
+    /** Optional: empty env ({@code SF_IMS_ISC_AS=}) must not fail boot — blank = no static AS. */
+    @ConfigProperty(name = "sf.ims.isc.as-uri")
+    Optional<String> iscAsUri = Optional.empty();
 
     /** iFC / MMTel-lite AS invoke gate ({@code IscAsRouter}). */
     @ConfigProperty(name = "sf.ims.feature.mmtel", defaultValue = "true")
@@ -67,7 +69,7 @@ public class ImsRoleFlags {
     public String scscfPeerUri() { return scscfPeerUri; }
     public String icscfUri() { return icscfUri; }
     public String pcscfUri() { return pcscfUri; }
-    public String iscAsUri() { return iscAsUri; }
+    public String iscAsUri() { return iscAsUri.orElse(""); }
 
     public boolean featureMmtel() { return enabled && featureMmtel; }
     public boolean featureCharging() { return enabled && featureCharging; }

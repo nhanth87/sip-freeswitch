@@ -20,6 +20,13 @@ public class TenantService {
     private static final Set<String> TRANSPORTS = Set.of("SIP", "WS", "HTTP2", "HTTP3");
 
     @Inject PasswordHasher hasher;
+    @Inject et.elisa.profile.ElisaProfileService sleeProfiles;
+
+    /** Every tenant (boot warm of the MvnoTenant profile hot store). */
+    @Transactional
+    public List<SfTenant> listAll() {
+        return SfTenant.listAll();
+    }
 
     public List<SfTenant> listFor(PortalAuthService.Session session) {
         if (session == null) {
@@ -109,6 +116,9 @@ public class TenantService {
         }
         if (existing == null) {
             t.persist();
+        }
+        if (sleeProfiles != null) {
+            sleeProfiles.upsertTenant(t);
         }
         return t;
     }

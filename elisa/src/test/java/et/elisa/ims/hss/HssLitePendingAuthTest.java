@@ -14,7 +14,7 @@ class HssLitePendingAuthTest {
     void takePending_removesBothCallIdAndImpiKeys() throws Exception {
         HssLiteService hss = new HssLiteService();
         byte[] xres = AkaMd5.parseHex("aabbccddeeff0011");
-        var pending = new HssLiteService.PendingAuth("u@ims.lab", "sip:u@ims.lab", xres, 5);
+        var pending = new HssLiteService.PendingAuth("u@ims.lab", "sip:u@ims.lab", xres, "bm9uY2U=");
         // simulate handleMar dual-key put via reflection on private map
         @SuppressWarnings("unchecked")
         var map = (java.util.concurrent.ConcurrentHashMap<String, HssLiteService.PendingAuth>)
@@ -24,7 +24,7 @@ class HssLitePendingAuthTest {
 
         Optional<HssLiteService.PendingAuth> got = hss.takePending("call-1");
         assertTrue(got.isPresent());
-        assertEquals(5, got.get().nextSqn());
+        assertEquals("bm9uY2U=", got.get().nonce());
         assertTrue(map.isEmpty(), "BUG: impi key left behind after takePending(callId)");
     }
 
@@ -34,7 +34,7 @@ class HssLitePendingAuthTest {
         @SuppressWarnings("unchecked")
         var map = (java.util.concurrent.ConcurrentHashMap<String, HssLiteService.PendingAuth>)
                 ImsReflect.get(hss, "pending");
-        map.put("c", new HssLiteService.PendingAuth("i", "p", new byte[] {1}, 1));
+        map.put("c", new HssLiteService.PendingAuth("i", "p", new byte[] {1}, "n"));
         assertTrue(hss.peekPending("c").isPresent());
         assertTrue(map.containsKey("c"));
     }

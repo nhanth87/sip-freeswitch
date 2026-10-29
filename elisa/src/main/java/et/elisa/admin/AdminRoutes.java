@@ -62,7 +62,7 @@ public class AdminRoutes {
     public Response login(@FormParam("username") String username, @FormParam("password") String password) {
         return auth.login(username, password)
                 .<Response>map(s -> {
-                    String dest = "TENANT".equalsIgnoreCase(s.role()) ? "/admin/portal" : "/admin";
+                    String dest = s.isGd() || s.isUser() ? "/admin/mvno" : "/admin";
                     return Response.seeOther(java.net.URI.create(dest))
                             .header("Set-Cookie", PortalAuthService.setCookieHeader(s.token()))
                             .build();

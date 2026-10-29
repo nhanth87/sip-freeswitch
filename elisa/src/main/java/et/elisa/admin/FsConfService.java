@@ -33,9 +33,9 @@ public class FsConfService {
     private final String hardRestartCmd;
 
     public FsConfService(
-            @ConfigProperty(name = "sf.fs.conf-dir", defaultValue = "") String confDir,
+            @ConfigProperty(name = "sf.fs.conf-dir") Optional<String> confDir,
             @ConfigProperty(name = "sf.fs.hard-restart-cmd", defaultValue = "") String hardRestartCmd) {
-        this.confRoot = resolveConfRoot(confDir);
+        this.confRoot = resolveConfRoot(confDir.orElse(null));
         this.hardRestartCmd = hardRestartCmd == null ? "" : hardRestartCmd.trim();
     }
 

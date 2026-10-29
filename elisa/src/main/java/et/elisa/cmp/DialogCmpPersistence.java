@@ -4,12 +4,17 @@ import com.microjainslee.ra.sipservlet.collab.DialogRegistry;
 import et.elisa.cluster.DialogCheckpoint;
 import et.elisa.cluster.DialogCheckpointStore;
 import et.elisa.cluster.SipDialogHa;
+import et.elisa.persist.CoalescingWriteBehind;
 import et.elisa.recovery.DialogOwnerStore;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.apache.logging.log4j.LogManager;
@@ -19,8 +24,9 @@ import org.apache.logging.log4j.Logger;
 /**
  * Dual-write CMP recovery store for invite/dialog SBB state.
  * Hot path: Infinispan {@link DialogCheckpointStore} only (no JTA).
- * Durable Postgres via {@link DialogCmpDurableWriter} when {@code sf.cmp.pg-sync=true}.
- * Load order: ISPN → PG (rehydrate ISPN on miss).
+ * Durable Postgres via {@link DialogCmpDurableWriter} when {@code sf.cmp.pg-sync=true},
+ * written behind the SBB thread ({@link CoalescingWriteBehind}, {@code sf.cmp.pg-write-behind-ms};
+ * 0 = synchronous). Load order: ISPN → queued PG op → PG (rehydrate ISPN on miss).
  *
  * <p>Optional {@link #setSipHaEnricher} merges live {@link DialogRegistry} portable
  * meta into the checkpoint on save (same SoT plane — not a second registry).
@@ -39,6 +45,19 @@ public class DialogCmpPersistence {
 
     private volatile boolean pgEnabled = true;
     private volatile boolean pgSync = true;
+    private volatile long writeBehindMs = 50L;
+    private volatile CoalescingWriteBehind<PgOp> writeBehind;
+
+    /** Queued PG op: {@code cp == null} marks the dialog ended. */
+    record PgOp(String callId, DialogCheckpoint cp) {}
+
+    /**
+     * Call-IDs ended recently (≈ SIP Timer J / 64·T1). A retransmitted BYE or the far
+     * end's late response must not turn into a PG SELECT per message under load.
+     */
+    private static final long TOMBSTONE_NANOS = TimeUnit.SECONDS.toNanos(32);
+    private static final int TOMBSTONE_MAX = 200_000;
+    private final ConcurrentMap<String, Long> recentlyEnded = new ConcurrentHashMap<>();
     private volatile Function<String, DialogRegistry.PortableDialogMeta> sipHaEnricher;
 
     /** Unit-test ctor — no CDI. */
@@ -60,6 +79,14 @@ public class DialogCmpPersistence {
         this.durable = null;
     }
 
+    /** Unit-test ctor with a durable writer (fake PG). */
+    DialogCmpPersistence(DialogCheckpointStore hot, DialogCmpDurableWriter durable, long writeBehindMs) {
+        this.hot = hot;
+        this.owners = null;
+        this.durable = durable;
+        this.writeBehindMs = writeBehindMs;
+    }
+
     /** Disable Panache for pure unit tests. */
     public DialogCmpPersistence withoutPg() {
         this.pgEnabled = false;
@@ -75,6 +102,33 @@ public class DialogCmpPersistence {
     @Inject
     void applyPgSync(@ConfigProperty(name = "sf.cmp.pg-sync", defaultValue = "true") boolean pgSync) {
         this.pgSync = pgSync;
+    }
+
+    @Inject
+    void applyWriteBehind(@ConfigProperty(name = "sf.cmp.pg-write-behind-ms", defaultValue = "50") long ms) {
+        this.writeBehindMs = ms;
+    }
+
+    @PreDestroy
+    void shutdown() {
+        CoalescingWriteBehind<PgOp> wb = writeBehind;
+        if (wb != null) {
+            wb.stop();
+        }
+    }
+
+    /** Queued PG ops not yet drained (0 when synchronous / PG off). */
+    public int pendingPgWrites() {
+        CoalescingWriteBehind<PgOp> wb = writeBehind;
+        return wb == null ? 0 : wb.pendingCount();
+    }
+
+    /** Drain queued PG ops now (tests / admin). */
+    public void flushPg() {
+        CoalescingWriteBehind<PgOp> wb = writeBehind;
+        if (wb != null) {
+            wb.flush();
+        }
     }
 
     /**
@@ -113,7 +167,12 @@ public class DialogCmpPersistence {
             owners.putIfAbsent(enriched.sipCallId(), enriched.elisaNodeId());
         }
         if (usePg()) {
-            durable.persist(cp);
+            CoalescingWriteBehind<PgOp> wb = writeBehind();
+            if (wb != null) {
+                wb.put(cp.callId(), new PgOp(cp.callId(), cp));
+            } else {
+                durable.persist(cp);
+            }
         }
         LOG.debug("cmp save callId=%s state=%s fs=%s haEmpty=%s",
                 enriched.sipCallId(), enriched.dialogState(), enriched.fsUuid(),
@@ -206,7 +265,19 @@ public class DialogCmpPersistence {
         if (!usePg()) {
             return Optional.empty();
         }
-        Optional<InviteCmpSnapshot> found = durable.load(sipCallId);
+        if (recentlyEnded(sipCallId)) {
+            return Optional.empty();
+        }
+        CoalescingWriteBehind<PgOp> wb = writeBehind;
+        PgOp queued = wb == null ? null : wb.pendingFor(sipCallId);
+        Optional<InviteCmpSnapshot> found;
+        if (queued != null && queued.cp() == null) {
+            return Optional.empty();
+        } else if (queued != null) {
+            found = Optional.of(InviteCmpSnapshot.fromCheckpoint(queued.cp()));
+        } else {
+            found = durable.load(sipCallId);
+        }
         found.ifPresent(snap -> {
             if (DialogCheckpoint.STATE_TERMINATED.equals(snap.dialogState())) {
                 return;
@@ -240,8 +311,75 @@ public class DialogCmpPersistence {
             owners.remove(sipCallId);
         }
         if (usePg()) {
-            durable.markEnded(sipCallId);
+            markRecentlyEnded(sipCallId);
+            CoalescingWriteBehind<PgOp> wb = writeBehind();
+            if (wb != null) {
+                wb.put(sipCallId, new PgOp(sipCallId, null));
+            } else {
+                durable.markEnded(sipCallId);
+            }
         }
+    }
+
+    /**
+     * ISPN / memory only — no PG fallback. For an initial INVITE (no state can exist
+     * yet, only a re-INVITE can hit), so a fresh Call-ID never costs a PG SELECT.
+     */
+    public Optional<InviteCmpSnapshot> loadHot(String sipCallId) {
+        if (sipCallId == null || sipCallId.isBlank()) {
+            return Optional.empty();
+        }
+        String canon = SipCallIds.canonical(sipCallId);
+        Optional<InviteCmpSnapshot> hit = storedSnapshot(canon);
+        return hit.isPresent() || canon.equals(sipCallId) ? hit : storedSnapshot(sipCallId);
+    }
+
+    private CoalescingWriteBehind<PgOp> writeBehind() {
+        CoalescingWriteBehind<PgOp> wb = writeBehind;
+        if (wb != null || writeBehindMs <= 0) {
+            return wb;
+        }
+        synchronized (this) {
+            if (writeBehind == null) {
+                DialogCmpDurableWriter writer = durable;
+                writeBehind = new CoalescingWriteBehind<>("cmp", batch -> {
+                    List<DialogCheckpoint> upserts = new ArrayList<>();
+                    List<String> ended = new ArrayList<>();
+                    for (PgOp op : batch) {
+                        if (op.cp() == null) {
+                            ended.add(op.callId());
+                        } else {
+                            upserts.add(op.cp());
+                        }
+                    }
+                    writer.writeBatch(upserts, ended);
+                }, writeBehindMs);
+            }
+            return writeBehind;
+        }
+    }
+
+    private void markRecentlyEnded(String sipCallId) {
+        if (recentlyEnded.size() >= TOMBSTONE_MAX) {
+            long now = System.nanoTime();
+            recentlyEnded.values().removeIf(at -> now - at > TOMBSTONE_NANOS);
+            if (recentlyEnded.size() >= TOMBSTONE_MAX) {
+                recentlyEnded.clear();
+            }
+        }
+        recentlyEnded.put(sipCallId, System.nanoTime());
+    }
+
+    private boolean recentlyEnded(String sipCallId) {
+        Long at = recentlyEnded.get(sipCallId);
+        if (at == null) {
+            return false;
+        }
+        if (System.nanoTime() - at > TOMBSTONE_NANOS) {
+            recentlyEnded.remove(sipCallId, at);
+            return false;
+        }
+        return true;
     }
 
     private boolean usePg() {

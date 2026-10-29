@@ -41,7 +41,13 @@ if [[ ! -f "${APP}/quarkus-run.jar" || "${1:-}" == "--build" ]]; then
   "${ROOT}/tools/build-all.sh"
 fi
 cd "${APP}"
+# A packaged fast-jar defaults to the prod profile, which fails closed without
+# SF_ADMIN_* secrets — the lab launcher runs the base (lab) config unless told otherwise.
+# Extra JVM flags go in JAVA_OPTS (args after the script are app args, not -D).
+# shellcheck disable=SC2086
 exec "${JAVA_HOME}/bin/java" \
+  -Xms512m -Xmx2g -XX:+UseZGC ${JAVA_OPTS:-} \
+  -Dquarkus.profile="${QUARKUS_PROFILE:-lab}" \
   -Dsf.html-dir="${SF_HTML_DIR}" \
   -Dquarkus.log.file.enable=true \
   -Dquarkus.log.file.path="${SF_LOG_DIR}/elisa.log" \

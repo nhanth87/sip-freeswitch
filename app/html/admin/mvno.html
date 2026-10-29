@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>ELISA MVNO</title>
+  <script>(function(){try{var t=localStorage.getItem('sf-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);else document.documentElement.setAttribute('data-theme','dark')}catch(e){document.documentElement.setAttribute('data-theme','dark')}})()</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/admin/static/admin.css"/>
+  <script src="/admin/static/htmx.min.js"></script>
+  <script defer src="/admin/static/sf-shell.js"></script>
+  <script defer src="/admin/static/alpine.min.js"></script>
+</head>
+<body class="sf-app" x-data="sfShell()">
+<div class="sf-layout" :class="{'rail-collapsed': railCollapsed, 'rail-open': mobileOpen}">
+  {{NAV_RAIL}}
+  <div class="sf-content">
+    <div class="sf-topbar">
+      <div style="display:flex;gap:.75rem;align-items:center">
+        <button type="button" class="btn btn-ghost" @click="toggleMobile()" aria-label="Menu">☰</button>
+      </div>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">{{AUTH_NAV}}</div>
+    </div>
+    <main class="sf-main">
+
+<p class="eyebrow">MVNO console · level <span class="mono">{{LEVEL}}</span> · tenant <span class="mono">{{TENANT}}</span></p>
+<div class="ops-section-indent">
+  <h1>MVNO</h1>
+  <p class="hint">ADMIN manages every MVNO and its service config · GD manages its own MVNO's users · USER sees its own line.
+    Authorisation: micro-jainslee <span class="mono">jainslee-authz</span> (platform-admin &gt; tenant-admin &gt; user).</p>
+
+  <section class="panel" style="margin:1rem 0">
+    <h2>Tenants</h2>
+    <div class="table-wrap" hx-get="/admin/partial/mvno-tenants" hx-trigger="load" hx-swap="innerHTML">Loading…</div>
+  </section>
+
+  <section class="panel" style="margin:1rem 0" {{SHOW_MANAGER}}>
+    <h2>Tenant config</h2>
+    <p class="hint">GD: name / description of the own MVNO only. ADMIN: also enable, max CPS, MSISDN range, ISC AS.
+      A disabled tenant's subscribers get <span class="mono">403</span> on INVITE at the S-CSCF.
+      Max CPS is stored and shown; enforcement waits for runtime load conditioning (micro-jainslee ADR 0005).</p>
+    <form method="post" action="/admin/mvno/tenants" style="display:grid;gap:.5rem;max-width:36rem">
+      <label>tenantId <input name="tenantId" class="mono" required placeholder="mvno-a"/></label>
+      <label>Name <input name="name"/></label>
+      <label>Description <input name="description"/></label>
+      <fieldset {{SHOW_ADMIN}} style="display:grid;gap:.5rem;border:0;padding:0">
+        <label><input type="checkbox" name="enabled" value="true" checked/> Enabled</label>
+        <label>Max CPS (0 = unlimited) <input name="maxCps" class="mono" value="0"/></label>
+        <label>MSISDN prefix <input name="msisdnPrefix" class="mono" placeholder="25191"/></label>
+        <label>ISC AS URI override <input name="iscAsUri" class="mono" placeholder="sip:1000@127.0.0.1:5062"/></label>
+      </fieldset>
+      <button class="btn btn-primary" type="submit">Save tenant</button>
+    </form>
+  </section>
+
+  <section class="panel" style="margin:1rem 0" {{SHOW_MANAGER}}>
+    <h2>Users</h2>
+    <form method="post" action="/admin/mvno/users" style="display:grid;gap:.5rem;max-width:36rem;margin-bottom:1rem">
+      <label>Username <input name="username" class="mono" required/></label>
+      <label>Password (8+) <input name="password" type="password" required autocomplete="new-password"/></label>
+      <label>Level
+        <select name="role">
+          <option>USER</option>
+          <option {{SHOW_ADMIN}}>GD</option>
+          <option {{SHOW_ADMIN}}>OPS</option>
+        </select>
+      </label>
+      <label {{SHOW_ADMIN}}>tenantId <input name="tenantId" class="mono"/></label>
+      <label>MSISDN (USER: the line it owns) <input name="msisdn" class="mono"/></label>
+      <label>Display name <input name="displayName"/></label>
+      <button class="btn btn-primary" type="submit">Create user</button>
+    </form>
+    <div class="table-wrap" hx-get="/admin/partial/mvno-users" hx-trigger="load" hx-swap="innerHTML">Loading…</div>
+  </section>
+
+  <section class="panel" style="margin:1rem 0">
+    <h2>Subscribers</h2>
+    <div class="table-wrap" hx-get="/admin/partial/mvno-subscribers" hx-trigger="load" hx-swap="innerHTML">Loading…</div>
+  </section>
+
+  <section class="panel" style="margin:1rem 0">
+    <h2>Recent calls</h2>
+    <div class="table-wrap" hx-get="/admin/partial/mvno-cdr" hx-trigger="load, every 10s" hx-swap="innerHTML">Loading…</div>
+  </section>
+</div>
+
+    </main>
+  </div>
+</div>
+</body>
+</html>

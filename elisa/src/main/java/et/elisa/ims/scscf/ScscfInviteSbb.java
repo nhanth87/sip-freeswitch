@@ -38,6 +38,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -69,6 +70,14 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
 
     @InjectRa(name = "sip-servlet-ra")
     private volatile RaCommandPort sipRa;
+
+    /** MVNO admission: tenantId → may originate (MvnoTenant profile, memory only). */
+    private volatile java.util.function.Predicate<String> tenantGate;
+
+    public ScscfInviteSbb withTenantGate(java.util.function.Predicate<String> gate) {
+        this.tenantGate = gate;
+        return this;
+    }
 
     public ScscfInviteSbb() {
         this(null, null, null, null, null, null, null, null, null, "elisa-1", "fallback");
@@ -233,10 +242,15 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
         if (roles == null || !roles.scscf()) {
             return;
         }
+        // Hot store only: a re-INVITE's dialog is in ISPN (DIST_SYNC across S-CSCFs);
+        // the PG fallback would cost a SELECT on every fresh Call-ID for nothing.
+        String current = getSipCallId();
+        if (e.callId() != null && !e.callId().equals(current) && cmpStore != null) {
+            cmpStore.loadHot(e.callId()).ifPresent(this::applyCmp);
+        }
         if (metrics != null) {
             metrics.onInvite();
         }
-        ensureCmpLoaded(e.callId());
         // W1-a re-INVITE: never downgrade a live EARLY/CONFIRMED dialog to INVITE
         // (would break recovery policy + startedAt/duration). Refresh checkpoint only.
         boolean reInvite = e.callId() != null && e.callId().equals(getSipCallId())
@@ -253,8 +267,17 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
             flushCmp();
             LOG.debug("[S-CSCF] re-INVITE callId={} target={}", e.callId(), target);
         } else {
+            String callerTenant = hss == null ? null
+                    : hss.resolveIdentity(e.fromUri()).map(s -> s.tenantId).orElse(null);
+            java.util.function.Predicate<String> gate = tenantGate;
+            if (callerTenant != null && gate != null && !gate.test(callerTenant)) {
+                send(new SendResponse(e.callId(), 403, "Tenant Disabled"));
+                LOG.debug("[S-CSCF] INVITE callId={} rejected: tenant {} disabled", e.callId(), callerTenant);
+                return;
+            }
             String to = e.toUri();
-            terminating = bindings != null && bindings.findLive(to).isPresent();
+            Optional<ImsBinding> live = bindings != null ? bindings.findLive(to) : Optional.empty();
+            terminating = live.isPresent();
             if (mmtel != null) {
                 MmtelService.Decision md = mmtel.evaluate(e.fromUri(), to, terminating);
                 if (md.action() == MmtelService.Action.BARRED) {
@@ -263,11 +286,12 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
                 }
                 if (md.action() == MmtelService.Action.DIVERT && md.divertUri() != null) {
                     to = md.divertUri();
-                    terminating = bindings != null && bindings.findLive(to).isPresent();
+                    live = bindings != null ? bindings.findLive(to) : Optional.empty();
+                    terminating = live.isPresent();
                 }
             }
             if (terminating) {
-                ImsBinding b = bindings.findLive(to).orElseThrow();
+                ImsBinding b = live.orElseThrow();
                 target = b.contact != null ? b.contact : to;
                 if (b.flowDiffersFromContact()) {
                     nextHop = b.flowNextHopUri();
@@ -409,7 +433,7 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
             String icid = PChargingVectors.synthesizeIcid(callId);
             String realm = roles != null && roles.realm() != null ? roles.realm() : "ims.lab";
             String vector = "icid-value=" + icid + ";orig-ioi=" + realm;
-            cdr.ingestSipDialogEnd(callId, from, to, msisdn, icid, vector, impi, impu, "S", dur);
+            cdr.ingestSipDialogEndAsync(callId, from, to, msisdn, icid, vector, impi, impu, "S", dur);
         } catch (Throwable t) {
             LOG.warn("[S-CSCF] SIP dialog CDR soft-fail callId={}: {}", callId, t.toString());
         }
@@ -448,6 +472,13 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
 
     void onResponse(SipResponseEvent e) {
         ensureCmpLoaded(e.callId());
+        if (getSipCallId() == null) {
+            // Dialog already torn down (onBye answered the UE locally and cleared CMP):
+            // this is FreeSWITCH's 100/200 to the BYE we sent. Relaying it would hand
+            // the UE a stray/duplicate response on its finished BYE transaction.
+            LOG.debug("[S-CSCF] RESPONSE {} for ended dialog callId={} absorbed", e.statusCode(), e.callId());
+            return;
+        }
         if (e.isProvisional()) {
             if (getDialogState() == null || DialogCheckpoint.STATE_INVITE.equals(getDialogState())) {
                 setDialogState(DialogCheckpoint.STATE_EARLY);

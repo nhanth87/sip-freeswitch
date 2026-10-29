@@ -17,6 +17,9 @@ public class SfPortalUser extends PanacheEntityBase {
     public String tenantId;
     @Column(name = "display_name")
     public String displayName;
+    /** USER role: the subscriber (MSISDN) this login owns (V11). */
+    @Column(name = "msisdn")
+    public String msisdn;
     @Column(name = "http_api_key")
     public String httpApiKey;
     @Column(name = "http_api_key_fp")

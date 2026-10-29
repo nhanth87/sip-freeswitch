@@ -36,7 +36,8 @@ public class CxServer {
         String impu = avps.getOrDefault(CxCodec.PUBLIC_IDENTITY, "");
         Map<Integer, String> ans = switch (req.commandCode()) {
             case CxCodec.UAR -> hss.handleUar(impi, impu);
-            case CxCodec.MAR -> hss.handleMar(impi, impu, req.sessionId());
+            case CxCodec.MAR -> hss.handleMar(impi, impu, req.sessionId(),
+                    avps.get(CxCodec.SIP_AUTHORIZATION));
             case CxCodec.SAR -> hss.handleSar(impi, impu);
             case CxCodec.LIR -> hss.handleLir(impu);
             default -> Map.of(CxCodec.RESULT_CODE, "3001");

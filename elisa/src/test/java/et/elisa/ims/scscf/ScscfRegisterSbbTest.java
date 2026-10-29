@@ -13,6 +13,7 @@ import et.elisa.ims.digest.SipDigestAuth;
 import et.elisa.ims.hss.HssLiteService;
 import et.elisa.ims.reg.BindingStore;
 import et.elisa.ims.support.ImsTestSupport;
+import et.elisa.ims.support.UeAka;
 import et.elisa.ims.support.ImsTestSupport.CapturingRa;
 import et.elisa.persist.ImsSubscriber;
 import et.elisa.security.SipDigestHasher;
@@ -23,6 +24,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class ScscfRegisterSbbTest {
+
+    /** RFC 3310 nonce the S-CSCF challenged with (base64 RAND ‖ AUTN). */
+    private static final String NONCE = AkaMd5.nonce(new byte[16], new byte[16]);
 
     @Test
     void challenge_whenAuthorizationHasEmptyResponse() {
@@ -126,7 +130,7 @@ class ScscfRegisterSbbTest {
         StubBindings bindings = new StubBindings();
         AtomicInteger notify = new AtomicInteger();
         byte[] xres = AkaMd5.parseHex("1122334455667788");
-        hss.pending = Optional.of(new HssLiteService.PendingAuth("u@ims.lab", "sip:u@ims.lab", xres, 9));
+        hss.pending = Optional.of(new HssLiteService.PendingAuth("u@ims.lab", "sip:u@ims.lab", xres, NONCE));
         IscThirdPartyRegister tp = new IscThirdPartyRegister() {
             @Override
             public void notifyAs(String impu, String contact, int expires) {
@@ -137,7 +141,7 @@ class ScscfRegisterSbbTest {
                 cx, hss, bindings, tp);
         ImsTestSupport.injectRa(sbb, ra);
 
-        String auth = "Digest response=\"" + AkaMd5.toHex(xres) + "\"";
+        String auth = UeAka.authorization("u@ims.lab", "ims.lab", "sip:ims.lab", NONCE, xres);
         sbb.onRegister(new SipRegisterEvent("c2", "sip:u@ims.lab", "sip:u@ims.lab",
                 "sip:u@10.0.0.1:5060", 3600, auth, "<sip:pcscf;lr>"));
 
@@ -148,7 +152,6 @@ class ScscfRegisterSbbTest {
         assertEquals(1, cx.sarCalls.get());
         assertEquals(1, bindings.upserts.get());
         assertEquals(1, notify.get());
-        assertEquals(9L, hss.committedSqn.get().longValue());
     }
 
     @Test
@@ -158,12 +161,12 @@ class ScscfRegisterSbbTest {
         StubHss hss = new StubHss();
         StubBindings bindings = new StubBindings();
         byte[] xres = AkaMd5.parseHex("1122334455667788");
-        hss.pending = Optional.of(new HssLiteService.PendingAuth("u@ims.lab", "sip:u@ims.lab", xres, 9));
+        hss.pending = Optional.of(new HssLiteService.PendingAuth("u@ims.lab", "sip:u@ims.lab", xres, NONCE));
         ScscfRegisterSbb sbb = new ScscfRegisterSbb(ImsTestSupport.roles(true, true, true, true),
                 cx, hss, bindings, null);
         ImsTestSupport.injectRa(sbb, ra);
 
-        String auth = "Digest response=\"" + AkaMd5.toHex(xres) + "\"";
+        String auth = UeAka.authorization("u@ims.lab", "ims.lab", "sip:ims.lab", NONCE, xres);
         sbb.onRegister(new SipRegisterEvent("c-nat", "sip:alice@ims.lab", "sip:alice@ims.lab",
                 "sip:alice@172.21.0.1:5060", 3600, auth, "<sip:pcscf.ims.lab:5060;lr;ob>",
                 "192.0.2.80", 5060, "UDP"));
@@ -212,13 +215,14 @@ class ScscfRegisterSbbTest {
         CapturingRa ra = new CapturingRa();
         StubHss hss = new StubHss();
         hss.pending = Optional.of(new HssLiteService.PendingAuth("u@ims.lab", "sip:u@ims.lab",
-                AkaMd5.parseHex("1122334455667788"), 2));
+                AkaMd5.parseHex("1122334455667788"), NONCE));
         ScscfRegisterSbb sbb = new ScscfRegisterSbb(ImsTestSupport.roles(true, true, true, true),
                 new StubCx(), hss, new StubBindings(), null);
         ImsTestSupport.injectRa(sbb, ra);
 
         sbb.onRegister(new SipRegisterEvent("c3", "sip:u@ims.lab", "sip:u@ims.lab",
-                "sip:u@10.0.0.1", 3600, "Digest response=\"0000000000000000\"", null));
+                "sip:u@10.0.0.1", 3600,
+                UeAka.authorization("u@ims.lab", "ims.lab", "sip:ims.lab", NONCE, new byte[8]), null));
 
         assertEquals(403, ra.ofType(SendResponse.class).getFirst().statusCode());
     }
@@ -273,7 +277,6 @@ class ScscfRegisterSbbTest {
 
     static class StubHss extends HssLiteService {
         Optional<HssLiteService.PendingAuth> pending = Optional.empty();
-        final AtomicReference<Long> committedSqn = new AtomicReference<>();
 
         @Override public Optional<PendingAuth> peekPending(String key) {
             return pending;
@@ -281,10 +284,6 @@ class ScscfRegisterSbbTest {
 
         @Override public Optional<PendingAuth> takePending(String key) {
             return pending;
-        }
-
-        @Override public void commitSqn(String impi, long nextSqn) {
-            committedSqn.set(nextSqn);
         }
 
         @Override public Optional<et.elisa.persist.ImsSubscriber> findByImpi(String impi) {

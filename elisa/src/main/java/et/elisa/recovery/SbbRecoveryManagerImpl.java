@@ -162,7 +162,10 @@ public class SbbRecoveryManagerImpl implements SbbRecoveryManager {
         EntityRemovalEvent.RemovalReason reason = event.reason();
         if (reason == EntityRemovalEvent.RemovalReason.HOT_REDEPLOY
                 || reason == EntityRemovalEvent.RemovalReason.OPERATOR
-                || reason == EntityRemovalEvent.RemovalReason.TIMER_EXPIRED) {
+                || reason == EntityRemovalEvent.RemovalReason.TIMER_EXPIRED
+                // JSR 240 §8.5: the SIP dialog / FS channel activity ended, the SLEE
+                // implicitly detached the entity and removed the root tree — normal end of life.
+                || reason == EntityRemovalEvent.RemovalReason.ATTACHMENT_COUNT_ZERO) {
             return;
         }
         String correlate = resolveCorrelate(event);

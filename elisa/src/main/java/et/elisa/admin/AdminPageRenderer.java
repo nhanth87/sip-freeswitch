@@ -10,7 +10,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 @ApplicationScoped
 public class AdminPageRenderer {
-    @ConfigProperty(name = "sf.html-dir", defaultValue = "") String configuredRoot;
+    @ConfigProperty(name = "sf.html-dir") java.util.Optional<String> configuredRoot = java.util.Optional.empty();
 
     public String page(String name, Map<String, String> vars) { return render("admin/" + name, vars); }
     public String partial(String name, Map<String, String> vars) { return render("partials/" + name, vars); }
@@ -30,7 +30,8 @@ public class AdminPageRenderer {
         } catch (IOException ex) { return java.util.Optional.empty(); }
     }
     private Path root() {
-        if (configuredRoot != null && !configuredRoot.isBlank()) return Path.of(configuredRoot).toAbsolutePath().normalize();
+        String configured = configuredRoot.orElse("");
+        if (!configured.isBlank()) return Path.of(configured).toAbsolutePath().normalize();
         String appHome = System.getenv("APP_HOME");
         if (appHome != null && Files.isDirectory(Path.of(appHome, "app", "html"))) return Path.of(appHome, "app", "html");
         Path local = Path.of("app/html"); return Files.isDirectory(local) ? local.toAbsolutePath() : Path.of("../app/html").toAbsolutePath();

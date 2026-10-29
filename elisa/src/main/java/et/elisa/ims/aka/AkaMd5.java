@@ -1,50 +1,101 @@
 package et.elisa.ims.aka;
 
+import et.elisa.ims.digest.SipDigestAuth;
+import et.epc.crypto.UmtsVector;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.SecureRandom;
-import java.util.Arrays;
+import java.security.NoSuchAlgorithmException;
+import java.util.Base64;
 import java.util.HexFormat;
-import javax.crypto.Cipher;
-import javax.crypto.spec.SecretKeySpec;
 
 /**
- * Lab IMS AKA (Milenage f1–f5 subset) for REGISTER challenges.
+ * IMS AKA over SIP Digest — {@code algorithm=AKAv1-MD5} (RFC 3310, TS 33.203 §6.1,
+ * TS 24.229 §5.4.1.2). The authentication vector itself is the TS 33.102 quintuplet from
+ * {@code epc-crypto} (MILENAGE, TS 35.206 — verified against TS 35.208 test sets):
+ * AUTN = (SQN ⊕ AK) ‖ AMF ‖ MAC-A.
+ *
+ * <ul>
+ *   <li>nonce = base64(RAND ‖ AUTN) (RFC 3310 §3.2)</li>
+ *   <li>the UE answers with an RFC 2617 digest whose password is RES (octets), so the
+ *       S-CSCF verifies it with XRES as the password (§3.4) — never by comparing RES
+ *       in the clear</li>
+ *   <li>synchronisation failure: the UE sends {@code auts=base64(AUTS)} (§3.4)</li>
+ * </ul>
  * Ki/OPc are hex strings (32 hex = 16 bytes).
  */
 public final class AkaMd5 {
 
-    private static final SecureRandom RNG = new SecureRandom();
     private static final HexFormat HEX = HexFormat.of();
 
     private AkaMd5() {}
 
-    public record Vector(byte[] rand, byte[] autn, byte[] xres, byte[] ck, byte[] ik, long nextSqn) {}
+    /** @param sqn the SQN embedded in AUTN (freshly reserved by the HSS, TS 33.102 Annex C) */
+    public record Vector(byte[] rand, byte[] autn, byte[] xres, byte[] ck, byte[] ik, long sqn) {}
 
     public static Vector generate(byte[] ki, byte[] opc, byte[] amf, long sqn) {
-        byte[] rand = new byte[16];
-        RNG.nextBytes(rand);
-        long next = sqn + 1;
-        byte[] sqnBytes = sqnToBytes(next);
-        byte[] macA = f1(ki, opc, rand, sqnBytes, amf);
-        byte[] autn = new byte[16];
-        System.arraycopy(sqnBytes, 0, autn, 0, 6);
-        System.arraycopy(amf, 0, autn, 6, 2);
-        System.arraycopy(macA, 0, autn, 8, 8);
-        byte[] res = f2(ki, opc, rand);
-        byte[] ck = f3(ki, opc, rand);
-        byte[] ik = f4(ki, opc, rand);
-        return new Vector(rand, autn, res, ck, ik, next);
+        UmtsVector v = UmtsVector.generate(ki, opc, amf, sqn);
+        return new Vector(v.rand(), v.autn(), v.xres(), v.ck(), v.ik(), sqn);
     }
 
-    public static boolean verifyRes(byte[] expectedXres, byte[] res) {
-        if (expectedXres == null || res == null) {
+    /** RFC 3310 §3.2: nonce = base64(RAND ‖ AUTN). */
+    public static String nonce(byte[] rand, byte[] autn) {
+        byte[] both = new byte[rand.length + autn.length];
+        System.arraycopy(rand, 0, both, 0, rand.length);
+        System.arraycopy(autn, 0, both, rand.length, autn.length);
+        return Base64.getEncoder().encodeToString(both);
+    }
+
+    /** WWW-Authenticate Digest AKAv1-MD5 challenge value (without header name). */
+    public static String wwwAuthenticate(String realm, byte[] rand, byte[] autn) {
+        return "Digest realm=\"" + realm + "\", nonce=\"" + nonce(rand, autn)
+                + "\", algorithm=AKAv1-MD5, qop=\"auth\"";
+    }
+
+    /** RAND from a base64 AKA nonce, or {@code null}. */
+    public static byte[] randFromNonce(String nonce) {
+        byte[] raw = decodeBase64(nonce);
+        return raw == null || raw.length < 32 ? null : java.util.Arrays.copyOf(raw, 16);
+    }
+
+    /**
+     * RFC 3310 §3.4 / RFC 2617: HA1 = MD5(username ":" realm ":" XRES), XRES taken as
+     * octets; the response is then checked like any Digest response.
+     */
+    public static boolean verifyResponse(String authorization, byte[] xres, String method, String expectedNonce) {
+        if (authorization == null || xres == null || xres.length == 0 || expectedNonce == null) {
             return false;
         }
-        if (expectedXres.length == 0 || res.length != expectedXres.length) {
+        String username = SipDigestAuth.param(authorization, "username");
+        String realm = SipDigestAuth.param(authorization, "realm");
+        if (username == null || realm == null) {
             return false;
         }
-        return MessageDigest.isEqual(expectedXres, res);
+        return SipDigestAuth.verify(authorization, ha1(username, realm, xres), method, expectedNonce);
+    }
+
+    /** Hex HA1 with a binary password (RES/XRES). */
+    public static String ha1(String username, String realm, byte[] password) {
+        try {
+            ByteArrayOutputStream in = new ByteArrayOutputStream();
+            in.writeBytes((username + ":" + realm + ":").getBytes(StandardCharsets.UTF_8));
+            in.writeBytes(password);
+            return HEX.formatHex(MessageDigest.getInstance("MD5").digest(in.toByteArray()));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("MD5 unavailable", e);
+        }
+    }
+
+    /** RFC 3310 §3.4: {@code auts} parameter (base64 of the 14-octet AUTS), or {@code null}. */
+    public static byte[] auts(String authorization) {
+        byte[] raw = decodeBase64(SipDigestAuth.param(authorization, "auts"));
+        return raw == null || raw.length != 14 ? null : raw;
+    }
+
+    /** True when the Authorization carries a non-empty Digest {@code response}. */
+    public static boolean hasResponse(String authorization) {
+        String r = SipDigestAuth.param(authorization, "response");
+        return r != null && !r.isBlank();
     }
 
     public static byte[] parseHex(String hex) {
@@ -62,114 +113,14 @@ public final class AkaMd5 {
         return HEX.formatHex(b == null ? new byte[0] : b);
     }
 
-    /** WWW-Authenticate Digest AKA-MD5 challenge value (without header name). */
-    public static String wwwAuthenticate(String realm, byte[] rand, byte[] autn) {
-        return "Digest algorithm=AKAv1-MD5, realm=\"" + realm + "\", nonce=\""
-                + toHex(rand) + toHex(autn) + "\", qop=\"auth\"";
-    }
-
-    public static byte[] extractResFromAuthorization(String authorization) {
-        if (authorization == null) {
+    private static byte[] decodeBase64(String value) {
+        if (value == null || value.isBlank()) {
             return null;
         }
-        int i = authorization.toLowerCase().indexOf("response=\"");
-        if (i < 0) {
-            return null;
-        }
-        int start = i + "response=\"".length();
-        int end = authorization.indexOf('"', start);
-        if (end < 0) {
-            return null;
-        }
-        String hex = authorization.substring(start, end).trim();
-        if (hex.isEmpty()) {
-            return null;
-        }
-        return parseHex(hex);
-    }
-
-    private static byte[] sqnToBytes(long sqn) {
-        byte[] out = new byte[6];
-        for (int i = 5; i >= 0; i--) {
-            out[i] = (byte) (sqn & 0xff);
-            sqn >>= 8;
-        }
-        return out;
-    }
-
-    private static byte[] f1(byte[] k, byte[] opc, byte[] rand, byte[] sqn, byte[] amf) {
-        byte[] in = new byte[16];
-        System.arraycopy(sqn, 0, in, 0, 6);
-        System.arraycopy(amf, 0, in, 6, 2);
-        System.arraycopy(sqn, 0, in, 8, 6);
-        System.arraycopy(amf, 0, in, 14, 2);
-        byte[] temp = aes(k, xor(rand, opc));
-        byte[] out = aes(k, xor(xor(in, opc), temp));
-        return Arrays.copyOf(xor(out, opc), 8);
-    }
-
-    private static byte[] f2(byte[] k, byte[] opc, byte[] rand) {
-        return Arrays.copyOf(f2345(k, opc, rand, 1), 8);
-    }
-
-    private static byte[] f3(byte[] k, byte[] opc, byte[] rand) {
-        return f2345(k, opc, rand, 2);
-    }
-
-    private static byte[] f4(byte[] k, byte[] opc, byte[] rand) {
-        return f2345(k, opc, rand, 4);
-    }
-
-    private static byte[] f2345(byte[] k, byte[] opc, byte[] rand, int r) {
-        byte[] temp = aes(k, xor(rand, opc));
-        byte[] rotated = rotate(temp, r);
-        return xor(aes(k, xor(rotated, opc)), opc);
-    }
-
-    private static byte[] rotate(byte[] in, int rBytes) {
-        byte[] out = new byte[16];
-        for (int i = 0; i < 16; i++) {
-            out[i] = in[(i + rBytes) % 16];
-        }
-        return out;
-    }
-
-    private static byte[] xor(byte[] a, byte[] b) {
-        byte[] out = new byte[16];
-        for (int i = 0; i < 16; i++) {
-            out[i] = (byte) (a[i % a.length] ^ b[i % b.length]);
-        }
-        return out;
-    }
-
-    private static byte[] aes(byte[] key, byte[] data) {
         try {
-            Cipher c = Cipher.getInstance("AES/ECB/NoPadding");
-            c.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(padKey(key), "AES"));
-            return c.doFinal(padBlock(data));
-        } catch (Exception e) {
-            // fallback lab hash
-            try {
-                MessageDigest md = MessageDigest.getInstance("SHA-256");
-                md.update(key);
-                md.update(data);
-                return Arrays.copyOf(md.digest(), 16);
-            } catch (Exception ex) {
-                return Arrays.copyOf((key.toString() + new String(data, StandardCharsets.ISO_8859_1))
-                        .getBytes(StandardCharsets.ISO_8859_1), 16);
-            }
+            return Base64.getDecoder().decode(value.trim());
+        } catch (IllegalArgumentException ex) {
+            return null;
         }
-    }
-
-    private static byte[] padKey(byte[] key) {
-        byte[] k = new byte[16];
-        System.arraycopy(key, 0, k, 0, Math.min(16, key.length));
-        return k;
-    }
-
-    private static byte[] padBlock(byte[] data) {
-        byte[] d = new byte[16];
-        System.arraycopy(data, 0, d, 0, Math.min(16, data.length));
-        return d;
     }
 }

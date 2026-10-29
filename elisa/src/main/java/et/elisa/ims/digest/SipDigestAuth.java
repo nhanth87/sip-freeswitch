@@ -77,7 +77,11 @@ public final class SipDigestAuth {
         return param(wwwOrAuthorization, "nonce");
     }
 
-    static String param(String header, String name) {
+    /** Digest auth-param value (quoted or token), or {@code null}. */
+    public static String param(String header, String name) {
+        if (header == null) {
+            return null;
+        }
         String lower = header.toLowerCase(Locale.ROOT);
         String key = name.toLowerCase(Locale.ROOT) + "=";
         int i = indexOfToken(lower, key);

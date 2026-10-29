@@ -7,15 +7,19 @@ import et.elisa.cmp.DialogCmpPersistence;
 import et.elisa.cmp.InviteCmpSnapshot;
 import et.elisa.cmp.SipCallIds;
 import et.elisa.ims.hss.HssLiteService;
+import et.elisa.persist.CoalescingWriteBehind;
 import et.elisa.persist.ImsSubscriber;
 import et.elisa.persist.SfCallSession;
 import et.elisa.profile.ElisaProfileService;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -32,8 +36,33 @@ public class CallSessionService {
     @Inject HssLiteService hss;
     @Inject ElisaProfileService sleeProfiles;
 
+    @Inject CallSessionPgWriter pgWriter;
+
     @ConfigProperty(name = "sf.cluster.node-id", defaultValue = "elisa-1")
     String elisaNodeId;
+
+    /**
+     * FS fires CREATE/PROGRESS/ANSWER/… then HANGUP/HANGUP_COMPLETE/DESTROY per channel;
+     * a synchronous find+persist per event made ESL traffic the PG bottleneck. The PG
+     * copy is written behind (coalesced per Unique-ID); 0 = synchronous.
+     */
+    @ConfigProperty(name = "sf.session.pg-write-behind-ms", defaultValue = "50")
+    long writeBehindMs = 50L;
+
+    private volatile CoalescingWriteBehind<CallSessionPgWriter.Op> writeBehind;
+
+    /** Channels already ended: the 2nd/3rd hangup event must not fall through to PG. */
+    private static final long ENDED_TTL_NANOS = TimeUnit.SECONDS.toNanos(60);
+    private static final int ENDED_MAX = 200_000;
+    private final ConcurrentHashMap<String, Long> recentlyEnded = new ConcurrentHashMap<>();
+
+    @PreDestroy
+    void shutdown() {
+        CoalescingWriteBehind<CallSessionPgWriter.Op> wb = writeBehind;
+        if (wb != null) {
+            wb.stop();
+        }
+    }
 
     @Transactional
     public CallSession upsertFromFs(String fsUuid, String sipCallId, String caller, String callee,
@@ -96,10 +125,14 @@ public class CallSessionService {
         if (fsUuid == null) {
             return;
         }
+        if (isRecentlyEnded(fsUuid)) {
+            return;
+        }
         CallSession session = hot != null ? hot.byFsUuid(fsUuid).orElse(null) : null;
         if (session != null) {
             CallSession ended = session.withState(hangupState == null ? "HANGUP" : hangupState);
             hot.remove(session);
+            markRecentlyEnded(fsUuid);
             markEndedPg(ended);
             if (ended.sipCallId() != null && dialogCmp != null) {
                 dialogCmp.remove(ended.sipCallId());
@@ -127,6 +160,14 @@ public class CallSessionService {
             if (hit.isPresent()) {
                 return hit;
             }
+        }
+        if (isRecentlyEnded(fsUuid)) {
+            return Optional.empty();
+        }
+        CoalescingWriteBehind<CallSessionPgWriter.Op> wb = writeBehind;
+        CallSessionPgWriter.Op queued = wb == null ? null : wb.pendingFor(fsUuid);
+        if (queued != null) {
+            return queued.ended() ? Optional.empty() : Optional.of(queued.session());
         }
         return loadPg(fsUuid).map(this::toHot);
     }
@@ -170,36 +211,60 @@ public class CallSessionService {
     }
 
     private void persistPg(CallSession s) {
-        SfCallSession row = SfCallSession.find("fsUuid", s.fsUuid()).firstResult();
-        if (row == null) {
-            row = new SfCallSession();
-            row.fsUuid = s.fsUuid();
-            row.startedAt = s.startedAt();
-        }
-        row.sipCallId = s.sipCallId();
-        row.profileId = s.profileId();
-        row.msisdn = s.msisdn();
-        row.tenantId = s.tenantId();
-        row.elisaNodeId = s.elisaNodeId();
-        row.fsNodeId = s.fsNodeId();
-        row.direction = s.direction();
-        row.state = s.state();
-        row.updatedAt = s.updatedAt();
-        row.persist();
+        writePg(new CallSessionPgWriter.Op(s, false));
     }
 
     private void markEndedPg(CallSession s) {
-        SfCallSession row = SfCallSession.find("fsUuid", s.fsUuid()).firstResult();
-        if (row == null) {
-            persistPg(s);
-            row = SfCallSession.find("fsUuid", s.fsUuid()).firstResult();
+        writePg(new CallSessionPgWriter.Op(s, true));
+    }
+
+    private void writePg(CallSessionPgWriter.Op op) {
+        CallSessionPgWriter writer = pgWriter;
+        if (writer == null) {
+            return;
         }
-        if (row != null) {
-            row.state = s.state();
-            row.updatedAt = Instant.now();
-            row.endedAt = Instant.now();
-            row.persist();
+        CoalescingWriteBehind<CallSessionPgWriter.Op> wb = writeBehind();
+        if (wb != null) {
+            wb.put(op.session().fsUuid(), op);
+        } else {
+            writer.writeBatch(List.of(op));
         }
+    }
+
+    private CoalescingWriteBehind<CallSessionPgWriter.Op> writeBehind() {
+        CoalescingWriteBehind<CallSessionPgWriter.Op> wb = writeBehind;
+        if (wb != null || writeBehindMs <= 0) {
+            return wb;
+        }
+        synchronized (this) {
+            if (writeBehind == null) {
+                writeBehind = new CoalescingWriteBehind<>("call-session", pgWriter::writeBatch, writeBehindMs);
+            }
+            return writeBehind;
+        }
+    }
+
+    private void markRecentlyEnded(String fsUuid) {
+        if (recentlyEnded.size() >= ENDED_MAX) {
+            long now = System.nanoTime();
+            recentlyEnded.values().removeIf(at -> now - at > ENDED_TTL_NANOS);
+            if (recentlyEnded.size() >= ENDED_MAX) {
+                recentlyEnded.clear();
+            }
+        }
+        recentlyEnded.put(fsUuid, System.nanoTime());
+    }
+
+    private boolean isRecentlyEnded(String fsUuid) {
+        Long at = recentlyEnded.get(fsUuid);
+        if (at == null) {
+            return false;
+        }
+        if (System.nanoTime() - at > ENDED_TTL_NANOS) {
+            recentlyEnded.remove(fsUuid, at);
+            return false;
+        }
+        return true;
     }
 
     private Optional<SfCallSession> loadPg(String fsUuid) {

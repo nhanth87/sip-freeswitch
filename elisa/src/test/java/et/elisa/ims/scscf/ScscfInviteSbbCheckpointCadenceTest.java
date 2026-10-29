@@ -3,8 +3,11 @@ package et.elisa.ims.scscf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.microjainslee.ra.sipservlet.command.SendResponse;
 import com.microjainslee.ra.sipservlet.events.SipAckEvent;
+import com.microjainslee.ra.sipservlet.events.SipByeEvent;
 import com.microjainslee.ra.sipservlet.events.SipInviteEvent;
+import com.microjainslee.ra.sipservlet.events.SipResponseEvent;
 import et.elisa.cluster.DialogCheckpoint;
 import et.elisa.cluster.DialogCheckpointStore;
 import et.elisa.cmp.DialogCmpPersistence;
@@ -106,5 +109,47 @@ class ScscfInviteSbbCheckpointCadenceTest {
         assertEquals(DialogCheckpoint.STATE_INVITE,
                 cmp.load("cid-new").orElseThrow().dialogState());
         assertTrue(sbb.getTrunkUri() != null);
+    }
+
+    @Test
+    void responseAfterLocallyAnsweredByeIsAbsorbed() {
+        Fixture f = Fixture.confirmed("cid-bye");
+        ImsTestSupport.CapturingRa ra = new ImsTestSupport.CapturingRa();
+        ImsTestSupport.injectRa(f.sbb(), ra);
+
+        f.sbb().onBye(new SipByeEvent("cid-bye"));
+        int afterBye = ra.ofType(SendResponse.class).size();
+        f.sbb().onResponse(new SipResponseEvent("cid-bye", 100, "Trying", null, null, List.of()));
+        f.sbb().onResponse(new SipResponseEvent("cid-bye", 200, "OK", null, null, List.of()));
+
+        assertEquals(afterBye, ra.ofType(SendResponse.class).size(),
+                "FS answers to our BYE must not be relayed to the UE");
+    }
+
+    @Test
+    void disabledTenantCallerGets403AndNothingIsForwarded() {
+        ConcurrentHashMap<String, DialogCheckpoint> shared = new ConcurrentHashMap<>();
+        DialogCmpPersistence cmp = new DialogCmpPersistence(
+                new DialogCheckpointStore().shareMemory(shared)).withoutPg();
+        et.elisa.ims.hss.HssLiteService hss = new et.elisa.ims.hss.HssLiteService() {
+            @Override
+            public java.util.Optional<et.elisa.persist.ImsSubscriber> resolveIdentity(String raw) {
+                et.elisa.persist.ImsSubscriber sub = new et.elisa.persist.ImsSubscriber();
+                sub.tenantId = raw.contains("bob") ? "mvno-off" : "mvno-on";
+                sub.impi = raw;
+                return java.util.Optional.of(sub);
+            }
+        };
+        ScscfInviteSbb.$Concrete sbb = new ScscfInviteSbb.$Concrete(
+                ImsTestSupport.roles(false, false, true, false), null, null, cmp, null, hss, "elisa-1", "fs-1");
+        sbb.withTenantGate(tenant -> !"mvno-off".equals(tenant));
+        ImsTestSupport.CapturingRa ra = new ImsTestSupport.CapturingRa();
+        ImsTestSupport.injectRa(sbb, ra);
+
+        sbb.onInvite(new SipInviteEvent("cid-off", "sip:bob@ims.lab", "sip:1000@ims.lab",
+                "sip:bob@10.0.0.9:5060", List.of(), List.of(), List.of(), "v=0", "application/sdp", Map.of()));
+
+        assertEquals(403, ra.ofType(SendResponse.class).getFirst().statusCode());
+        assertTrue(ra.ofType(com.microjainslee.ra.sipservlet.command.SendInvite.class).isEmpty());
     }
 }

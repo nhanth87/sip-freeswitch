@@ -43,7 +43,10 @@ public final class ElisaProfiles {
         pf.createProfileTable(CallSessionProfile.TABLE);
         pf.registerIndex(CallSessionProfile.TABLE, "sipCallId");
         pf.registerIndex(CallSessionProfile.TABLE, "msisdn");
-        LOG.info("SLEE Profile tables ready: {} + {}", ImsSubscriberProfile.TABLE, CallSessionProfile.TABLE);
+
+        pf.createProfileTable(MvnoTenantProfile.TABLE);
+        LOG.info("SLEE Profile tables ready: {} + {} + {}", ImsSubscriberProfile.TABLE,
+                CallSessionProfile.TABLE, MvnoTenantProfile.TABLE);
     }
 
     /** Profile PK: MSISDN preferred, else IMPI (JP2). */
@@ -175,6 +178,38 @@ public final class ElisaProfiles {
             return List.of();
         }
         return pf.findProfilesByAttribute(ImsSubscriberProfile.TABLE, "directoryUserId", directoryUserId.trim());
+    }
+
+    /** Mirror one {@code sf_tenant} row into the MvnoTenant hot store (PK = tenantId). */
+    public static Optional<MvnoTenantProfile> upsertTenant(ProfileFacility pf, et.elisa.persist.SfTenant row) {
+        if (pf == null || row == null || row.id == null) {
+            return Optional.empty();
+        }
+        try {
+            MvnoTenantProfile t = getOrCreate(pf, MvnoTenantProfile.TABLE, row.id, MvnoTenantProfile.class);
+            t.setTenantId(row.id);
+            t.setName(row.name);
+            t.setEnabled(row.enabled ? "true" : "false");
+            t.setMaxCps((long) row.maxCps);
+            t.setMsisdnPrefix(row.msisdnPrefix);
+            t.setIscAsUri(row.iscAsUri);
+            t.setUpdatedAtEpochMs(row.updatedAt != null ? row.updatedAt.toEpochMilli() : System.currentTimeMillis());
+            return Optional.of(t);
+        } catch (RuntimeException e) {
+            LOG.warn("MvnoTenantProfile upsert failed tenant={}: {}", row.id, e.toString());
+            return Optional.empty();
+        }
+    }
+
+    public static Optional<MvnoTenantProfile> getTenant(ProfileFacility pf, String tenantId) {
+        if (pf == null || tenantId == null) {
+            return Optional.empty();
+        }
+        ProfileLocalObject plo = pf.getProfile(new ProfileID(MvnoTenantProfile.TABLE, tenantId));
+        if (plo != null && plo.getProfile() instanceof MvnoTenantProfile t) {
+            return Optional.of(t);
+        }
+        return Optional.empty();
     }
 
     public static Optional<ImsSubscriberProfile> getSubscriber(ProfileFacility pf, String profileKey) {

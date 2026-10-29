@@ -16,7 +16,7 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.compiler.release>25</maven.compiler.release>
     <quarkus.platform.version>3.37.3</quarkus.platform.version>
-    <microjainslee.version>1.2.0-SNAPSHOT</microjainslee.version>
+    <microjainslee.version>1.2.2-SNAPSHOT</microjainslee.version>
     <surefire.version>3.5.4</surefire.version>
     <enforcer.plugin.version>3.5.0</enforcer.plugin.version>
     <!-- Log4j2-only policy (owner mandate 2026-08-26): one version family for
@@ -127,6 +127,26 @@
     <dependency>
       <groupId>com.microjainslee</groupId>
       <artifactId>jainslee-api</artifactId>
+      <version>${microjainslee.version}</version>
+    </dependency>
+    <dependency>
+      <!-- 3GPP AuC: MILENAGE (TS 35.206/208), TS 33.102 Annex C SQN, AUTS, quintuplets.
+           Only the pure crypto classes are used; epc-api (and its ra-gtpv2c) must never
+           enter the Elisa JVM (AGENTS: no GTP in Elisa). -->
+      <groupId>et.epc</groupId>
+      <artifactId>epc-crypto</artifactId>
+      <version>0.1.0-SNAPSHOT</version>
+      <exclusions>
+        <exclusion>
+          <groupId>et.epc</groupId>
+          <artifactId>epc-api</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <!-- Multi-tenant RBAC: platform-admin (ADMIN) > tenant-admin (GD) > user (USER) -->
+      <groupId>com.microjainslee</groupId>
+      <artifactId>jainslee-authz</artifactId>
       <version>${microjainslee.version}</version>
     </dependency>
     <dependency>

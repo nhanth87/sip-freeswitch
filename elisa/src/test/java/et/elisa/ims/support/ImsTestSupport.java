@@ -6,6 +6,7 @@ import et.elisa.ims.config.ImsRoleFlags;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 public final class ImsTestSupport {
@@ -59,7 +60,9 @@ public final class ImsTestSupport {
     public static void set(Object target, String field, Object value) throws ReflectiveOperationException {
         Field f = target.getClass().getDeclaredField(field);
         f.setAccessible(true);
-        f.set(target, value);
+        // Blank-able config props are Optional<String> (empty env must not fail boot).
+        f.set(target, f.getType() == Optional.class && !(value instanceof Optional<?>)
+                ? Optional.ofNullable(value) : value);
     }
 
     public static final class CapturingRa implements RaCommandPort {

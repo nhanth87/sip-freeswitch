@@ -29,7 +29,22 @@ public class HssLiteService {
     /** Pending SIP Digest (dashboard Linphone/Zoiper) keyed by callId / IMPI. */
     private final ConcurrentHashMap<String, PendingDigest> digestPending = new ConcurrentHashMap<>();
 
-    public record PendingAuth(String impi, String impu, byte[] xres, long nextSqn) {}
+    /**
+     * resolveIdentity is called ~5× per S-CSCF INVITE (+CDR, xml_curl) and an unknown
+     * identity costs up to 8 SELECTs — dozens of PG round trips per call on the SIP
+     * thread. Short TTL (positive + negative) instead of write-path invalidation:
+     * admin edits show up within one TTL. 0 disables.
+     */
+    @ConfigProperty(name = "sf.ims.hss.identity-cache-ms", defaultValue = "2000")
+    long identityCacheMs = 2000L;
+
+    private record CachedIdentity(Optional<ImsSubscriber> value, long expiresAtNanos) {}
+
+    private static final int IDENTITY_CACHE_MAX = 100_000;
+    private final ConcurrentHashMap<String, CachedIdentity> identityCache = new ConcurrentHashMap<>();
+
+    /** S-CSCF side of an AKA challenge: XRES from the MAA + the nonce sent in the 401. */
+    public record PendingAuth(String impi, String impu, byte[] xres, String nonce) {}
 
     public record PendingDigest(String impi, String impu, String nonce, String ha1) {}
 
@@ -58,6 +73,28 @@ public class HssLiteService {
             return Optional.empty();
         }
         String s = raw.trim();
+        if (identityCacheMs <= 0) {
+            return resolveIdentityUncached(s);
+        }
+        long now = System.nanoTime();
+        CachedIdentity hit = identityCache.get(s);
+        if (hit != null && now - hit.expiresAtNanos() < 0) {
+            return hit.value();
+        }
+        Optional<ImsSubscriber> resolved = resolveIdentityUncached(s);
+        if (identityCache.size() >= IDENTITY_CACHE_MAX) {
+            identityCache.clear();
+        }
+        identityCache.put(s, new CachedIdentity(resolved, now + identityCacheMs * 1_000_000L));
+        return resolved;
+    }
+
+    /** Drop cached identity lookups (subscriber provisioning writes). */
+    public void invalidateIdentityCache() {
+        identityCache.clear();
+    }
+
+    private Optional<ImsSubscriber> resolveIdentityUncached(String s) {
         Optional<ImsSubscriber> byMsisdn = findByMsisdn(s);
         if (byMsisdn.isPresent()) {
             return byMsisdn;
@@ -94,8 +131,15 @@ public class HssLiteService {
         return impi == null ? Optional.empty() : findByImpi(impi);
     }
 
+    /**
+     * Cx MAR → MAA (TS 29.228 §6.3, TS 29.229). One fresh authentication vector per request:
+     * the SQN is reserved atomically in Postgres by TS 33.102 Annex C rules (SEQ + 1, cyclic
+     * IND) before the vector is built, so concurrent MARs never share an SQN and an unused
+     * vector still advances SEQ_HE. With {@code randAutsHex} (synchronisation failure) the
+     * HSS first verifies AUTS and adopts SQN_MS when it is ahead (§6.3.5).
+     */
     @Transactional
-    public Map<Integer, String> handleMar(String impi, String impu, String callId) {
+    public Map<Integer, String> handleMar(String impi, String impu, String callId, String randAutsHex) {
         ImsSubscriber sub = findByImpi(impi).orElse(null);
         if (sub == null || !sub.enabled) {
             return Map.of(CxCodec.RESULT_CODE, "5001");
@@ -108,15 +152,45 @@ public class HssLiteService {
         }
         byte[] ki = material.ki();
         byte[] opc = material.opc();
-        byte[] amf = AkaMd5.parseHex(sub.amf == null ? "8000" : sub.amf);
-        AkaMd5.Vector v = AkaMd5.generate(ki, opc, amf, sub.sqn);
-        pending.put(callId == null ? impi : callId, new PendingAuth(impi, impu, v.xres(), v.nextSqn()));
-        if (callId != null) {
-            pending.put(impi, new PendingAuth(impi, impu, v.xres(), v.nextSqn()));
+        if (randAutsHex != null && !randAutsHex.isBlank()) {
+            byte[] randAuts = AkaMd5.parseHex(randAutsHex);
+            if (randAuts.length != 30) {
+                return Map.of(CxCodec.RESULT_CODE, "5004"); // DIAMETER_INVALID_AVP_VALUE
+            }
+            try {
+                long sqnMs = et.epc.crypto.Auts.recoverSqnMs(ki, opc,
+                        java.util.Arrays.copyOfRange(randAuts, 0, 16),
+                        java.util.Arrays.copyOfRange(randAuts, 16, 30));
+                adoptSqnMs(impi, sqnMs);
+            } catch (IllegalArgumentException badAuts) {
+                return Map.of(CxCodec.RESULT_CODE, "4001"); // DIAMETER_AUTHENTICATION_REJECTED
+            }
         }
+        byte[] amf = AkaMd5.parseHex(sub.amf == null ? "8000" : sub.amf);
+        AkaMd5.Vector v = AkaMd5.generate(ki, opc, amf, reserveSqn(impi));
         String randAutn = AkaMd5.toHex(v.rand()) + AkaMd5.toHex(v.autn());
         return CxCodec.maaAvps(impi, randAutn, AkaMd5.toHex(v.xres()),
                 AkaMd5.toHex(v.ck()), AkaMd5.toHex(v.ik()));
+    }
+
+    /** TS 33.102 Annex C — atomic SQN reservation (two MARs never share a vector SQN). */
+    long reserveSqn(String impi) {
+        Object sqn = ImsSubscriber.getEntityManager()
+                .createNativeQuery("UPDATE ims_subscriber SET sqn = " + et.epc.crypto.Sqn.nextSql("sqn")
+                        + ", updated_at = now() WHERE impi = ?1 RETURNING sqn")
+                .setParameter(1, impi)
+                .getSingleResult();
+        return ((Number) sqn).longValue();
+    }
+
+    /** §6.3.5 — after a verified AUTS the HE never issues an SQN below SQN_MS. */
+    void adoptSqnMs(String impi, long sqnMs) {
+        ImsSubscriber.getEntityManager()
+                .createNativeQuery("UPDATE ims_subscriber SET sqn = GREATEST(sqn, ?1), updated_at = now() "
+                        + "WHERE impi = ?2")
+                .setParameter(1, sqnMs)
+                .setParameter(2, impi)
+                .executeUpdate();
     }
 
     public Optional<PendingAuth> takePending(String key) {
@@ -177,6 +251,7 @@ public class HssLiteService {
         if (incoming == null || incoming.impi == null || incoming.impi.isBlank()) {
             throw new IllegalArgumentException("impi required");
         }
+        invalidateIdentityCache();
         if (kiHex != null && !kiHex.isBlank() && opcHex != null && !opcHex.isBlank()) {
             secrets.putHex(incoming.impi.trim(), kiHex.trim(), opcHex.trim());
         }
@@ -223,29 +298,18 @@ public class HssLiteService {
     }
 
     /**
-     * Cache XRES from Cx MAA (TS 29.229 SIP-Authorization) so S-CSCF can verify
-     * the subsequent REGISTER when HSS is remote or when MAR short-circuits.
+     * S-CSCF: remember XRES from the MAA (TS 29.229 SIP-Authorization) and the nonce of the
+     * 401 it sent, to verify the UE's RFC 3310 digest on the next REGISTER.
      */
-    public void rememberChallenge(String callId, String impi, String impu, byte[] xres, long nextSqn) {
+    public void rememberChallenge(String callId, String impi, String impu, byte[] xres, String nonce) {
         if (xres == null || xres.length == 0 || impi == null || impi.isBlank()) {
             return;
         }
-        PendingAuth p = new PendingAuth(impi, impu, xres, nextSqn);
+        PendingAuth p = new PendingAuth(impi, impu, xres, nonce);
         if (callId != null && !callId.isBlank()) {
             pending.put(callId, p);
         }
         pending.put(impi, p);
-    }
-
-    @Transactional
-    public void commitSqn(String impi, long nextSqn) {
-        ImsSubscriber sub = findByImpi(impi).orElse(null);
-        if (sub == null) {
-            return;
-        }
-        sub.sqn = nextSqn;
-        sub.updatedAt = Instant.now();
-        sub.persist();
     }
 
     @Transactional

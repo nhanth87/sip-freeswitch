@@ -39,6 +39,7 @@ public class AdminNavRenderer {
             new Link("Subscribers", "/admin/subscribers", "·"),
             new Link("Bindings", "/admin/bindings", "·"),
             new Link("Trunks", "/admin/trunks", "·"),
+            new Link("MVNO", "/admin/mvno", "·"),
             new Link("Tenants", "/admin/tenants", "·"),
             new Link("Users", "/admin/users", "·"),
             new Link("ESL", "/admin/esl", "·"),
@@ -48,6 +49,7 @@ public class AdminNavRenderer {
             new Link("ICE/TURN", "/admin/ice", "·")
     };
     private static final Link[] PORTAL = {
+            new Link("MVNO", "/admin/mvno", "·"),
             new Link("Portal", "/admin/portal", "·")
     };
 
@@ -62,7 +64,8 @@ public class AdminNavRenderer {
                 || PortalAuthService.ROLE_ADMIN.equals(role)
                 || PortalAuthService.ROLE_OPS.equals(role);
         boolean admin = apiKeyOperator || PortalAuthService.ROLE_ADMIN.equals(role);
-        boolean tenant = PortalAuthService.ROLE_TENANT.equals(role);
+        boolean tenant = PortalAuthService.ROLE_TENANT.equals(role)
+                || PortalAuthService.ROLE_GD.equals(role) || PortalAuthService.ROLE_USER.equals(role);
 
         vars.put("{{NAV_RAIL}}", railHtml(role, operator, admin, tenant, activePath));
         vars.put("{{AUTH_NAV}}", session == null

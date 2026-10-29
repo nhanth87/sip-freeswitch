@@ -27,6 +27,18 @@ public class SfTenant extends PanacheEntityBase {
     public String trunkTransport;
     @Column(name = "trunk_config", nullable = false)
     public String trunkConfig = "{}";
+    /** INVITE/s cap for originating subscribers; 0 = unlimited (V11). */
+    @Column(name = "max_cps", nullable = false)
+    public int maxCps;
+    /** Live dialogs cap; 0 = unlimited (V11). */
+    @Column(name = "max_concurrent", nullable = false)
+    public int maxConcurrent;
+    @Column(name = "msisdn_prefix")
+    public String msisdnPrefix;
+    @Column(name = "isc_as_uri")
+    public String iscAsUri;
+    @Column(name = "description")
+    public String description;
     @Column(name = "created_at")
     public Instant createdAt;
     @Column(name = "updated_at")
