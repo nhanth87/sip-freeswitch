@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+<!-- IMS AKA REGISTER (TS 33.203 / RFC 3310): SIPp's USIM model (3GPP reference MILENAGE) checks
+     MAC-A in the base64 RAND‖AUTN nonce and answers with the AKAv1-MD5 digest (RES as password).
+     SIPp memcpy()s aka_K / aka_OP / aka_AMF as raw string bytes (not hex) and does not expand
+     [fieldN] inside [authentication], so the lab subscriber "akasipp" is provisioned with
+     Ki = hex("sippakalabkey001"), OPc = AES_Ki(OP) xor OP for OP = "sippakalabop0001", AMF = 3830. -->
+<scenario name="ims_register_aka">
+  <send retrans="500">
+    <![CDATA[
+      REGISTER sip:ims.lab SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      Max-Forwards: 70
+      From: <sip:[field0]@ims.lab>;tag=[pid]reg[call_number]
+      To: <sip:[field0]@ims.lab>
+      Call-ID: [call_id]
+      CSeq: 1 REGISTER
+      Contact: <sip:[field0]@[local_ip]:[local_port]>
+      Authorization: Digest username="[field0]@ims.lab", realm="ims.lab", nonce="", uri="sip:ims.lab", response=""
+      Expires: 600
+      Content-Length: 0
+    ]]>
+  </send>
+
+  <recv response="401" auth="true"/>
+
+  <send retrans="500">
+    <![CDATA[
+      REGISTER sip:ims.lab SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      Max-Forwards: 70
+      From: <sip:[field0]@ims.lab>;tag=[pid]reg[call_number]
+      To: <sip:[field0]@ims.lab>
+      Call-ID: [call_id]
+      CSeq: 2 REGISTER
+      Contact: <sip:[field0]@[local_ip]:[local_port]>
+      [authentication username=akasipp@ims.lab aka_K=sippakalabkey001 aka_OP=sippakalabop0001 aka_AMF=80]
+      Expires: 600
+      Content-Length: 0
+    ]]>
+  </send>
+
+  <recv response="200"/>
+</scenario>

@@ -1,19 +1,49 @@
-# FreeSWITCH lab — dialplan/media only (not 10k CPS plane).
-# Host maps 5062 → container 5060 so sip-servlet can keep :5060.
+# mvn lab deps — Postgres + FreeSWITCH for an Elisa started from Maven on the host
+# (./tools/build-all.sh && ./run.sh). Full containerised lab = root docker-compose.yml.
+#
+#   docker compose -f freeswitch/docker-compose.yml up -d
+#   ./run.sh                        # Elisa :5060 SIP / :8088 admin, JDBC localhost:5432
+#   ./tools/bench-cps.sh 500 30     # INVITE → Elisa → FS MRF sip:1000@127.0.0.1:5062
+#
+# FS runs on the host network so xml_curl (→127.0.0.1:8088), ESL (127.0.0.1:8021) and the
+# SIP trunk (127.0.0.1:5062) need no NAT. Overlays: conf/README.md.
 
 services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: elisa
+      POSTGRES_USER: elisa
+      POSTGRES_PASSWORD: elisa
+    # Lab DB: no fsync wait per commit (Elisa CDR/CMP/session writes); never for prod.
+    command: ["postgres", "-c", "max_connections=200", "-c", "synchronous_commit=off"]
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: [mvn-postgres:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U elisa -d elisa"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
   freeswitch:
     image: safarov/freeswitch:latest
-    container_name: digicom-freeswitch-lab
-    restart: unless-stopped
-    ports:
-      - "5062:5060/udp"
-      - "5062:5060/tcp"
-      - "8021:8021"
-      - "16384-16484:16384-16484/udp"
+    network_mode: host
     volumes:
-      - freeswitch-data:/etc/freeswitch
-    # Lab only — lock down before any shared network exposure.
+      - ./conf/autoload_configs/switch.conf.xml:/etc/freeswitch/autoload_configs/switch.conf.xml:ro
+      - ./conf/autoload_configs/modules.conf.xml:/etc/freeswitch/autoload_configs/modules.conf.xml:ro
+      - ./conf/autoload_configs/acl.conf.xml:/etc/freeswitch/autoload_configs/acl.conf.xml:ro
+      - ./conf/autoload_configs/event_socket.mvn.conf.xml:/etc/freeswitch/autoload_configs/event_socket.conf.xml:ro
+      - ./conf/autoload_configs/xml_curl.mvn.conf.xml:/etc/freeswitch/autoload_configs/xml_curl.conf.xml:ro
+      - ./conf/sip_profiles/external.mvn.xml:/etc/freeswitch/sip_profiles/external.xml:ro
+      - ./conf/sip_profiles/disabled.xml:/etc/freeswitch/sip_profiles/internal.xml:ro
+      - ./conf/sip_profiles/disabled.xml:/etc/freeswitch/sip_profiles/internal-ipv6.xml:ro
+      - ./conf/sip_profiles/disabled.xml:/etc/freeswitch/sip_profiles/external-ipv6.xml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "fs_cli -x status 2>/dev/null | grep -q UP"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
 volumes:
-  freeswitch-data:
+  mvn-postgres: {}

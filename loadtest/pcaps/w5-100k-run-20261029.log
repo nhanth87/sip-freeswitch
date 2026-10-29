@@ -1,0 +1,10 @@
+start 2026-10-29T07:16:14+07:00 rate=120 loadavg=4.09 8.98 8.30
+entities-before: core.SimpleSbbLocalObject=6 
+fs-before: 0 total.
+sipp rc=0 end 2026-10-29T07:30:17+07:00
+fs-after: 0 total.
+entities-after+5s: ra.sipservlet.collab.DialogRegistry$ServerTransaction=10149 core.SimpleSbbLocalObject=7 ra.sipservlet.collab.ClientTransactions$Tx=2 ra.sipservlet.collab.DialogRegistry$Dialog=1 
+tcpdump: listening on lo, link-type EN10MB (Ethernet), snapshot length 256 bytes
+entities-after+40s: core.SimpleSbbLocalObject=7 ra.sipservlet.collab.DialogRegistry$Dialog=1 ra.sipservlet.collab.ClientTransactions$Tx=1 
+fs-status: 0 session(s) - peak 3286, last 5min 114  0 session(s) per Sec out of max 5000, peak 396, last 5min 123  min idle cpu 0.00/41.40 
+done

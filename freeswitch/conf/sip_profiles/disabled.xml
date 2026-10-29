@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mounted over vanilla internal.xml / *-ipv6.xml: Elisa trunks only on the external
+     profile. Vanilla internal also binds :5060 and fails "Error Creating SIP UA" against
+     external (compose) or steals Elisa's :5060 (host network, mvn lab). -->
+<include/>

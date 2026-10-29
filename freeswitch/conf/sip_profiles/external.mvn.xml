@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- mvn lab (freeswitch/docker-compose.yml, host network): Elisa runs from Maven on the
+     host and owns 127.0.0.1:5060, so FS listens on 127.0.0.1:5062 (= sip.trunk.freeswitch-uri
+     default). No STUN: loopback lab, and a failed STUN lookup stalls profile start. -->
+<include>
+  <profile name="external">
+    <settings>
+      <param name="sip-ip" value="127.0.0.1"/>
+      <param name="sip-port" value="5062"/>
+      <param name="rtp-ip" value="127.0.0.1"/>
+      <param name="ext-rtp-ip" value="127.0.0.1"/>
+      <param name="ext-sip-ip" value="127.0.0.1"/>
+      <param name="context" value="public"/>
+      <param name="inbound-bypass-media" value="false"/>
+      <param name="inbound-proxy-media" value="false"/>
+      <param name="inbound-late-negotiation" value="false"/>
+      <param name="apply-candidate-acl" value="wan.auto"/>
+    </settings>
+  </profile>
+</include>

@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+<!-- INVITE from a provisioned subscriber (field0) to -s <service>; accepts any final
+     response class so one scenario drives 200 (MRF), 403 (tenant disabled) and 480
+     (known callee not registered). The expected code is asserted from the pcap. -->
+<scenario name="uac_invite_from">
+  <send retrans="500">
+    <![CDATA[
+      INVITE sip:[service]@ims.lab SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: <sip:[field0]@ims.lab>;tag=[pid]inv[call_number]
+      To: <sip:[service]@ims.lab>
+      Call-ID: [call_id]
+      CSeq: 1 INVITE
+      Contact: <sip:[field0]@[local_ip]:[local_port]>
+      Max-Forwards: 70
+      Content-Type: application/sdp
+      Content-Length: [len]
+
+      v=0
+      o=user1 53655765 2353687637 IN IP[local_ip_type] [local_ip]
+      s=-
+      c=IN IP[media_ip_type] [media_ip]
+      t=0 0
+      m=audio [media_port] RTP/AVP 0
+      a=rtpmap:0 PCMU/8000
+    ]]>
+  </send>
+
+  <recv response="100" optional="true"/>
+  <recv response="180" optional="true"/>
+  <recv response="183" optional="true"/>
+  <recv response="200" optional="true" next="answered"/>
+  <recv response="403" optional="true" next="ackfail"/>
+  <recv response="480" next="ackfail"/>
+
+  <label id="answered"/>
+  <send>
+    <![CDATA[
+      ACK sip:[service]@ims.lab SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: <sip:[field0]@ims.lab>;tag=[pid]inv[call_number]
+      To: <sip:[service]@ims.lab>[peer_tag_param]
+      Call-ID: [call_id]
+      CSeq: 1 ACK
+      Max-Forwards: 70
+      Content-Length: 0
+    ]]>
+  </send>
+  <pause milliseconds="200"/>
+  <send retrans="500">
+    <![CDATA[
+      BYE sip:[service]@ims.lab SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: <sip:[field0]@ims.lab>;tag=[pid]inv[call_number]
+      To: <sip:[service]@ims.lab>[peer_tag_param]
+      Call-ID: [call_id]
+      CSeq: 2 BYE
+      Max-Forwards: 70
+      Content-Length: 0
+    ]]>
+  </send>
+  <recv response="200" next="done"/>
+
+  <label id="ackfail"/>
+  <send>
+    <![CDATA[
+      ACK sip:[service]@ims.lab SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: <sip:[field0]@ims.lab>;tag=[pid]inv[call_number]
+      To: <sip:[service]@ims.lab>[peer_tag_param]
+      Call-ID: [call_id]
+      CSeq: 1 ACK
+      Max-Forwards: 70
+      Content-Length: 0
+    ]]>
+  </send>
+
+  <label id="done"/>
+</scenario>
