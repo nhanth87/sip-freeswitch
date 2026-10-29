@@ -28,4 +28,14 @@ public interface PolicyRepository {
     default List<String> ipCanSessionIds(String imsi, String apn) {
         return List.of();
     }
+
+    /** Admin write: create or replace the PCC rule {@code (apn, rule.name)}. */
+    default void upsertRule(String apn, PccRule rule) {
+        throw new UnsupportedOperationException("read-only policy repository");
+    }
+
+    /** IMSIs holding an IP-CAN session on {@code apn} — RAR fan-out after a rule change. */
+    default List<String> imsisWithSessions(String apn) {
+        return List.of();
+    }
 }

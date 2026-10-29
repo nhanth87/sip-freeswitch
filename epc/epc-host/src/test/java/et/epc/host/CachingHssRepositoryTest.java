@@ -72,8 +72,8 @@ class CachingHssRepositoryTest {
         CachingHssRepository cached = new CachingHssRepository(delegate, cache());
         assertTrue(cached.find(IMSI).isPresent());
 
-        assertEquals(1L, cached.reserveSqn(IMSI));
-        assertEquals(1L, cached.find(IMSI).orElseThrow().sqn());
+        assertEquals(et.epc.crypto.Sqn.next(0), cached.reserveSqn(IMSI));
+        assertEquals(et.epc.crypto.Sqn.next(0), cached.find(IMSI).orElseThrow().sqn());
     }
 
     @Test

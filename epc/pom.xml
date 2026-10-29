@@ -25,7 +25,7 @@
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.compiler.release>25</maven.compiler.release>
-    <microjainslee.version>1.2.0-SNAPSHOT</microjainslee.version>
+    <microjainslee.version>1.2.2-SNAPSHOT</microjainslee.version>
     <junit.version>5.11.4</junit.version>
     <log4j.version>2.26.1</log4j.version>
     <surefire.version>3.5.4</surefire.version>
@@ -168,6 +168,11 @@
       </dependency>
       <!-- Log4j2-only policy bridges: JUL + slf4j route INTO Log4j2;
            jboss-logmanager stays a silent Quarkus structural jar (epc-host). -->
+      <dependency>
+        <groupId>org.apache.logging.log4j</groupId>
+        <artifactId>log4j-1.2-api</artifactId>
+        <version>${log4j.version}</version>
+      </dependency>
       <dependency>
         <groupId>org.apache.logging.log4j</groupId>
         <artifactId>log4j-jul</artifactId>

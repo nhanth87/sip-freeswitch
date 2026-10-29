@@ -11,7 +11,9 @@ class JdbcHssRepositoryTest {
 
     @Test
     void reserveSqnSqlIsAtomicUpdateReturning() {
-        assertTrue(JdbcHssRepository.RESERVE_SQN.contains("sqn = sqn + 1"));
+        assertTrue(JdbcHssRepository.RESERVE_SQN.contains("RETURNING sqn"));
+        assertTrue(JdbcHssRepository.RESERVE_SQN.contains(et.epc.crypto.Sqn.nextSql("sqn")),
+                "Annex C SEQ/IND increment, not sqn + 1");
         assertTrue(JdbcHssRepository.RESERVE_SQN.contains("RETURNING sqn"));
         // A single UPDATE…RETURNING statement — never a read (SELECT sqn) then a separate write.
         assertFalse(JdbcHssRepository.RESERVE_SQN.contains("SELECT"));

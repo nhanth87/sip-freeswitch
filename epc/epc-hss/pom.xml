@@ -28,6 +28,24 @@
       <artifactId>ra-diameter</artifactId>
     </dependency>
     <dependency>
+      <!-- HLR/AuC face: MAP SendAuthenticationInfo over SS7 (TS 29.002 §8.5.2) -->
+      <groupId>com.microjainslee</groupId>
+      <artifactId>ra-jss7</artifactId>
+      <version>${microjainslee.version}</version>
+      <exclusions>
+        <!-- Log4j2-only policy: jSS7 stream/sctp-api pull log4j 1.2.8 -->
+        <exclusion>
+          <groupId>log4j</groupId>
+          <artifactId>log4j</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <!-- jSS7's org.apache.log4j calls routed into Log4j2 -->
+      <groupId>org.apache.logging.log4j</groupId>
+      <artifactId>log4j-1.2-api</artifactId>
+    </dependency>
+    <dependency>
       <groupId>com.microjainslee</groupId>
       <artifactId>jainslee-apt</artifactId>
       <optional>true</optional>

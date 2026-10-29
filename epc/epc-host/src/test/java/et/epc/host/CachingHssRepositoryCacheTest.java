@@ -160,9 +160,9 @@ class CachingHssRepositoryCacheTest {
         assertEquals(0L, cached.find(IMSI).orElseThrow().sqn());
 
         // Reservation never reads from cache.
-        assertEquals(43L, cached.reserveSqn(IMSI));
+        assertEquals(et.epc.crypto.Sqn.next(42), cached.reserveSqn(IMSI));
         assertEquals(1, delegate.reserveSqns);
-        assertEquals(44L, cached.reserveSqn(IMSI));
+        assertEquals(et.epc.crypto.Sqn.next(et.epc.crypto.Sqn.next(42)), cached.reserveSqn(IMSI));
         assertEquals(2, delegate.reserveSqns);
     }
 

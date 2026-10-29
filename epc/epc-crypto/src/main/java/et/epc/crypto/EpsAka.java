@@ -29,20 +29,7 @@ public final class EpsAka {
 
     /** AUTS resync: recover SQN_MS from AUTS = (SQN_MS ⊕ AK_S) || MAC-S. */
     public static long sqnFromAuts(byte[] ki, byte[] opc, byte[] rand, byte[] auts) {
-        if (auts == null || auts.length != 14) {
-            throw new IllegalArgumentException("AUTS must be 14 octets");
-        }
-        byte[] dummySqn = new byte[6];
-        byte[] amfStar = new byte[] {0x00, 0x00};
-        Milenage.Result m = Milenage.compute(ki, opc, rand, dummySqn, amfStar);
-        // recompute with recovered SQN after AK_S
-        byte[] sqnMs = Bytes.xor(Bytes.copy(auts, 0, 6), padAk(m.aks()));
-        Milenage.Result check = Milenage.compute(ki, opc, rand, sqnMs, amfStar);
-        byte[] macS = Bytes.copy(auts, 6, 8);
-        if (!java.security.MessageDigest.isEqual(macS, check.macS())) {
-            throw new IllegalArgumentException("AUTS MAC-S mismatch");
-        }
-        return Bytes.bytesToSqn(sqnMs);
+        return Auts.recoverSqnMs(ki, opc, rand, auts);
     }
 
     private static byte[] padAk(byte[] ak6) {

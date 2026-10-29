@@ -83,6 +83,21 @@ public final class PcrfService {
      * (EpcConfigResource owner) writes {@code epc_pcc_rule} first, then invokes
      * this and pushes RAR via {@code PcrfSbb.pushRarOnPolicyChange}.
      */
+    /**
+     * Admin rule write (TS 29.212 §4.5.2 PCRF-initiated provisioning): persist the PCC rule
+     * for {@code apn} and return the IMSIs with IP-CAN sessions on that APN — the caller
+     * re-decides and pushes RAR for each via {@code PcrfSbb.pushRarOnPolicyChange}.
+     */
+    public List<String> updateRule(String apn, PccRule rule) {
+        Objects.requireNonNull(apn);
+        Objects.requireNonNull(rule);
+        if (repo == null) {
+            throw new IllegalStateException("no durable policy repository wired");
+        }
+        repo.upsertRule(apn, rule);
+        return repo.imsisWithSessions(apn);
+    }
+
     public PccDecision policyChanged(String imsi, String apn) {
         Objects.requireNonNull(imsi);
         Objects.requireNonNull(apn);

@@ -68,6 +68,9 @@ class HssServiceResyncTest {
                 .put(S6aAvp.RE_SYNCHRONIZATION_INFO, auts).build());
         assertEquals(S6aAvp.SUCCESS, u32(resync.avp(S6aAvp.RESULT_CODE)));
         assertNotNull(resync.avp(S6aAvp.KASME));
-        assertEquals(6L, repo.find(IMSI).orElseThrow().sqn());
+        // TS 33.102 §6.3.5: HE adopts SQN_MS only when it is ahead; here the HE (first AIR)
+        // already is, so the next vector continues from the HE value (Annex C SEQ/IND).
+        long expected = et.epc.crypto.Sqn.next(Math.max(et.epc.crypto.Sqn.next(0), 5L));
+        assertEquals(expected, repo.find(IMSI).orElseThrow().sqn());
     }
 }

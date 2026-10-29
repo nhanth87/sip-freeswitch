@@ -53,7 +53,7 @@ class HssServiceTest {
         assertEquals(16, aia.avp(S6aAvp.RAND).length);
         assertEquals(16, aia.avp(S6aAvp.AUTN).length);
         assertEquals(32, aia.avp(S6aAvp.KASME).length);
-        assertEquals(1L, repo.find(IMSI).orElseThrow().sqn());
+        assertEquals(et.epc.crypto.Sqn.next(0), repo.find(IMSI).orElseThrow().sqn());
     }
 
     @Test
@@ -63,7 +63,7 @@ class HssServiceTest {
         assertNotEquals(
                 Bytes.toHex(first.avp(S6aAvp.AUTN)),
                 Bytes.toHex(second.avp(S6aAvp.AUTN)));
-        assertEquals(2L, repo.find(IMSI).orElseThrow().sqn());
+        assertEquals(et.epc.crypto.Sqn.next(et.epc.crypto.Sqn.next(0)), repo.find(IMSI).orElseThrow().sqn());
     }
 
     @Test

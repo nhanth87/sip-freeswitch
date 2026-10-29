@@ -287,6 +287,25 @@ public abstract class PcrfSbb extends CmpBackedSbb implements SleeEventHandler {
      *
      * @return the number of Gx sessions a RAR fan-out was emitted for
      */
+    /**
+     * Bind {@code diameter-ra} for an instance the host built outside the container
+     * (the in-process PCRF handler): {@code @InjectRa} only fires for container-made SBBs.
+     */
+    public void bindDiameter(RaCommandPort port) {
+        if (port != null) {
+            this.diameterRa = port;
+        }
+    }
+
+    /** RAR fan-out for every IMSI holding a session on {@code apn} after a rule write. */
+    public int pushRarOnRuleChange(String adminSessionId, String apn, List<String> imsis) {
+        int pushed = 0;
+        for (String imsi : imsis) {
+            pushed += pushRarOnPolicyChange(adminSessionId, imsi, apn);
+        }
+        return pushed;
+    }
+
     public int pushRarOnPolicyChange(String adminSessionId, String imsi, String apn) {
         Objects.requireNonNull(imsi);
         Objects.requireNonNull(apn);

@@ -25,8 +25,8 @@ class SubscriberRecordTest {
     @Test
     void reserveSqnIncrementsFromSeed() {
         SubscriberRecord r = rec(10);
-        assertEquals(11, r.reserveSqn());
-        assertEquals(12, r.reserveSqn());
+        assertEquals(et.epc.crypto.Sqn.next(10), r.reserveSqn());
+        assertEquals(et.epc.crypto.Sqn.next(et.epc.crypto.Sqn.next(10)), r.reserveSqn());
     }
 
     @Test

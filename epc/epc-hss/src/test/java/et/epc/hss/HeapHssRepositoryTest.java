@@ -55,8 +55,8 @@ class HeapHssRepositoryTest {
     @Test
     void reserveSqnIncrements() {
         repo.save(new SubscriberRecord(profile(), 0));
-        assertEquals(1, repo.reserveSqn(IMSI));
-        assertEquals(2, repo.reserveSqn(IMSI));
+        assertEquals(et.epc.crypto.Sqn.of(1, 1), repo.reserveSqn(IMSI));
+        assertEquals(et.epc.crypto.Sqn.of(2, 2), repo.reserveSqn(IMSI));
     }
 
     @Test
@@ -149,7 +149,11 @@ class HeapHssRepositoryTest {
             t.join();
         }
         assertEquals(threads * perThread, seen.size(), "no duplicate SQN may be handed out");
-        assertEquals(threads * perThread, repo.find(IMSI).orElseThrow().sqn());
+        long expected = 0;
+        for (int i = 0; i < threads * perThread; i++) {
+            expected = et.epc.crypto.Sqn.next(expected);
+        }
+        assertEquals(expected, repo.find(IMSI).orElseThrow().sqn());
     }
 
     /** Relational APN rows replace the legacy CSV-era profile on read (mirror of JDBC path). */

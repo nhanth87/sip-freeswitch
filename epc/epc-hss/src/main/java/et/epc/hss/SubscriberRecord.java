@@ -43,9 +43,9 @@ public final class SubscriberRecord {
         return sqn.get();
     }
 
-    /** Atomically reserve next SQN used in AUTN. */
+    /** Atomically reserve the next SQN used in AUTN (TS 33.102 Annex C: SEQ + 1, cyclic IND). */
     public long reserveSqn() {
-        return sqn.incrementAndGet();
+        return sqn.updateAndGet(et.epc.crypto.Sqn::next);
     }
 
     public void forceSqn(long next) {

@@ -47,6 +47,31 @@ public final class JdbcPolicyRepository implements PolicyRepository {
              ORDER BY updated_at DESC
             """;
 
+    static final String SQL_UPSERT_RULE = """
+            INSERT INTO epc_pcc_rule (
+              name, apn, qci, arp_priority, preempt_cap, preempt_vuln,
+              mbr_ul_bps, mbr_dl_bps, gbr_ul_bps, gbr_dl_bps,
+              rating_group, service_id, flow_desc_json, gating_open)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT (apn, name) DO UPDATE SET
+              qci = EXCLUDED.qci,
+              arp_priority = EXCLUDED.arp_priority,
+              preempt_cap = EXCLUDED.preempt_cap,
+              preempt_vuln = EXCLUDED.preempt_vuln,
+              mbr_ul_bps = EXCLUDED.mbr_ul_bps,
+              mbr_dl_bps = EXCLUDED.mbr_dl_bps,
+              gbr_ul_bps = EXCLUDED.gbr_ul_bps,
+              gbr_dl_bps = EXCLUDED.gbr_dl_bps,
+              rating_group = EXCLUDED.rating_group,
+              service_id = EXCLUDED.service_id,
+              flow_desc_json = EXCLUDED.flow_desc_json,
+              gating_open = EXCLUDED.gating_open
+            """;
+
+    static final String SQL_IMSIS_ON_APN = """
+            SELECT DISTINCT imsi FROM epc_ipcan_session WHERE apn = ?
+            """;
+
     private final DataSource ds;
 
     public JdbcPolicyRepository(DataSource ds) {
@@ -109,6 +134,54 @@ public final class JdbcPolicyRepository implements PolicyRepository {
             return List.copyOf(out);
         } catch (SQLException e) {
             throw new IllegalStateException("pcrf ip-can session lookup", e);
+        }
+    }
+
+    @Override
+    public void upsertRule(String apn, PccRule r) {
+        Objects.requireNonNull(apn);
+        Objects.requireNonNull(r);
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement(SQL_UPSERT_RULE)) {
+            ps.setString(1, r.name());
+            ps.setString(2, apn);
+            ps.setInt(3, r.qci());
+            ps.setInt(4, r.arpPriority());
+            ps.setBoolean(5, r.preemptionCapable());
+            ps.setBoolean(6, r.preemptionVulnerable());
+            ps.setLong(7, r.mbrUlBps());
+            ps.setLong(8, r.mbrDlBps());
+            ps.setLong(9, r.gbrUlBps());
+            ps.setLong(10, r.gbrDlBps());
+            if (r.ratingGroup() == null) {
+                ps.setNull(11, java.sql.Types.INTEGER);
+            } else {
+                ps.setInt(11, r.ratingGroup());
+            }
+            ps.setString(12, r.serviceId());
+            ps.setString(13, r.flowDescription() == null ? "[]" : r.flowDescription());
+            ps.setBoolean(14, r.gatingOpen());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("pcrf rule upsert", e);
+        }
+    }
+
+    @Override
+    public List<String> imsisWithSessions(String apn) {
+        Objects.requireNonNull(apn);
+        List<String> out = new ArrayList<>();
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement(SQL_IMSIS_ON_APN)) {
+            ps.setString(1, apn);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.add(rs.getString("imsi"));
+                }
+            }
+            return List.copyOf(out);
+        } catch (SQLException e) {
+            throw new IllegalStateException("pcrf imsi-on-apn lookup", e);
         }
     }
 

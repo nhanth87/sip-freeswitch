@@ -24,10 +24,9 @@ import javax.sql.DataSource;
  */
 public final class JdbcHssRepository implements HssRepository {
 
-    static final String RESERVE_SQN = """
-            UPDATE epc_subscriber SET sqn = sqn + 1, updated_at = now()
-             WHERE imsi = ? RETURNING sqn
-            """;
+    /** TS 33.102 Annex C: fresh SQN per vector (SEQ + 1, cyclic IND), atomic in Postgres. */
+    static final String RESERVE_SQN = "UPDATE epc_subscriber SET sqn = " + et.epc.crypto.Sqn.nextSql("sqn")
+            + ", updated_at = now() WHERE imsi = ? RETURNING sqn";
 
     static final String SELECT_FIELDS = """
             imsi, msisdn, enabled, mcc, mnc, default_apn, apns_csv,

@@ -108,6 +108,8 @@ public final class EpcBootstrap {
     private PccCache pcc;
     private PcefService pcefService;
     private PcrfService pcrfService;
+    private JdbcPolicyRepository policyRepo;
+    private PcrfSbb pcrfSbb;
     /** Gx wire client (Phase C) — null unless EPC_PCRF_WIRE_MODE=wire. */
     private volatile WirePcrfClient gxWireClient;
     /** MME peer-trust drawbridge (Open5GS #4337); disabled keeps pre-change behaviour. */
@@ -264,6 +266,7 @@ public final class EpcBootstrap {
                     ? pcrfService
                     : PcrfService.withHeapPolicy();
             PcrfSbb.$Concrete pcrfSbb = new PcrfSbb.$Concrete(service);
+            this.pcrfSbb = pcrfSbb;
             container.registerSbbType(DiameterGatewaySbb.class,
                     () -> new DiameterGatewaySbb.$Concrete(hssService, cxService, pcrfSbb::handle)
                             .withAnswerSink(this::routeDiameterAnswer));
@@ -348,15 +351,18 @@ public final class EpcBootstrap {
             DurableSink sink = new JdbcDurableSink(dataSource);
             sessions = new DualWriteSessionStore(hot, sink, durableExecutor);
             wired.add("sessions-durable");
+            policyRepo = new JdbcPolicyRepository(dataSource);
             if (pccCache != null) {
-                pcc = new IspnPccCache(pccCache, new JdbcPolicyRepository(dataSource));
+                pcc = new IspnPccCache(pccCache, policyRepo);
                 wired.add("pcc-postgres");
             }
         } else {
             sessions = new HeapSessionStore();
         }
+        // The durable repo is what writes epc_ipcan_session (persistDecision) and lists the
+        // RAR targets; without it every policy push silently found zero sessions.
         pcrfService = pcc != null
-                ? new PcrfService(pcc)
+                ? new PcrfService(pcc, policyRepo)
                 : PcrfService.withHeapPolicy();
         wired.add("pcrf");
 
@@ -590,6 +596,27 @@ public final class EpcBootstrap {
 
     public PccCache pcc() {
         return pcc;
+    }
+
+    /**
+     * Admin PCC rule write → Postgres → cache invalidation → Gx RAR to every live
+     * session on the APN (TS 29.212 §4.5.2).
+     *
+     * @return number of Gx sessions a RAR was pushed to
+     */
+    public int updatePccRule(String apn, et.epc.pcrf.PccRule rule) {
+        if (pcrfService == null) {
+            throw new IllegalStateException("PCRF not wired");
+        }
+        java.util.List<String> imsis = pcrfService.updateRule(apn, rule);
+        PcrfSbb sbb = this.pcrfSbb;
+        if (sbb == null) {
+            return 0;
+        }
+        if (slee != null) {
+            sbb.bindDiameter(slee.getRaCommandPort(DIAMETER_RA));
+        }
+        return sbb.pushRarOnRuleChange("admin-" + System.currentTimeMillis(), apn, imsis);
     }
 
     public PcrfService pcrfService() {
