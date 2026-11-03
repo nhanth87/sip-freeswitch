@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- VoLTE demo: micro-jainslee RAs log through Log4j2; without a config their WARN/ERROR
+     are invisible in `docker logs`. Console, INFO; RA connection state at DEBUG. -->
+<Configuration status="WARN">
+  <Appenders>
+    <Console name="out" target="SYSTEM_OUT">
+      <PatternLayout pattern="%d{HH:mm:ss.SSS} %-5level [%t] %c{1} %msg%n"/>
+    </Console>
+  </Appenders>
+  <Loggers>
+    <Logger name="com.microjainslee.ra.diameter" level="DEBUG"/>
+    <Logger name="com.microjainslee.ra.gtpv2c" level="DEBUG"/>
+    <Logger name="com.microjainslee.ra.pfcp" level="DEBUG"/>
+    <Logger name="com.microjainslee.core.removal.SessionLifecycleLogger" level="WARN"/>
+    <Root level="INFO">
+      <AppenderRef ref="out"/>
+    </Root>
+  </Loggers>
+</Configuration>

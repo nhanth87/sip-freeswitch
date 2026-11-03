@@ -8,6 +8,13 @@ import et.epc.api.link.PeerLink;
 public final class S6aPeerWatch {
     private volatile PeerLink link = PeerLink.down("s6a", false, "no-cea");
     private volatile boolean listening;
+    /** Live Diameter port: the peer reaches CER/CEA after bind and the stack answers DWR itself. */
+    private volatile DiameterPeerPort source;
+
+    /** Report the bound Diameter port's live state from now on (not a bind-time snapshot). */
+    public void track(DiameterPeerPort diameter) {
+        this.source = diameter;
+    }
 
     public void bound() {
         listening = true;
@@ -25,7 +32,8 @@ public final class S6aPeerWatch {
     }
 
     public PeerLink snapshot() {
-        return link;
+        DiameterPeerPort d = source;
+        return d != null ? d.snapshot("s6a") : link;
     }
 
     public void refreshFrom(DiameterPeerPort diameter) {

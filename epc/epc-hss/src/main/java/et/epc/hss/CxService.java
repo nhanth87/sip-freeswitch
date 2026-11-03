@@ -38,10 +38,16 @@ public final class CxService {
 
     private static final SecureRandom RNG = new SecureRandom();
 
-    private static final ScscfPicker DEFAULT_PICKER = (rec, impu, capabilities) ->
-            (rec.imsScscfUri() != null && !rec.imsScscfUri().isBlank())
-                    ? rec.imsScscfUri()
-                    : DEFAULT_SCSCF;
+    private static final ScscfPicker DEFAULT_PICKER = servingOr(DEFAULT_SCSCF);
+
+    /** The S-CSCF already serving the subscriber, else {@code defaultUri} (single-pool deployment). */
+    public static ScscfPicker servingOr(String defaultUri) {
+        String fallback = defaultUri == null || defaultUri.isBlank() ? DEFAULT_SCSCF : defaultUri.trim();
+        return (rec, impu, capabilities) ->
+                (rec.imsScscfUri() != null && !rec.imsScscfUri().isBlank())
+                        ? rec.imsScscfUri()
+                        : fallback;
+    }
 
     private final HssRepository repo;
     private final SecretStore secrets;
@@ -158,10 +164,9 @@ public final class CxService {
                 DiameterAvp.octets(CxAvp.INTEGRITY_KEY, DiameterAvp.VENDOR_3GPP, m.ik(), true))));
         structured.add(DiameterAvp.utf8(CxAvp.PUBLIC_IDENTITY, DiameterAvp.VENDOR_3GPP,
                 publicIdentity, true));
-        if (rec.imsScscfUri() != null && !rec.imsScscfUri().isBlank()) {
-            structured.add(DiameterAvp.utf8(CxAvp.SERVER_NAME, DiameterAvp.VENDOR_3GPP,
-                    rec.imsScscfUri(), true));
-        }
+        // TS 29.229 §6.1.8: an MAA has no Server-Name — sent with the M-bit, a conforming
+        // peer must reject the whole answer (Corsac did: every re-registration then failed).
+        structured.add(DiameterAvp.u32(CxAvp.SIP_NUMBER_AUTH_ITEMS, DiameterAvp.VENDOR_3GPP, 1L, true));
         structured.add(DiameterAvp.enum32(CxAvp.AUTH_SESSION_STATE, 1L));
         return CxResult.ok(avps, structured);
     }
@@ -377,6 +382,57 @@ public final class CxService {
 
         public static CxResult error(long resultCode) {
             return of(resultCode, Map.of());
+        }
+
+        /**
+         * The answer as it goes on the wire (TS 29.229): 3GPP outcomes — UAA registration
+         * states, LIA UNREGISTERED_SERVICE, Cx errors 5001/5002 — as Experimental-Result
+         * (Vendor-Id 10415) with no Result-Code; base outcomes as Result-Code. The payload
+         * leaves as typed AVPs only: the flat map is the in-process contract, and putting it
+         * on the wire sent every value (Result-Code included) as an untyped UTF-8 AVP.
+         */
+        public com.microjainslee.ra.diameter.command.SendDiameterAnswer toAnswer(
+                String sessionId, int commandCode, long hopByHop, long endToEnd) {
+            List<DiameterAvp> wire = new ArrayList<>(structuredAvps);
+            java.util.Set<Integer> present = new java.util.HashSet<>();
+            for (DiameterAvp a : structuredAvps) {
+                present.add(a.code());
+            }
+            String userName = avps.get(CxAvp.USER_NAME);
+            if (userName != null && !present.contains(CxAvp.USER_NAME)) {
+                wire.add(DiameterAvp.utf8(CxAvp.USER_NAME, userName));
+            }
+            for (int code : new int[] {CxAvp.PUBLIC_IDENTITY, CxAvp.SERVER_NAME}) {
+                String v = avps.get(code);
+                if (v != null && !present.contains(code)) {
+                    wire.add(DiameterAvp.utf8(code, CxAvp.VENDOR_ID_3GPP, v, true));
+                }
+            }
+            String userData = avps.get(CxAvp.USER_DATA);
+            if (userData != null && !present.contains(CxAvp.USER_DATA)) {
+                wire.add(DiameterAvp.octets(CxAvp.USER_DATA, CxAvp.VENDOR_ID_3GPP,
+                        userData.getBytes(java.nio.charset.StandardCharsets.UTF_8), true));
+            }
+            long rc = resultCode;
+            if (experimental(commandCode, resultCode)) {
+                wire.add(DiameterAvp.grouped(CxAvp.EXPERIMENTAL_RESULT, 0L, true, List.of(
+                        DiameterAvp.u32(CxAvp.VENDOR_ID, 0L, CxAvp.VENDOR_ID_3GPP, true),
+                        DiameterAvp.u32(CxAvp.EXPERIMENTAL_RESULT_CODE, 0L, resultCode, true))));
+                rc = 0L; // no Result-Code AVP
+            }
+            return new com.microjainslee.ra.diameter.command.SendDiameterAnswer(sessionId,
+                    CxAvp.APPLICATION_ID, commandCode, rc, hopByHop, endToEnd, Map.of(), wire);
+        }
+
+        /** Outcomes TS 29.229 reports as Experimental-Result for this command. */
+        static boolean experimental(int commandCode, long resultCode) {
+            if (resultCode == CxAvp.ERROR_USER_UNKNOWN || resultCode == CxAvp.ERROR_IDENTITIES_DONT_MATCH) {
+                return true;
+            }
+            if (commandCode == 300) { // UAA: FIRST / SUBSEQUENT_REGISTRATION, UNREGISTERED_SERVICE
+                return resultCode >= CxAvp.FIRST_REGISTRATION && resultCode <= CxAvp.UNREGISTERED_SERVICE;
+            }
+            return commandCode == 302 && resultCode == CxAvp.UNREGISTERED_SERVICE;
         }
     }
 

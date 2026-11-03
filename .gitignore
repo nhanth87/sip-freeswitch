@@ -18,3 +18,6 @@ dist/**/*.hprof
 *.wasm.bak
 .quarkus/
 epc/**/.quarkus/
+*.log.[0-9]*
+# lab-only console passwords (docs/agents/volte-e2e.md)
+deploy/volte/demo-accounts.env

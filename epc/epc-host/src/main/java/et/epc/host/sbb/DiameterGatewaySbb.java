@@ -159,19 +159,8 @@ public abstract class DiameterGatewaySbb extends CmpBackedSbb implements SleeEve
             case 303 -> cx.mar(impiOrBlank(impi), impuOrBlank(impu));
             default -> CxResult.error(CxAvp.UNABLE_TO_COMPLY);
         };
-        long rc = result.resultCode();
-        boolean success = rc == CxAvp.SUCCESS
-                || rc == CxAvp.FIRST_REGISTRATION
-                || rc == CxAvp.SUBSEQUENT_REGISTRATION;
-        if (success) {
-            // UAR returns experimental result codes (2002/2003) plus payload; MAA/SAA
-            // carry grouped AVPs (SIP-Auth-Data-Item / Charging-Information).
-            return new SendDiameterAnswer(req.sessionId(), CX, req.commandCode(), rc,
-                    req.hopByHopId(), req.endToEndId(), result.avps(),
-                    result.structuredAvps());
-        }
-        return SendDiameterAnswer.error(req.sessionId(), CX, req.commandCode(),
-                req.hopByHopId(), req.endToEndId(), rc);
+        // TS 29.229 wire shape: Experimental-Result for UAA states / Cx errors, typed payload.
+        return result.toAnswer(req.sessionId(), req.commandCode(), req.hopByHopId(), req.endToEndId());
     }
 
     private static String impiOrBlank(String impi) {

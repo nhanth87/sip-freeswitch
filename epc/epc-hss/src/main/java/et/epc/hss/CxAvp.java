@@ -42,13 +42,19 @@ public final class CxAvp {
     public static final int CONFIDENTIALITY_KEY = 625;
     public static final int INTEGRITY_KEY = 626;
 
-    /* Result-Code / Experimental-Result-Code values. Cx UAA uses the 3GPP app
-       experimental codes 2002 (FIRST_REGISTRATION) / 2003 (SUBSEQUENT_REGISTRATION)
-       instead of DIAMETER_SUCCESS for S-CSCF parity. */
+    /* Result-Code (RFC 6733) and Cx Experimental-Result-Code (TS 29.229 §6.2, Vendor-Id
+       10415 — a separate number space, so FIRST_REGISTRATION and DIAMETER_SUCCESS are both
+       2001). A UAA carries FIRST/SUBSEQUENT_REGISTRATION as Experimental-Result, never as
+       Result-Code (Result-Code 2002 would be DIAMETER_LIMITED_SUCCESS). */
     public static final long SUCCESS = 2001L;
-    public static final long FIRST_REGISTRATION = 2002L;
-    public static final long SUBSEQUENT_REGISTRATION = 2003L;
+    public static final long FIRST_REGISTRATION = 2001L;
+    public static final long SUBSEQUENT_REGISTRATION = 2002L;
+    public static final long UNREGISTERED_SERVICE = 2003L;
     public static final long ERROR_USER_UNKNOWN = 5001L;
+    public static final long ERROR_IDENTITIES_DONT_MATCH = 5002L;
+    public static final long VENDOR_ID_3GPP = 10_415L;
+    public static final int VENDOR_ID = 266;
+    public static final int EXPERIMENTAL_RESULT_CODE = 298;
     public static final long ERROR_AUTHORIZATION_REJECTED = 5003L;
     public static final long UNABLE_TO_COMPLY = 5012L;
 

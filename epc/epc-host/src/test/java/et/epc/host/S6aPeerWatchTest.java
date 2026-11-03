@@ -51,4 +51,17 @@ class S6aPeerWatchTest {
         w.ceaAccepted("hss.epc.mno");
         assertTrue(w.snapshot().live());
     }
+
+    @Test
+    void trackedPortIsTheSourceOfTruthAfterBind() {
+        S6aPeerWatch w = new S6aPeerWatch();
+        w.bound();
+        w.ceaAccepted("stale.bind-time");     // a bind-time verdict must not outlive the port
+        var endpoint = new com.microjainslee.ra.diameter.DiameterRaEndpoint(
+                new com.microjainslee.ra.diameter.DiameterResourceAdaptor());
+        w.track(new DiameterPeerPort(endpoint));
+        var link = w.snapshot();
+        assertFalse(link.live(), "inactive RA, no CER/CEA: not live");
+        assertTrue(link.evidence().contains("listen-not-cea"));
+    }
 }

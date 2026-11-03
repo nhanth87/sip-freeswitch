@@ -119,7 +119,8 @@ public class CxClient {
                 lock.notifyAll();
             }
         });
-        port.sendCommand(new SendDiameterRequest(sid, CxCodec.CX_APP_ID, cmd, destHost, destRealm, avps));
+        port.sendCommand(new SendDiameterRequest(sid, CxCodec.CX_APP_ID, cmd, destHost, destRealm,
+                Map.of(), CxCodec.toWire(avps)));
         synchronized (lock) {
             long deadline = System.currentTimeMillis() + 3000;
             while (box[0] == null && System.currentTimeMillis() < deadline) {

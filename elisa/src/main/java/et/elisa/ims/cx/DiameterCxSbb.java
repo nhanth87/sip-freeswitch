@@ -74,7 +74,11 @@ public abstract class DiameterCxSbb extends CmpBackedSbb implements SleeEventHan
                 setSessionId(e.sessionId());
                 setApplicationId(e.applicationId());
                 if (client != null) {
-                    client.onAnswer(e.sessionId(), e.avps());
+                    // Result-Code (or the 3GPP Experimental-Result-Code the RA folds into
+                    // resultCode()) — answers from a remote HSS carry it outside the AVP map.
+                    java.util.Map<Integer, String> avps = new java.util.LinkedHashMap<>(e.avps());
+                    avps.putIfAbsent(CxCodec.RESULT_CODE, Long.toString(e.resultCode()));
+                    client.onAnswer(e.sessionId(), avps);
                 }
             }
             default -> {}

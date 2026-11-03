@@ -12,7 +12,22 @@ package et.epc.host;
  */
 public record DiameterSeam(String peerHost, int peerPort, String peerRole,
                            String destinationHost, String destinationRealm,
-                           String originHost, String originRealm) {
+                           String originHost, String originRealm, String peers) {
+
+    /** Single-peer seam (no {@code peers} list). */
+    public DiameterSeam(String peerHost, int peerPort, String peerRole, String destinationHost,
+                        String destinationRealm, String originHost, String originRealm) {
+        this(peerHost, peerPort, peerRole, destinationHost, destinationRealm, originHost, originRealm, null);
+    }
+
+    /**
+     * Several peers, one Diameter link each (HSS: MME + I/S-CSCF; PCRF: PGW-C + P-CSCF):
+     * {@code host:port:role:destHost:destRealm:app+app;...} — see ra-diameter
+     * {@code DiameterRaConfig.parsePeers}. Takes precedence over the single peer fields.
+     */
+    public boolean hasPeerList() {
+        return peers != null && !peers.isBlank();
+    }
 
     public static final DiameterSeam DEFAULT =
             new DiameterSeam(null, 3868, "client", null, null, null, "epc.lab");

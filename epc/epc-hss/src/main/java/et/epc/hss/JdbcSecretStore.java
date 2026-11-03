@@ -39,6 +39,9 @@ public final class JdbcSecretStore implements SecretStore {
         Objects.requireNonNull(imsi);
         require16(ki, "ki");
         require16(opc, "opc");
+        if (amf != null && amf.length == 2) {
+            amf = java.util.Arrays.copyOf(amf, 16); // one AES block, zero-padded
+        }
         require16(amf, "amf");
         String sql = """
                 INSERT INTO epc_secret (imsi, ki_enc, opc_enc, amf_enc, kek_version)
@@ -70,9 +73,14 @@ public final class JdbcSecretStore implements SecretStore {
         return unwrap(imsi, "opc_enc");
     }
 
+    /**
+     * AMF is 16 bits (TS 33.102 §6.3.2); it is stored as one AES block (zero-padded) like
+     * Ki/OPc. Returning the whole block put 16 octets of "AMF" into every AUTN — the MAC-A
+     * fell off the end of RAND‖AUTN and no USIM could verify a Postgres-backed vector.
+     */
     @Override
     public byte[] amf(Imsi imsi) {
-        return unwrap(imsi, "amf_enc");
+        return java.util.Arrays.copyOf(unwrap(imsi, "amf_enc"), 2);
     }
 
     private byte[] unwrap(Imsi imsi, String column) {

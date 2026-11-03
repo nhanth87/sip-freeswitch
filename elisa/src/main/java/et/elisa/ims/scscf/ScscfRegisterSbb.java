@@ -78,10 +78,13 @@ public final class ScscfRegisterSbb implements Sbb, SleeEventHandler {
         int expires = e.expires();
 
         if (!hasUsableAuthorization(e.authorization())) {
-            Map<Integer, String> uaa = cx.uar(impi, impu);
-            if (!"2001".equals(uaa.get(CxCodec.RESULT_CODE))) {
-                send(SendResponse.of(e.callId(), 403, "Forbidden"));
-                return;
+            // UAR is the I-CSCF's (TS 29.229 §6.1.1): a split S-CSCF goes straight to MAR.
+            if (roles == null || roles.icscf()) {
+                Map<Integer, String> uaa = cx.uar(impi, impu);
+                if (!CxCodec.uaaSuccess(uaa)) {
+                    send(SendResponse.of(e.callId(), 403, "Forbidden"));
+                    return;
+                }
             }
             ImsSubscriber sub = hss == null ? null
                     : hss.findByImpi(impi).or(() -> hss.findByImpu(impu)).or(() -> hss.resolveIdentity(impu))

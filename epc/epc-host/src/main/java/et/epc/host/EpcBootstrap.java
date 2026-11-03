@@ -104,6 +104,7 @@ public final class EpcBootstrap {
     private EpcInfinispanManager ispn;
     private String kekHex = "000102030405060708090a0b0c0d0e0f";
     private DiameterSeam diameterSeam = DiameterSeam.DEFAULT;
+    private String scscfUri = CxService.DEFAULT_SCSCF;
     private ExecutorService durableExecutor;
     private PccCache pcc;
     private PcefService pcefService;
@@ -181,6 +182,14 @@ public final class EpcBootstrap {
     }
 
     /** HSS/AuC secret KEK (32-hex-char); only used when a datasource is wired. */
+    /** S-CSCF a UAR hands out when the subscriber has none assigned yet (epc.hss.scscf-uri). */
+    public EpcBootstrap withScscfUri(String uri) {
+        if (uri != null && !uri.isBlank()) {
+            this.scscfUri = uri.trim();
+        }
+        return this;
+    }
+
     public EpcBootstrap withSecretKek(String kek) {
         if (kek != null && !kek.isBlank()) {
             this.kekHex = kek;
@@ -386,7 +395,9 @@ public final class EpcBootstrap {
                     : new HeapSecretStore();
             hssService = new HssService(hssRepo, secrets, new PlmnId("001", "01"),
                     mmeAllowlist, "mme.epc.lab");
-            cxService = new CxService(hssRepo);
+            // Cx MAR needs the AuC secrets (Ki/OPc/AMF) — without them every MAA was
+            // DIAMETER_AUTHORIZATION_REJECTED.
+            cxService = new CxService(hssRepo, secrets, CxService.servingOr(scscfUri));
             wired.add(db ? "secrets-postgres" : "secrets-heap");
         }
         InetAddress local;
@@ -507,6 +518,9 @@ public final class EpcBootstrap {
         // Elisa for Cx, AF for Rx, OCS for Gy) instead of listen-only 0.0.0.0:3868.
         // live() == isPeerReady() (CEA accepted) — never "socket bound".
         cfg.setPeerRole(diameterSeam.peerRole());
+        if (diameterSeam.hasPeerList()) {
+            cfg.setPeers(DiameterRaConfig.parsePeers(diameterSeam.peers()));
+        }
         if (diameterSeam.hasPeer()) {
             cfg.setPeerHost(diameterSeam.peerHost().trim());
             cfg.setPeerPort(diameterSeam.peerPort());
@@ -536,6 +550,7 @@ public final class EpcBootstrap {
         }
         s6a = new S6aPeerWatch();
         s6a.bound();
+        s6a.track(port);
         if (port.live()) {
             s6a.ceaAccepted("isPeerReady");
         } else {

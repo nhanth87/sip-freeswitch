@@ -1,6 +1,7 @@
 package et.epc.hss;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import com.microjainslee.ra.diameter.avp.DiameterAvp;
@@ -114,7 +115,7 @@ class CxStructuredAvpTest {
         repo.save(new SubscriberRecord(profile(), 0));
         CxService service = cx(repo);
 
-        // No S-CSCF bound yet -> FIRST_REGISTRATION (2002).
+        // No S-CSCF bound yet -> FIRST_REGISTRATION (Experimental-Result 2001).
         CxService.CxResult first = service.uar(IMSI.digits(), null);
         assertEquals(CxAvp.FIRST_REGISTRATION, first.resultCode());
         DiameterAvp uaaState = find(first.structuredAvps(), CxAvp.AUTH_SESSION_STATE);
@@ -122,7 +123,7 @@ class CxStructuredAvpTest {
         assertEquals(1L, uaaState.asUnsigned32());
         assertEquals("sip:scscf.ims.lab:5060", first.avps().get(CxAvp.SERVER_NAME));
 
-        // Bind an S-CSCF -> next UAR is a re-registration -> SUBSEQUENT (2003).
+        // Bind an S-CSCF -> next UAR is a re-registration -> SUBSEQUENT (Experimental-Result 2002).
         service.assignScscf(IMSI, "sip:scscf.ims.lab:5060");
         CxService.CxResult subsequent = service.uar(IMSI.digits(), null);
         assertEquals(CxAvp.SUBSEQUENT_REGISTRATION, subsequent.resultCode());
@@ -146,5 +147,32 @@ class CxStructuredAvpTest {
         DiameterAvp state = find(r.structuredAvps(), CxAvp.AUTH_SESSION_STATE);
         assertNotNull(state, "LIA must carry Auth-Session-State(277)");
         assertEquals(1L, state.asUnsigned32());
+    }
+
+    @Test
+    void uarHandsOutTheConfiguredScscfUntilOneIsAssigned() {
+        HeapHssRepository repo = new HeapHssRepository();
+        repo.save(new SubscriberRecord(profile(), 0));
+        CxService service = new CxService(repo, null, CxService.servingOr("sip:scscf:5060"));
+        assertEquals("sip:scscf:5060", service.uar(IMSI.digits(), null).avps().get(CxAvp.SERVER_NAME));
+        service.assignScscf(IMSI, "sip:scscf-2:5060");
+        assertEquals("sip:scscf-2:5060", service.uar(IMSI.digits(), null).avps().get(CxAvp.SERVER_NAME),
+                "the serving S-CSCF wins");
+    }
+
+    @Test
+    void maaOfAnAssignedSubscriberCarriesNoServerName() {
+        HeapHssRepository repo = new HeapHssRepository();
+        repo.save(new SubscriberRecord(profile(), 0));
+        CxService service = cx(repo);
+        service.assignScscf(IMSI, "sip:scscf.ims.lab:5060");
+
+        CxService.CxResult maa = service.mar(IMSI.digits(), null);
+        assertEquals(CxAvp.SUCCESS, maa.resultCode());
+        // TS 29.229 §6.1.8 — Server-Name is not an MAA AVP; with the M-bit a peer rejects the answer.
+        assertTrue(maa.structuredAvps().stream().noneMatch(a -> a.code() == CxAvp.SERVER_NAME));
+        DiameterAvp items = find(maa.structuredAvps(), CxAvp.SIP_NUMBER_AUTH_ITEMS);
+        assertNotNull(items);
+        assertEquals(1L, items.asUnsigned32());
     }
 }

@@ -103,10 +103,20 @@ class DiameterGatewaySbbTest {
     void cxUarReturnsLocatedScscf() throws Exception {
         sbb.onEvent(req(DiameterGatewaySbb.CX, 300, Map.of(S6aAvp.USER_NAME, IMSI.digits())), null);
         SendDiameterAnswer ans = last();
-        // UAA returns the 3GPP experimental result code (SUBSEQUENT_REGISTRATION when an
-        // S-CSCF is already bound), not DIAMETER_SUCCESS — Open5GS S-CSCF parity.
-        assertEquals(2003L, ans.resultCode());
-        assertEquals("sip:scscf.ims.lab:5060", ans.avps().get(602));
+        // TS 29.229: SUBSEQUENT_REGISTRATION (S-CSCF already bound) is an Experimental-Result
+        // {Vendor-Id 10415, 2002} with no Result-Code; Server-Name is a typed 3GPP AVP.
+        assertEquals(0L, ans.resultCode(), "no Result-Code AVP on a UAA");
+        com.microjainslee.ra.diameter.avp.DiameterAvp exp = ans.avpsStructured().stream()
+                .filter(a -> a.code() == 297).findFirst().orElseThrow();
+        assertEquals(10_415L, exp.children().stream().filter(c -> c.code() == 266).findFirst()
+                .orElseThrow().asUnsigned32());
+        assertEquals(2002L, exp.children().stream().filter(c -> c.code() == 298).findFirst()
+                .orElseThrow().asUnsigned32());
+        com.microjainslee.ra.diameter.avp.DiameterAvp server = ans.avpsStructured().stream()
+                .filter(a -> a.code() == 602).findFirst().orElseThrow();
+        assertEquals(10_415L, server.vendorId());
+        assertEquals("sip:scscf.ims.lab:5060", server.asUtf8());
+        assertTrue(ans.avps().isEmpty(), "no untyped flat AVPs on the wire");
     }
 
     @Test
@@ -115,7 +125,7 @@ class DiameterGatewaySbbTest {
                 Map.of(S6aAvp.USER_NAME, IMSI.digits(), 602, "sip:scscf2:5060")), null);
         SendDiameterAnswer ans = last();
         assertEquals(2001L, ans.resultCode());
-        assertEquals("sip:scscf2:5060", ans.avps().get(602));
+        assertEquals("sip:scscf2:5060", typed(ans, 602).asUtf8());
     }
 
     @Test
@@ -168,12 +178,12 @@ class DiameterGatewaySbbTest {
         gate.onEvent(req(DiameterGatewaySbb.CX, 303, Map.of(CxAvp.USER_NAME, IMSI.digits())), null);
         SendDiameterAnswer ans = last();
         assertEquals(2001L, ans.resultCode());
-        Map<Integer, String> avps = ans.avps();
-        assertEquals("Digest-AKAv1-MD5", avps.get(CxAvp.SIP_AUTHENTICATION_SCHEME));
-        assertNotNull(avps.get(CxAvp.SIP_AUTHENTICATE));
-        assertNotNull(avps.get(CxAvp.SIP_AUTHORIZATION));
-        assertNotNull(avps.get(CxAvp.CONFIDENTIALITY_KEY));
-        assertNotNull(avps.get(CxAvp.INTEGRITY_KEY));
+        // On the wire the vector is the grouped SIP-Auth-Data-Item(612), 3GPP vendor leaves.
+        assertEquals("Digest-AKAv1-MD5", typed(ans, CxAvp.SIP_AUTHENTICATION_SCHEME).asUtf8());
+        assertNotNull(typed(ans, CxAvp.SIP_AUTHENTICATE));
+        assertNotNull(typed(ans, CxAvp.SIP_AUTHORIZATION));
+        assertNotNull(typed(ans, CxAvp.CONFIDENTIALITY_KEY));
+        assertNotNull(typed(ans, CxAvp.INTEGRITY_KEY));
     }
 
     @Test
@@ -185,7 +195,23 @@ class DiameterGatewaySbbTest {
         assertEquals(DiameterGatewaySbb.CX, ans.applicationId());
         assertEquals(301, ans.commandCode());
         assertEquals(2001L, ans.resultCode());
-        assertEquals("sip:scscf.ims.lab:5060", ans.avps().get(CxAvp.SERVER_NAME));
+        assertEquals("sip:scscf.ims.lab:5060", typed(ans, CxAvp.SERVER_NAME).asUtf8());
+    }
+
+    /** A typed AVP of the answer, searched through grouped AVPs; fails when absent. */
+    private static com.microjainslee.ra.diameter.avp.DiameterAvp typed(SendDiameterAnswer ans, int code) {
+        java.util.ArrayDeque<com.microjainslee.ra.diameter.avp.DiameterAvp> todo =
+                new java.util.ArrayDeque<>(ans.avpsStructured());
+        while (!todo.isEmpty()) {
+            var a = todo.poll();
+            if (a.code() == code) {
+                return a;
+            }
+            if (a.children() != null) {
+                todo.addAll(a.children());
+            }
+        }
+        throw new AssertionError("AVP " + code + " not in the answer");
     }
 
     @Test

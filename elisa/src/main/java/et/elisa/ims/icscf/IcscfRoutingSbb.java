@@ -76,7 +76,7 @@ public final class IcscfRoutingSbb implements Sbb, SleeEventHandler {
         String impu = e.toUri();
         String impi = e.fromUri() == null ? impu : e.fromUri().replaceFirst("(?i)^sip:", "");
         Map<Integer, String> uaa = cx.uar(impi, impu);
-        if (!"2001".equals(uaa.get(CxCodec.RESULT_CODE))) {
+        if (!CxCodec.uaaSuccess(uaa)) {
             LOG.warn("[I-CSCF] UAR rejected impi={} impu={} result={}", impi, impu, uaa.get(CxCodec.RESULT_CODE));
             send(new SendResponse(e.callId(), 403, "Forbidden"));
             return;
@@ -107,7 +107,7 @@ public final class IcscfRoutingSbb implements Sbb, SleeEventHandler {
         Map<Integer, String> lia = cx.lir(e.toUri());
         LOG.debug("[I-CSCF] INVITE LIR impu={} result={} callId={}", e.toUri(),
                 lia.get(CxCodec.RESULT_CODE), e.callId());
-        if (!"2001".equals(lia.get(CxCodec.RESULT_CODE))) {
+        if (!CxCodec.liaSuccess(lia)) {
             send(new SendResponse(e.callId(), 404, "Not Found"));
             return;
         }

@@ -20,6 +20,11 @@ public final class Milenage {
         Objects.requireNonNull(k);
         Objects.requireNonNull(opc);
         Objects.requireNonNull(rand);
+        if (amf2 == null || amf2.length != 2) {
+            // AUTN = SQN⊕AK ‖ AMF ‖ MAC-A — any other AMF length corrupts it silently.
+            throw new IllegalArgumentException("AMF must be 2 octets, got "
+                    + (amf2 == null ? "null" : amf2.length));
+        }
         byte[] temp = AesEcb.encrypt(k, Bytes.xor(rand, opc));
         byte[] in1 = new byte[16];
         System.arraycopy(sqn6, 0, in1, 0, 6);

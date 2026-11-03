@@ -166,8 +166,7 @@ public abstract class HssSbb extends CmpBackedSbb implements SleeEventHandler {
     }
 
     private static SendDiameterAnswer toCxAnswer(DiameterRequestEvent req, CxService.CxResult r) {
-        return new SendDiameterAnswer(req.sessionId(), CX, req.commandCode(), r.resultCode(),
-                req.hopByHopId(), req.endToEndId(), r.avps(), r.structuredAvps());
+        return r.toAnswer(req.sessionId(), req.commandCode(), req.hopByHopId(), req.endToEndId());
     }
 
     // HELPERS

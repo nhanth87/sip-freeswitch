@@ -111,9 +111,20 @@ class HssSbbTest {
     void cxUarReturnsLocatedScscf() {
         sbb.onEvent(req(HssSbb.CX, 300, Map.of(S6aAvp.USER_NAME, IMSI.digits())), null);
         SendDiameterAnswer ans = last();
-        // Subscriber already has an S-CSCF bound in setUp -> SUBSEQUENT_REGISTRATION (2003).
-        assertEquals(2003L, ans.resultCode());
-        assertEquals("sip:scscf.ims.lab:5060", ans.avps().get(CxAvp.SERVER_NAME));
+        // TS 29.229: SUBSEQUENT_REGISTRATION (S-CSCF already bound) is an Experimental-Result
+        // {Vendor-Id 10415, 2002} with no Result-Code; Server-Name is a typed 3GPP AVP.
+        assertEquals(0L, ans.resultCode(), "no Result-Code AVP on a UAA");
+        com.microjainslee.ra.diameter.avp.DiameterAvp exp = ans.avpsStructured().stream()
+                .filter(a -> a.code() == 297).findFirst().orElseThrow();
+        assertEquals(10_415L, exp.children().stream().filter(c -> c.code() == 266).findFirst()
+                .orElseThrow().asUnsigned32());
+        assertEquals(2002L, exp.children().stream().filter(c -> c.code() == 298).findFirst()
+                .orElseThrow().asUnsigned32());
+        com.microjainslee.ra.diameter.avp.DiameterAvp server = ans.avpsStructured().stream()
+                .filter(a -> a.code() == 602).findFirst().orElseThrow();
+        assertEquals(10_415L, server.vendorId());
+        assertEquals("sip:scscf.ims.lab:5060", server.asUtf8());
+        assertTrue(ans.avps().isEmpty(), "no untyped flat AVPs on the wire");
     }
 
     @Test
@@ -124,7 +135,9 @@ class HssSbbTest {
                 CxAvp.SERVER_ASSIGNMENT_TYPE, "1")), null);
         SendDiameterAnswer ans = last();
         assertEquals(2001L, ans.resultCode());
-        assertEquals("sip:scscf2:5060", ans.avps().get(CxAvp.SERVER_NAME));
+        assertEquals("sip:scscf2:5060", ans.avpsStructured().stream()
+                .filter(x -> x.code() == CxAvp.SERVER_NAME && x.vendorId() == CxAvp.VENDOR_ID_3GPP)
+                .findFirst().orElseThrow().asUtf8());
     }
 
     @Test
@@ -132,7 +145,10 @@ class HssSbbTest {
         sbb.onEvent(req(HssSbb.CX, 303, Map.of(S6aAvp.USER_NAME, IMSI.digits())), null);
         SendDiameterAnswer ans = last();
         assertEquals(2001L, ans.resultCode());
-        assertTrue(ans.avps().containsKey(CxAvp.SIP_AUTHENTICATE));
+        var item = ans.avpsStructured().stream()
+                .filter(x -> x.code() == CxAvp.SIP_AUTH_DATA_ITEM).findFirst().orElseThrow();
+        assertTrue(item.children().stream().anyMatch(c -> c.code() == CxAvp.SIP_AUTHENTICATE),
+                "SIP-Authenticate inside SIP-Auth-Data-Item");
     }
 
     @Test

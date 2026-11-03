@@ -105,6 +105,12 @@ public class EpcRuntime {
     @ConfigProperty(name = "epc.diameter.origin.realm", defaultValue = "epc.lab")
     String diameterOriginRealm;
 
+    @ConfigProperty(name = "epc.diameter.peers")
+    Optional<String> diameterPeers;
+
+    @ConfigProperty(name = "epc.hss.scscf-uri", defaultValue = "sip:scscf.ims.lab:5060")
+    String hssScscfUri;
+
     @ConfigProperty(name = "epc.jdbc.url", defaultValue = EpcJdbc.DEFAULT_URL)
     String jdbcUrl;
 
@@ -155,7 +161,7 @@ public class EpcRuntime {
                 .withDiameter(new DiameterSeam(diameterPeerHost.orElse(null), diameterPeerPort,
                         diameterPeerRole, diameterDestHost.orElse(null),
                         diameterDestRealm.orElse(null), diameterOriginHost.orElse(null),
-                        diameterOriginRealm))
+                        diameterOriginRealm, diameterPeers.orElse(null)))
                 .withMmeAllowlist(MmeAllowlist.parse(mmeAllowlistEnabled, mmeAllowlist.orElse(null)))
                 .withS5c(s5cWire, s5cPgwcPeerHost, s5cPgwcPeerPort)
                 .withUp(upUrrMode, upUrrPollMs, upUrrBaselinePersistMs, upQerEnabled,
@@ -167,7 +173,8 @@ public class EpcRuntime {
                     .migrate();
             bootstrap.withDataSource(dataSource)
                     .withInfinispan(ispn)
-                    .withSecretKek(kekHex);
+                    .withSecretKek(kekHex)
+                    .withScscfUri(hssScscfUri);
             LOG.info("epc datastore enabled: Postgres Agroal(\"epc\") + Flyway wired "
                     + "(url={}, ispn={})", jdbcUrl, ispn != null && ispn.enabled());
         } else {

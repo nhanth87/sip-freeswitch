@@ -1,0 +1,120 @@
+# VoLTE end-to-end demo overlay (docs/agents/volte-e2e.md):
+#   docker compose -f docker-compose.yml -f docker-compose.services.yml -f docker-compose.volte.yml \
+#     --profile epc --profile services up -d ...
+#
+# - log4j2 config for the micro-jainslee RAs in every EPC / Elisa node (RA errors reach `docker logs`)
+# - Diameter multi-peer: epc-hss dials the MME (S6a) and both CSCFs (Cx); the CSCFs accept
+#   it (server role, any source port). The Elisa HSS-lite (`hss`) is not used: epc-hss
+#   (Postgres, 3GPP AuC) is the HSS of the chain.
+# - Media: UE RTP rides the GTP-U bearer to FreeSWITCH; Elisa does not relay RTP, so the
+#   TURN/ICE rewrite (rtp_redirect) is off for this chain.
+# - Fixed addresses (172.20.10.x): Diameter peers resolve each other once at link start, so a
+#   recreated container with a new address left the other side dialing the old one.
+x-log4j2: &log4j2
+  - ./deploy/volte/log4j2.xml:/etc/volte/log4j2.xml:ro
+
+x-java: &java
+  JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true -Xms64m -Xmx512m -XX:+UseSerialGC -Dlog4j2.configurationFile=/etc/volte/log4j2.xml"
+
+x-no-relay: &no-relay
+  SF_MEDIA_RTP_REDIRECT: "false"
+  SF_MEDIA_REQUIRE_TURN: "false"
+  SF_MEDIA_ICE_REQUIRED: "false"
+  SIP_RA_ICE_ENABLED: "false"
+
+x-cx-server: &cx-server
+  SF_IMS_CX_ENABLED: "true"
+  SF_IMS_CX_PEER_HOST: 172.20.10.10
+  SF_IMS_CX_PEER_PORT: "0"
+  SF_IMS_CX_PEER_ROLE: server
+  SF_IMS_CX_DEST_HOST: epc-hss-1.epc.lab
+  SF_IMS_CX_DEST_REALM: epc.lab
+  SF_IMS_CX_REALM: ims.lab
+
+services:
+  epc-hss:
+    networks: !override
+      sf-net:
+        ipv4_address: 172.20.10.10
+    volumes: *log4j2
+    environment:
+      <<: *java
+      # S6a towards the MME + Cx towards I-CSCF and S-CSCF, one Diameter link each.
+      # Fixed addresses, not names: a peer container that is not up yet has no DNS name.
+      # S-CSCF a UAR hands out (resolvable on sf-net).
+      EPC_HSS_SCSCF_URI: sip:scscf:5060
+      EPC_DIAMETER_PEERS: "172.20.10.11:3868:client:mme.epc.lab:epc.lab:s6a;172.20.10.21:3868:client:icscf.ims.lab:ims.lab:cx;172.20.10.22:3868:client:scscf.ims.lab:ims.lab:cx"
+  epc-sgwc:
+    networks: !override
+      sf-net:
+        ipv4_address: 172.20.10.14
+    volumes: *log4j2
+    environment: *java
+  epc-pgwc:
+    networks: !override
+      sf-net:
+        ipv4_address: 172.20.10.13
+    volumes: *log4j2
+    environment: *java
+  epc-pcrf:
+    networks: !override
+      sf-net:
+        ipv4_address: 172.20.10.12
+    volumes: *log4j2
+    environment: *java
+
+  pcscf:
+    networks: !override
+      sf-net:
+        ipv4_address: 172.20.10.20
+    volumes:
+      - ./app/html:/html:ro
+      - ./deploy/volte/log4j2.xml:/etc/volte/log4j2.xml:ro
+    environment:
+      <<: [*java, *no-relay]
+
+  icscf:
+    networks: !override
+      sf-net:
+        ipv4_address: 172.20.10.21
+    volumes:
+      - ./app/html:/html:ro
+      - ./deploy/volte/log4j2.xml:/etc/volte/log4j2.xml:ro
+    environment:
+      <<: [*java, *cx-server]
+      SF_IMS_CX_ORIGIN: icscf.ims.lab
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+
+  scscf:
+    networks: !override
+      sf-net:
+        ipv4_address: 172.20.10.22
+    volumes:
+      - ./app/html:/html:ro
+      - ./deploy/volte/log4j2.xml:/etc/volte/log4j2.xml:ro
+    environment:
+      <<: [*java, *no-relay, *cx-server]
+      SF_IMS_CX_ORIGIN: scscf.ims.lab
+      # AKA vectors / profile from epc-hss over Cx (MAR / SAR), not the in-process HSS-lite.
+      SF_IMS_HSS: "false"
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+      freeswitch:
+        condition: service_started
+
+  mme:
+    networks: !override
+      sf-net:
+        ipv4_address: 172.20.10.11
+
+  freeswitch:
+    # mod_xml_curl (dialplan for sip:1000 from the S-CSCF: answer + tone) + lab core tuning.
+    volumes:
+      - ./freeswitch/conf/autoload_configs/modules.conf.xml:/etc/freeswitch/autoload_configs/modules.conf.xml:ro
+      - ./freeswitch/conf/autoload_configs/switch.conf.xml:/etc/freeswitch/autoload_configs/switch.conf.xml:ro
+    networks: !override
+      sf-net:
+        ipv4_address: 172.20.10.30
