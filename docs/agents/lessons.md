@@ -115,3 +115,10 @@ Measured on the mvn lab (`freeswitch/docker-compose.yml` + `./run.sh`): before f
 - **SIMD/"registers" only pay on byte scanning.** The big wins were removing work (O(N) scans per removal, a syscall per ESL message, an exception per CMP write). SWAR (8 bytes per 64-bit load) is used where bytes are scanned (ESL framing); next candidate is SIP parsing, not business logic.
 - **zsh eats `:t` / `:h` after a variable** (2026-11-03): `"fontfile=$F:textfile=..."` became `…ttfextfile` (`$F:t` = tail modifier). Use `${F}` whenever a `:` follows a variable (ffmpeg filters, `host:port`).
 - **Off-screen GUI recording**: Hyprland `hyprctl output create headless NAME` + a runtime window rule to its workspace + `wf-recorder -o NAME` records terminals / Wireshark without touching the user's screens; `hyprctl output remove` + `hyprctl reload` afterwards drops both.
+
+## GitHub push 403 — shared PAT in ~/.ssh (2026-11-15)
+
+- Symptom: `git push` → `Permission … denied to nhanth87` (403) via both `store` and `gh` credentials; the fine-grained PAT lacked repo write.
+- Fix: classic PAT saved at `~/.ssh/github_pat_nhanth87` (**0600**, never commit), served by `~/.ssh/gh-pat-helper.sh` as global `credential.https://github.com.helper` (gh keyring = fallback). Removed the stale github.com line from `~/.git-credentials` (backup `.bak`) — store was winning over the URL helper.
+- Scope: Contents read+write on nhanth87 + digicom-et. Verified write-auth with `git push --dry-run <remote> HEAD:<branch>` on ussdgw (origin + digicom-et), jain-slee, gmlc, ota, elisa, silent-auth — authenticates, changes nothing.
+- Rotate the PAT if it ever appears in chat/logs.
