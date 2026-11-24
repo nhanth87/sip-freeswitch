@@ -161,7 +161,7 @@ what remains is data completeness + policy.
 
 ### Phase E — Wire prove (the actual P1 gate)
 
-1. `docker compose --profile epc up` → open5gs MME (`epc/loadtest/open5gs/README.md`).
+1. `docker compose --profile epc up` → open5gs MME (`docs/epc/loadtest/open5gs/README.md`).
 2. S6a PCAP: AIR/AIA + ULR/ULA with full subscription AVPs (tshark filter
    `diameter.cmd.code == 318 || == 316`), then S11 Create Session to `epc-sgwc`.
 3. `epc-acceptance.sh` → `results/<date>-epc.json`; `pilot-acceptance.sh` must

@@ -147,7 +147,7 @@ parity to keep if you ever seed open5gs-hssd; against THIS topology it is
 }
 ```
 
-## Known blockers (honest, from `epc/loadtest/open5gs/GAP-sgw-pgw.md`)
+## Known blockers (honest, from `docs/epc/loadtest/open5gs/GAP-sgw-pgw.md`)
 
 These were the original blockers; state on 2026-08-23:
 

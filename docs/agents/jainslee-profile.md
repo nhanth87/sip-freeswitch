@@ -3,7 +3,7 @@
 **Status:** **implemented** (lab P1) — ProfileSpecification classes + bootstrap tables + REGISTER/CHANNEL upserts.  
 **Not this doc:** HTMX `/admin/profiles` (operator UI over Postgres). That page is admin CRUD, not the SLEE Profile Facility.
 
-Related: [`user-profile.md`](user-profile.md) (current Elisa PG/ISPN locks), [`datastore.md`](datastore.md), runtime guide [`jain-slee/docs/en/profile-programming-model.md`](../../../../jain-slee/jain-slee/docs/en/profile-programming-model.md).
+Related: [`user-profile.md`](user-profile.md) (current Elisa PG/ISPN locks), [`datastore.md`](datastore.md), runtime guide [`jain-slee/docs/en/profile-programming-model.md`](../../../../../jain-slee/jain-slee/docs/en/profile-programming-model.md).
 
 ---
 

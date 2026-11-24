@@ -30,7 +30,7 @@ Path: `loadtest/ims-tools/`
 ./tools/install-ims-smoke-hook.sh
 ```
 
-Report: [`docs/agents/ims-external-test-report.md`](../../docs/agents/ims-external-test-report.md).
+Report: [`docs/agents/ims-external-test-report.md`](../agents/ims-external-test-report.md).
 
 ## Build SIPp
 

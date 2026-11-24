@@ -60,7 +60,7 @@ HLR (MAP SendAuthenticationInfo over SS7) is not on the VoLTE path; it gets its 
    peer host at start — start it after that host exists (I-CSCF before epc-hss failed with
    UnknownHostException).
 6. **Open — user plane / PFCP is the critical path.** `sgwu` / `pgwu` are alpine placeholders, and
-   per `epc/loadtest/open5gs/GAP-sgw-pgw.md` our SGW-C/PGW-C PFCP is a shell: no Association
+   per `docs/epc/loadtest/open5gs/GAP-sgw-pgw.md` our SGW-C/PGW-C PFCP is a shell: no Association
    Setup / Heartbeat, no real PDR/FAR/QER encoding, Session Modification = full reprogram. A
    standard UP (open5gs `sgwud` / `upfd`, both in `local/open5gs-mme:epc`) needs: Association,
    Session Establishment with PDR/FAR (Sxa + Sxb), Modification on Modify Bearer (eNB F-TEID),

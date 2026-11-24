@@ -141,4 +141,4 @@ ESL remap to home FS — Code (unit)	HomeEslRemapService on failover spawn. Not 
 Never (unchanged)
 PFCP/N4, Gx, Gy, RTP through Elisa, nginx as P-CSCF, SBC topology hiding, 10k INVITE/s or 1M SIP TPS without SIPp, RestComm public remote, rsync dist/elisa to a host in this slice. GTP-U stays out of Elisa and epc-host JVMs. Do not vendor Mobius GTP (AGPL) or pull GTPTag / Netty into ra-gtpv2c. Mobius GTP (AGPL) or pull GTPTag / Netty into ra-gtpv2c.
 
-Sources: tree grep 2026-08-15 · docs/agents/production-p0.md · epc/docs/nni/pics-rel14.md · ra-gtpv2c Gtpv2Codec / Gtpv2Ies · github.com/mobius-software-ltd/gtp (AGPL inventory only) · lab A–B Digest PCAPs 2026-08-11 (in-docker PASS, host Contact FAIL). Unit tests ≠ host prove ≠ attach PCAP ≠ 10k INVITE/s.
+Sources: tree grep 2026-08-15 · docs/agents/production-p0.md · docs/epc/nni/pics-rel14.md · ra-gtpv2c Gtpv2Codec / Gtpv2Ies · github.com/mobius-software-ltd/gtp (AGPL inventory only) · lab A–B Digest PCAPs 2026-08-11 (in-docker PASS, host Contact FAIL). Unit tests ≠ host prove ≠ attach PCAP ≠ 10k INVITE/s.

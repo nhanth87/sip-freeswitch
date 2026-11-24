@@ -492,5 +492,5 @@ Phase 5  acceptance run + báo cáo trung thực
 - EPC P1 plan (gap/phases): `docs/agents/epc-p1.md`
 - Datastore/profile: `docs/agents/datastore.md`, `docs/agents/jainslee-profile.md`
 - Charging/CGRates: `docs/agents/ims-core.md` § Charging · `docs/agents/elisa-improve-plan.md`
-- Capacity: `docs/agents/capacity-acceptance.md`, `docs/agents/capacity-1m.md`, `epc/docs/agents/capacity-64c-10g.md`
+- Capacity: `docs/agents/capacity-acceptance.md`, `docs/agents/capacity-1m.md`, `docs/epc/agents/capacity-64c-10g.md`
 > Đã wire seam PcrfPort tại boot (xem §2.3). Khi không có PCRF → trả mã lỗi theo app.

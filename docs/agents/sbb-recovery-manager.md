@@ -2,7 +2,7 @@
 
 **Status:** P0 WIRED (2026-08-11) — view-change listener + `ClusterManager.adopt` (one ISPN view) + SipDialogHa restore on every spawn + BYE self-remove race guard + soft-hang watchdog + nn kill-test script. Not Clearwater Chronos. ProfileFacility is **not** failover SoT.  
 **Product context:** Elisa lab IMS Core + FreeSWITCH MRF/AS; N–N cluster **C1** (Infinispan) / **C2** (VIP affinity) / **C3** (FS pair); target **10 000 INVITE/s** on `ra-sip-servlet`; host **JDK 25** micro-jainslee.  
-**Related:** [`cmp-recovery.md`](cmp-recovery.md) (app CMP dual-write), [`jainslee-profile.md`](jainslee-profile.md), [`cluster-c2-vip-affinity.md`](cluster-c2-vip-affinity.md), [`ims-core.md`](ims-core.md) (I7 sticky), jain-slee ADR [`0002-ra-sticky-ha-fabric.md`](../../../../jain-slee/jain-slee/docs/adr/0002-ra-sticky-ha-fabric.md), `SessionRecoveryService` (Gap-SR-1), `DistributedSbbEntityPool`.
+**Related:** [`cmp-recovery.md`](cmp-recovery.md) (app CMP dual-write), [`jainslee-profile.md`](jainslee-profile.md), [`cluster-c2-vip-affinity.md`](cluster-c2-vip-affinity.md), [`ims-core.md`](ims-core.md) (I7 sticky), jain-slee ADR [`0002-ra-sticky-ha-fabric.md`](../../../../../jain-slee/jain-slee/docs/adr/0002-ra-sticky-ha-fabric.md), `SessionRecoveryService` (Gap-SR-1), `DistributedSbbEntityPool`.
 
 ---
 

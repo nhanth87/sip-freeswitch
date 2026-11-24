@@ -29,4 +29,4 @@ No VoLTE QoS, HA, or throughput claim without wire proof. NextEPC AccUPF 30 Gbit
 
 - SIP (Gm to P-CSCF) → Elisa **`sip-servlet-ra`** only. `epc-host` bans `ra-sip-servlet`.
 - Diameter S6a/Cx/Gx/Gy → vendor **`diameter-ra`** (`isPeerReady()`). No second Diameter stack.
-- Matrix: [`ra-matrix.md`](ra-matrix.md). SLEE split: [`epc-slee.md`](epc-slee.md). 10 Gbit/s on 64C/128G: [`epc/docs/agents/capacity-64c-10g.md`](../../epc/docs/agents/capacity-64c-10g.md).
+- Matrix: [`ra-matrix.md`](ra-matrix.md). SLEE split: [`epc-slee.md`](epc-slee.md). 10 Gbit/s on 64C/128G: [`docs/epc/agents/capacity-64c-10g.md`](../epc/agents/capacity-64c-10g.md).

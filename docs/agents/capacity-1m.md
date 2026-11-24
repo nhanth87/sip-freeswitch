@@ -79,4 +79,4 @@ SIPp: `./tools/bench-cps.sh` ramps to **10k INVITE/s on one edge**. A 1M run nee
 
 ## Hardware honesty
 
-Java SIP CP on a 64C box is **not** 1M TPS. EPC note: [`epc/docs/agents/capacity-64c-10g.md`](../../epc/docs/agents/capacity-64c-10g.md) — 10 Gbit/s is a **user-plane** number. 1M SIP TPS is many signaling hosts + kernel/DPDK only on UP.
+Java SIP CP on a 64C box is **not** 1M TPS. EPC note: [`docs/epc/agents/capacity-64c-10g.md`](../epc/agents/capacity-64c-10g.md) — 10 Gbit/s is a **user-plane** number. 1M SIP TPS is many signaling hosts + kernel/DPDK only on UP.

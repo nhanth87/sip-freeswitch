@@ -16,6 +16,6 @@ Bind-mounted over the `safarov/freeswitch` image's vanilla config.
 | `sip_profiles/external.mvn.xml` | mvn lab | `127.0.0.1:5062` (Elisa owns `:5060`), no STUN |
 | `sip_profiles/disabled.xml` | mvn lab | mounted over vanilla `internal*.xml` / `external-ipv6.xml` — vanilla internal also binds `:5060` |
 
-mvn lab (Elisa from Maven on the host, PG + FS in Docker): [`../docker-compose.yml`](../docker-compose.yml).
+mvn lab (Elisa from Maven on the host, PG + FS in Docker): [`../docker-compose.yml`](../../freeswitch/docker-compose.yml).
 
-Never point xml_curl at the nginx VIP (`/fs/` is denied on the edge). See [`docs/agents/docker-lab.md`](../../docs/agents/docker-lab.md).
+Never point xml_curl at the nginx VIP (`/fs/` is denied on the edge). See [`docs/agents/docker-lab.md`](../agents/docker-lab.md).

@@ -100,7 +100,7 @@ FreeSWITCH = dialplan/media (not CPS plane). `ra-freeswitch` is **control plane*
 | **2** | [`freeswitch/`](freeswitch/) | FreeSWITCH conf overlays + lab |
 | **3** | [`app/html/`](app/html/) | Disk admin UI ({{TOKEN}}, HTMX) |
 | **4** | [`loadtest/`](loadtest/) | SIPp CPS harness |
-| **5** | [`docs/agents/`](docs/agents/) | architecture, multi-service-deploy (1 code → P/I/S/HSS + N–N), ra-freeswitch, … |
+| **5** | [`docs/`](docs/README.md) | **all Markdown lives here** (layout in `docs/README.md`): `agents/` (Elisa/IMS design + runbooks), `epc/`, `loadtest/`, `status/PENDING-ISSUES.md`, `3gpp/`. New .md files go under `docs/`, never next to code (only README/AGENTS/CLAUDE stay in place). |
 | **6** | [`tools/`](tools/) | build-all, smoke, bench-cps, package-dist, package-dist-epc |
 
 ```bash

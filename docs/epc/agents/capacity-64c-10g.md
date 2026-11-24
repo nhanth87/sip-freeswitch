@@ -74,4 +74,4 @@ Do **not** run DPDK PMDs and the JIT on the same isolated cores.
 - NextEPC 30G as proof of 4G S1-U/S5-U
 - “SGW/PGW HA” or “VoLTE ready”
 
-Close the gate only with [`epc/loadtest/bakeoff/`](../../loadtest/bakeoff/README.md) on this class of hardware: full-duplex 10 Gbit/s, 10k contexts, IPv4+IPv6, charging reconcile, process-kill recovery.
+Close the gate only with [`epc/loadtest/bakeoff/`](../loadtest/bakeoff.md) on this class of hardware: full-duplex 10 Gbit/s, 10k contexts, IPv4+IPv6, charging reconcile, process-kill recovery.

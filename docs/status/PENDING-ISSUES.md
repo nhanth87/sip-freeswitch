@@ -1,13 +1,13 @@
 # PENDING ISSUES — MVNO improve plan (W1/W2/W3) + Log4j2-only landing
 
-**Refreshed:** 2026-11-20 (added § HSS links; every older item below is unchanged from 2026-08-26) · **Updated:** 2026-08-26 · Plan: [`docs/agents/mvno-improve-plan.md`](docs/agents/mvno-improve-plan.md)
+**Refreshed:** 2026-11-20 (added § HSS links; every older item below is unchanged from 2026-08-26) · **Updated:** 2026-08-26 · Plan: [`docs/agents/mvno-improve-plan.md`](../agents/mvno-improve-plan.md)
 **Landed so far:** W1-a, W1-b, W2-a (Sprint 1) · W3-a, W3-b (Sprint 2 core) · Log4j2-only sweep (elisa 19 files + both poms + dist scripts).
 **Test policy:** full test runs are **deferred to the end-of-features batch test** per owner — compile + enforcer green only until then.
 
 ## HSS links (2026-11-20)
 
 Standalone `HssMain` with Diameter S6a/Cx, SS7 MAP SAI (SCTP only) and HTTP/2 Nudm-UEAU on one AuC.
-Doc: [`docs/agents/hss-links.md`](docs/agents/hss-links.md). Changes are in the working tree, not committed.
+Doc: [`docs/agents/hss-links.md`](../agents/hss-links.md). Changes are in the working tree, not committed.
 
 **Done (unit / integration proven, not wire-proven):**
 

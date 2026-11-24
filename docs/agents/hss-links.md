@@ -389,7 +389,7 @@ Secrets: the SBB never logs the event or a body (a 200 carries XRES* and KAUSF).
 | `HssLinksTest` | 16 | config parsing, env names, malformed values refused, SCTP-only refusal, KEK refusal, SBI listen + serve on loopback, port in use fails the start, Diameter TCP bind on loopback with `peerReady=false`, SS7 link not active fails loudly |
 | `HssAppTest`, `HssBootstrapTest` | 5 / 4 | face install, strict `@InjectRa` abort, APT auto-deploy trap, factory instances answer AIR / MAP SAI / Nudm-UEAU |
 
-Full `epc` reactor: see `PENDING-ISSUES.md` § HSS links for the per-module counts.
+Full `epc` reactor: see `docs/status/PENDING-ISSUES.md` § HSS links for the per-module counts.
 
 ### 8.2 NOT wire-proven
 

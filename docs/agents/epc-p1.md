@@ -97,7 +97,7 @@
 
 ## 5. Lab wiring — open5gs MME (epc profile)
 
-Full runbook: **`epc/loadtest/open5gs/README.md`**. This wires the open5gs MME
+Full runbook: **`docs/epc/loadtest/open5gs/README.md`**. This wires the open5gs MME
 (standalone `open5gs-mmed`, built in-tree) into the `epc` profile as our real
 S6a **client** (freeDiameter `ConnectPeer` → `epc-hss:3868`) and S11 **client**
 (gtpc client → `epc-sgwc:2123`). No MongoDB needed (only open5gs udr/hss/pcrf/pcf
