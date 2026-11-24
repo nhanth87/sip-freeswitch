@@ -1,8 +1,43 @@
 # PENDING ISSUES — MVNO improve plan (W1/W2/W3) + Log4j2-only landing
 
-**Updated:** 2026-08-26 · Plan: [`docs/agents/mvno-improve-plan.md`](docs/agents/mvno-improve-plan.md)
+**Refreshed:** 2026-11-20 (added § HSS links; every older item below is unchanged from 2026-08-26) · **Updated:** 2026-08-26 · Plan: [`docs/agents/mvno-improve-plan.md`](docs/agents/mvno-improve-plan.md)
 **Landed so far:** W1-a, W1-b, W2-a (Sprint 1) · W3-a, W3-b (Sprint 2 core) · Log4j2-only sweep (elisa 19 files + both poms + dist scripts).
 **Test policy:** full test runs are **deferred to the end-of-features batch test** per owner — compile + enforcer green only until then.
+
+## HSS links (2026-11-20)
+
+Standalone `HssMain` with Diameter S6a/Cx, SS7 MAP SAI (SCTP only) and HTTP/2 Nudm-UEAU on one AuC.
+Doc: [`docs/agents/hss-links.md`](docs/agents/hss-links.md). Changes are in the working tree, not committed.
+
+**Done (unit / integration proven, not wire-proven):**
+
+| # | Item |
+|---|------|
+| H1 | `epc-crypto` `FiveGAka`: KDF (TS 33.220 B.2), KAUSF (TS 33.501 A.2), XRES* (A.4, low 128 bits), HXRES* (A.5) — `FiveGAkaTest` 20 |
+| H2 | `epc-hss` `UeauService`: Nudm-UEAU generate-auth-data, SUPI + null-scheme SUCI, resync, causes per cached TS 29.503 v16.5.0 — `UeauServiceTest` 14 |
+| H3 | `UdmUeauSbb` on `ra-http-server`; HTTP/2 h2c prior knowledge proven on loopback (`UdmUeauHttp2Test`); `jackson-bom` 2.21.8 in epc-hss pom |
+| H4 | `HssLinks` / `HssApp` / `HssBootstrap` / `HssMain`: only enabled links boot, `Bound.verify()`, exit 2 on link failure, SS7 non-SCTP refused, public KEK refused unless `hss.lab=true`; no-arg SBB constructors removed (auto-deploy trap) |
+| H5 | `mise.toml` (root + `epc/`): `java = "zulu-25"` (the pinned `zulu-25.34.17` was not installed) |
+| H6 | Full `epc` reactor `mvn -o test` (2026-11-20, exit 0, 0 fail/err/skip): epc-api 363 · epc-crypto 448 · epc-hss 185 · epc-sgwc 27 · epc-pgwc 28 · epc-pcef 49 · epc-pcrf 47 · epc-up-linux 50 · epc-host 104 = **1301** |
+
+**Open:**
+
+| # | Item | Detail |
+|---|------|--------|
+| H-W1 | **Wire proof — none yet** | no real MME/S-CSCF (Diameter), no VLR/SGSN/STP (SS7 never on a live SCTP association), no AUSF; no 3GPP-published 5G AKA vector (self-derived KAT only) |
+| H-R1 | Blocking JDBC on the SBB event thread | `JdbcHssRepository` (`reserveSqn`) runs on the event thread |
+| H-R2 | `HssSbb` / `HlrSbb` have no catch-all in `onEvent` | JDBC error or an S6a AIR with bad AUTS / missing RAND throws → no AIA / no MAP answer; peer waits for its own timer (`UdmUeauSbb` already answers 500) |
+| H-R3 | Startup status printed once | `peerReady` / `m3uaRouteReady` are read `false` at boot; no live link status afterwards |
+| H-R4 | Diameter default peer 127.0.0.1 | empty `hss.diameter.peers` = one server-role peer on loopback → set `hss.diameter.peers` for a real MME/S-CSCF |
+| H-R5 | Home PLMN hard-coded 001/01 in `HssMain` | AIR without Visited-PLMN-Id → KASME bound to 001/01 |
+| H-R6 | `hss.jdbc.password` default `epc` | require it outside a lab |
+| H-R7 | **epc-host KEK default** | compose `epc-hss` (epc-host) still defaults `epc.hss.secret.kek-hex` to the public KEK: `epc/epc-host/src/main/resources/application.properties`, `dist/epc/configs/application.properties`, `EpcRuntime.java` — not covered by the new `hss.lab` rule |
+| H-R8 | Jackson BOM | any module that puts Vert.x next to `ra-jss7` needs `jackson-bom` 2.21.8 |
+| H-R9 | SBB factory rule | SBBs registered via `registerSbbType` must not have a no-arg constructor |
+| H-R10 | 3GPP gaps vs `epc-hss-pcrf-full3gpp.md` Phase A.3 | AIR returns one vector (ignores Number-Of-Requested-Vectors); no Δ window on resync; Cx MAR has no AUTS resync |
+| H-R11 | PUR has no MME allowlist check | any Diameter peer can mark a subscriber purged |
+| H-P1 | `HssMain` packaging | no dist / run script / compose service starts it; prove-the-artifact not done |
+| H-D1 | Owner decisions pending | Elisa `HssLiteService` (second AuC + SQN space) · ~~GitHub repo visibility~~ decided 2026-11-24: **public** |
 
 ## Sprint 3 / next code
 

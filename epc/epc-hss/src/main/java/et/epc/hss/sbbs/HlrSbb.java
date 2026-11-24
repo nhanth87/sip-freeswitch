@@ -22,20 +22,28 @@ import org.restcomm.protocols.ss7.map.api.service.mobility.authentication.SendAu
  * dialog that carried the request. Vector generation lives in {@link HlrAuthService}
  * (Postgres SoT, TS 33.102 Annex C SQN); ra-jss7 only encodes MAP.
  */
-@SbbAnnotation(name = "HlrSbb", vendor = "et.epc", version = "1.0")
+@SbbAnnotation(name = HlrSbb.SBB_NAME, vendor = "et.epc", version = "1.0")
 public class HlrSbb implements Sbb, SleeEventHandler {
 
     private static final Logger LOG = LogManager.getLogger(HlrSbb.class);
 
+    /** Annotation name; the {@code mapEventToSbb} target in {@code HssApp}. */
+    public static final String SBB_NAME = "HlrSbb";
+    /** {@code Ss7RaEndpoint.getRaName()} default. */
+    public static final String SS7_RA = "ra-jss7";
+
     private final HlrAuthService auc;
 
-    @InjectRa(name = "ra-jss7")
+    @InjectRa(name = SS7_RA)
     private volatile RaCommandPort ss7Ra;
 
-    public HlrSbb() {
-        this(null);
-    }
-
+    /**
+     * No no-arg constructor on purpose: the container auto-deploys every APT-indexed SBB it can
+     * instantiate under its annotation name, and {@code ensureMappedSbbAttached} looks that
+     * entity up <em>before</em> the {@code registerSbbType} factory. An auto-deployed instance
+     * with no {@link HlrAuthService} would then answer every SendAuthenticationInfo with a MAP
+     * error. Pinned by {@code HssAppTest}.
+     */
     public HlrSbb(HlrAuthService auc) {
         this.auc = auc;
     }

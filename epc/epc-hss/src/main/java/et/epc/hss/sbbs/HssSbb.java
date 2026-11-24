@@ -52,10 +52,12 @@ public abstract class HssSbb extends CmpBackedSbb implements SleeEventHandler {
     @InjectRa(name = "diameter-ra")
     private volatile RaCommandPort diameterRa;
 
-    public HssSbb() {
-        this(null, null, null);
-    }
-
+    /**
+     * No no-arg constructor on purpose (here and on {@link $Concrete}): an APT-indexed SBB the
+     * container can instantiate is auto-deployed under its annotation name, and that entity
+     * shadows the {@code registerSbbType} factory for {@code mapEventToSbb} — it would answer
+     * every S6a/Cx request with 3002 (no services). Pinned by {@code HssAppTest}.
+     */
     public HssSbb(HssService hss, CxService cx, PcrfPort pcrf) {
         this.hss = hss;
         this.cx = cx;
@@ -286,10 +288,6 @@ public abstract class HssSbb extends CmpBackedSbb implements SleeEventHandler {
 
     public static final class $Concrete extends HssSbb {
         private final Map<String, Object> local = new ConcurrentHashMap<>();
-
-        public $Concrete() {
-            super();
-        }
 
         public $Concrete(HssService hss, CxService cx, PcrfPort pcrf) {
             super(hss, cx, pcrf);

@@ -1,8 +1,14 @@
 # sip-freeswitch / Elisa
 
+<!-- knowledge-vault:start -->
+## Knowledge base
+
+This project's docs are mirrored and cross-linked in the shared Obsidian vault: `~/Desktop/knowledge-vault/telecom-project/Projects/Ethiopia/Elisa (sip-freeswitch)/Elisa (sip-freeswitch) — Index.md` (home: `~/Desktop/knowledge-vault/telecom-project/Home.md`). Search there first; the files in this repo stay the source of truth.
+<!-- knowledge-vault:end -->
+
 Private nhanth87 SIP edge (**Elisa** IMS) + **epc/** (4G MVNO HSS/SGW/PGW, separate process) + FreeSWITCH + PostgreSQL. Elisa target **10 000 INVITE/s**.
 
-> **PRIVATE** — `nhanth87/sip-freeswitch` only.
+> **PUBLIC** — `nhanth87/sip-freeswitch` only (no other remotes).
 
 ## Quick start
 

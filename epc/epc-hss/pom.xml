@@ -10,6 +10,23 @@
   </parent>
   <artifactId>epc-hss</artifactId>
   <name>epc :: epc-hss</name>
+  <dependencyManagement>
+    <dependencies>
+      <!-- One Jackson line for the whole module. Without it Maven's nearest-wins picks
+           jackson-core 2.15.2 from jSS7 tcap-impl (ra-jss7), and Vert.x 4.5.36 JSON fails at
+           runtime with NoSuchMethodError BufferRecycler.releaseToPool() (added in 2.16).
+           2.21.8 is the version vertx-dependencies 4.5.36 is built against; it also lifts
+           flyway's jackson-databind 2.19.1 and jSS7's jackson-dataformat-xml 2.15.2 onto the
+           same core/annotations. -->
+      <dependency>
+        <groupId>com.fasterxml.jackson</groupId>
+        <artifactId>jackson-bom</artifactId>
+        <version>2.21.8</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
   <dependencies>
     <dependency>
       <groupId>et.epc</groupId>
@@ -39,6 +56,14 @@
           <artifactId>log4j</artifactId>
         </exclusion>
       </exclusions>
+    </dependency>
+    <dependency>
+      <!-- UDM face: Nudm-UEAU over HTTP/2 cleartext prior knowledge (TS 29.500 §5.2.2).
+           Vert.x 4.5 HTTP server; also supplies io.vertx.core.json (Jackson) used by
+           UdmUeauSbb to parse/encode the TS 29.503 JSON bodies. -->
+      <groupId>com.microjainslee</groupId>
+      <artifactId>ra-http-server</artifactId>
+      <version>${microjainslee.version}</version>
     </dependency>
     <dependency>
       <!-- jSS7's org.apache.log4j calls routed into Log4j2 -->

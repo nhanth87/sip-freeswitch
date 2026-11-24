@@ -1,13 +1,30 @@
 # AGENTS.md — nhanth87 SIP + FreeSWITCH (sip-freeswitch / Elisa)
 
+<!-- knowledge-vault:start -->
+## Knowledge vault — search first, update after (mandatory for every request and every AI agent)
+
+The shared Obsidian vault `~/Desktop/knowledge-vault/telecom-project` mirrors the README, docs and design files of every project, plus the supermemory export, with cross-project topic indexes and agent-written notes.
+
+**1. Search first.** Before exploring this repo or answering, look in the vault:
+- Home: `~/Desktop/knowledge-vault/telecom-project/Home.md`. This project: `~/Desktop/knowledge-vault/telecom-project/Projects/Ethiopia/Elisa (sip-freeswitch)/Elisa (sip-freeswitch) — Index.md`. Topics: `~/Desktop/knowledge-vault/telecom-project/Topics/`.
+- `rg -n "<term>" ~/Desktop/knowledge-vault/telecom-project`. Every note has `vault_source:` = the real file; open that file to edit or quote.
+- Claude Code sessions get relevant vault hits injected automatically (UserPromptSubmit hook). Other agents (opencode, codex, cursor, kimi, gemini) must run the `rg` themselves.
+
+**2. Update after.** When the request produces knowledge (a decision, lesson, deploy or rollback, investigation or root cause, design, howto, status change):
+- if it belongs in this repo, edit the repo docs (README, docs/, ADR, lessons) — never the vault copy;
+- otherwise, or in addition, write `~/Desktop/knowledge-vault/telecom-project/Notes/<Project>/YYYY-MM-DD <title>.md` following `~/Desktop/knowledge-vault/telecom-project/Notes/README.md`. **No secrets in notes.**
+- Then re-sync: `python3 -I ~/Desktop/knowledge-vault/telecom-project/_meta/sync_vault.py`. Claude's Stop hook and a 30-min timer also sync automatically.
+<!-- knowledge-vault:end -->
+
 **Tree:** `ethiopia-working-dir/worktrees/voice-service/sip-freeswitch`  
 Symlink: `worktrees/sip-freeswitch/main`. Chat worktree: `worktrees/sip-freeswitch/chat`.
 
-## Visibility — PRIVATE (mandatory)
+## Visibility — PUBLIC (owner decision 2026-11-24)
 
-**sip-freeswitch is a private project.** Repo: `nhanth87/sip-freeswitch` only.
+**sip-freeswitch is a public repo.** Repo: `nhanth87/sip-freeswitch` only.
 
-- Never make public; never push Digicom-ET/other remotes; never public mirrors.
+- Never push Digicom-ET/other remotes; no extra mirrors.
+- Public means: no secrets in commits — lab passwords stay in git-ignored files (`deploy/volte/demo-accounts.env`), keys/KEK/DB passwords come from the environment. Scan the diff before every push.
 
 ## Role — lab IMS Core (not an SBC)
 

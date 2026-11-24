@@ -3,6 +3,7 @@ package et.epc.hss.app;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -48,6 +49,8 @@ class HssBootstrapTest {
         assertEquals("postgres", svc.mode());
         assertInstanceOf(JdbcHssRepository.class, svc.repo());
         assertInstanceOf(JdbcSecretStore.class, svc.secrets());
+        assertNotNull(svc.hlr(), "MAP SAI face shares the durable AuC");
+        assertNotNull(svc.ueau(), "Nudm-UEAU face shares the durable AuC");
 
         // App-level: the SBB install must succeed against the durable services too.
         container = new MicroSleeContainer(MicroSleeConfiguration.builder()
@@ -56,7 +59,7 @@ class HssBootstrapTest {
                 .sbbPoolMax(4096)
                 .build());
         HssApp app = new HssApp();
-        app.install(container, svc.hss(), svc.cx(), null);
+        app.install(container, svc, null);
         assertTrue(container.getSbbTypeRegistry().isRegistered(HssSbb.class));
         assertTrue(app.wired().contains("SbbType:HssSbb"));
         assertTrue(app.wired().contains("EventMapping:DiameterRequestEvent->HssSbb"));

@@ -4,12 +4,16 @@ import et.epc.api.PlmnId;
 import et.epc.hss.CxService;
 import et.epc.hss.HeapHssRepository;
 import et.epc.hss.HeapSecretStore;
+import et.epc.hss.HlrAuthService;
 import et.epc.hss.HssRepository;
 import et.epc.hss.HssService;
 import et.epc.hss.JdbcHssRepository;
 import et.epc.hss.JdbcSecretStore;
 import et.epc.hss.MmeAllowlist;
 import et.epc.hss.SecretStore;
+import et.epc.hss.UeauService;
+import java.util.Collection;
+import java.util.List;
 import java.util.Objects;
 import javax.sql.DataSource;
 import org.apache.logging.log4j.LogManager;
@@ -52,11 +56,20 @@ public final class HssBootstrap {
      */
     public static Services durable(PlmnId homePlmn, DataSource ds, String kekHex,
                                    MmeAllowlist allowlist) {
+        return durable(homePlmn, ds, kekHex, allowlist, List.of());
+    }
+
+    /**
+     * Durable path with the Nudm-UEAU serving-network allowlist ({@code UeauService}): PLMNs
+     * besides each subscriber's home PLMN whose AUSF may fetch 5G HE AVs.
+     */
+    public static Services durable(PlmnId homePlmn, DataSource ds, String kekHex,
+                                   MmeAllowlist allowlist, Collection<PlmnId> allowedServingPlmns) {
         Objects.requireNonNull(ds, "epc-hss durable path requires a DataSource");
         String kek = (kekHex == null || kekHex.isBlank()) ? DEFAULT_KEK_HEX : kekHex;
         JdbcHssRepository repo = new JdbcHssRepository(ds);
         JdbcSecretStore secrets = new JdbcSecretStore(ds, kek);
-        return services(homePlmn, ds, repo, secrets, allowlist, "postgres");
+        return services(homePlmn, ds, repo, secrets, allowlist, allowedServingPlmns, "postgres");
     }
 
     /** Heap fallback for R&amp;D / unit tests — no DB opened. */
@@ -66,8 +79,14 @@ public final class HssBootstrap {
 
     /** Heap fallback with an MME allowlist applied. */
     public static Services heap(PlmnId homePlmn, MmeAllowlist allowlist) {
+        return heap(homePlmn, allowlist, List.of());
+    }
+
+    /** Heap fallback with an MME allowlist and a Nudm-UEAU serving-network allowlist. */
+    public static Services heap(PlmnId homePlmn, MmeAllowlist allowlist,
+                                Collection<PlmnId> allowedServingPlmns) {
         return services(homePlmn, null, new HeapHssRepository(), new HeapSecretStore(),
-                allowlist, "heap (R&D)");
+                allowlist, allowedServingPlmns, "heap (R&D)");
     }
 
     /**
@@ -86,10 +105,20 @@ public final class HssBootstrap {
      */
     public static Services wire(PlmnId homePlmn, String jdbcUrl, String user, String password,
                                 String kekHex, MmeAllowlist allowlist) {
+        return wire(homePlmn, jdbcUrl, user, password, kekHex, allowlist, List.of());
+    }
+
+    /**
+     * As {@link #wire(PlmnId, String, String, String, String, MmeAllowlist)}, plus the
+     * Nudm-UEAU serving-network allowlist ({@code hss.sbi.allowed-serving-plmns}).
+     */
+    public static Services wire(PlmnId homePlmn, String jdbcUrl, String user, String password,
+                                String kekHex, MmeAllowlist allowlist,
+                                Collection<PlmnId> allowedServingPlmns) {
         if (jdbcUrl == null || jdbcUrl.isBlank()) {
             LOG.info("epc-hss bootstrap: no hss.jdbc.url -> heap fallback (R&D mode), "
                     + "mme.allowlist.enabled={}", allowlist.enabled());
-            return heap(homePlmn, allowlist);
+            return heap(homePlmn, allowlist, allowedServingPlmns);
         }
         requirePostgres(jdbcUrl);
         PGSimpleDataSource ds = new PGSimpleDataSource();
@@ -101,7 +130,7 @@ public final class HssBootstrap {
             ds.setPassword(password);
         }
         runMigrations(ds);
-        return durable(homePlmn, ds, kekHex, allowlist);
+        return durable(homePlmn, ds, kekHex, allowlist, allowedServingPlmns);
     }
 
     /** Apply the standalone epc-hss schemas via Flyway on the {@code epc} datasource. */
@@ -114,13 +143,22 @@ public final class HssBootstrap {
         LOG.info("epc-hss Flyway migrated {}", MIGRATION_LOCATION);
     }
 
+    /**
+     * One AuC behind every face: S6a/Cx ({@link HssService}/{@link CxService}), MAP SAI
+     * ({@link HlrAuthService}) and Nudm-UEAU ({@link UeauService}) share the same repository,
+     * secret store and therefore the same SQN space.
+     */
     private static Services services(PlmnId homePlmn, DataSource ds, HssRepository repo,
-                                     SecretStore secrets, MmeAllowlist allowlist, String mode) {
+                                     SecretStore secrets, MmeAllowlist allowlist,
+                                     Collection<PlmnId> allowedServingPlmns, String mode) {
         HssService hss = new HssService(repo, secrets, homePlmn,
                 allowlist == null ? MmeAllowlist.disabled() : allowlist, DEFAULT_MME_REALM);
         CxService cx = new CxService(repo, secrets);
+        HlrAuthService hlr = new HlrAuthService(repo, secrets);
+        UeauService ueau = new UeauService(repo, secrets,
+                allowedServingPlmns == null ? List.of() : allowedServingPlmns);
         boolean durable = repo instanceof JdbcHssRepository;
-        return new Services(ds, repo, secrets, hss, cx, durable, mode);
+        return new Services(ds, repo, secrets, hss, cx, hlr, ueau, durable, mode);
     }
 
     private static void requirePostgres(String jdbcUrl) {
@@ -141,15 +179,18 @@ public final class HssBootstrap {
         return colon < 0 ? url : url.substring(0, colon);
     }
 
-    /** The services wired by a bootstrap run. */
+    /** The services wired by a bootstrap run: one per HSS face, all on one AuC. */
     public record Services(DataSource dataSource, HssRepository repo, SecretStore secrets,
-                           HssService hss, CxService cx, boolean durable, String mode) {
+                           HssService hss, CxService cx, HlrAuthService hlr, UeauService ueau,
+                           boolean durable, String mode) {
 
         public Services {
             Objects.requireNonNull(repo);
             Objects.requireNonNull(secrets);
             Objects.requireNonNull(hss);
             Objects.requireNonNull(cx);
+            Objects.requireNonNull(hlr);
+            Objects.requireNonNull(ueau);
         }
 
         public boolean durable() {
