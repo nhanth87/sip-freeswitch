@@ -12,6 +12,7 @@ import com.microjainslee.ra.pfcp.PfcpFteid;
 import com.microjainslee.ra.pfcp.PfcpRule;
 import com.microjainslee.ra.pfcp.command.PfcpAssociateCommand;
 import com.microjainslee.ra.pfcp.command.PfcpProgramSession;
+import com.microjainslee.ra.pfcp.command.PfcpSessionDeletion;
 import et.epc.api.ApnConfig;
 import et.epc.api.BearerId;
 import et.epc.api.Fteid;
@@ -32,9 +33,7 @@ import java.net.InetSocketAddress;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.apache.logging.log4j.LogManager;
@@ -45,16 +44,13 @@ import org.apache.logging.log4j.Logger;
  * only after PGW-C IP allocation and both UP rule sets are programmed.
  *
  * <p>S5-C can run either in-process (lab fallback, {@code epc.s5c.wire=false})
- * or on the wire (split SGW-C/PGW-C, {@code epc.s5c.wire=true}). In wire mode
- * {@link #createSession} sends {@code CREATE_SESSION_REQUEST} through
- * {@code gtpv2c-ra} to the configured PGW-C peer and correlates the
- * {@code CREATE_SESSION_RESPONSE} by GTPv2 sequence number via
- * {@link #onS5cResponse}.
+ * or on the wire (split SGW-C/PGW-C, {@code epc.s5c.wire=true}). In wire mode the S11
+ * procedure is two-phase ({@link #beginCreateSession} → {@link #onS5cCreateResponse} /
+ * {@link #onS5cTimeout}); nothing waits on the SBB thread.
  */
 public final class SgwControl {
 
     private static final Logger LOG = LogManager.getLogger(SgwControl.class);
-    public static final long S5C_TIMEOUT_MILLIS = 5_000L;
 
     private final EpcClusterConfig cluster;
     private final TeidAllocator teids;
@@ -70,8 +66,12 @@ public final class SgwControl {
     private final AtomicLong seid;
     private final AtomicLong generation = new AtomicLong(1);
     private final AtomicInteger s5cSequence = new AtomicInteger(1);
-    private final ConcurrentHashMap<Integer, CompletableFuture<S5cSessionResult>> s5cPending =
-            new ConcurrentHashMap<>();
+    /** Pending S5-C procedures keyed by our S5-C TEID (the response's header TEID). */
+    private final ConcurrentHashMap<Integer, PendingCreate> pendingCreates = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Integer, PendingDelete> pendingDeletes = new ConcurrentHashMap<>();
+    /** S5-C sequence → S5-C TEID, for the RA's procedure timeout (keyed on sequence). */
+    private final ConcurrentHashMap<Integer, Integer> pendingBySeq = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Integer, ControlPeers> controlPeers = new ConcurrentHashMap<>();
 
     public SgwControl(
             EpcClusterConfig cluster,
@@ -114,23 +114,212 @@ public final class SgwControl {
     }
 
     /**
-     * {@code pgwS5c} is the MME-provided PGW S5/S8 control-plane F-TEID
-     * (interface 5..8). When non-null and {@code epc.s5c.wire=true} it overrides
-     * the configured {@code epc.s5c.pgwc.peer} so the S5-C request follows the
-     * PGW-C the MME selected instead of a hard-coded default.
+     * In-process S5 (lab, {@code epc.s5c.wire=false}): the co-located PGW-C answers at once.
+     * {@code enbS1u} may be null — a Create Session carries no eNB S1-U F-TEID; Modify Bearer does.
      */
     public SgwCreateSessionResult createSession(
             Imsi imsi, ApnConfig apn, Fteid enbS1u, Fteid pgwS5c) {
-        Fteid s11c = teids.allocate(localS11, 10);
-        Fteid s1u = teids.allocate(localS1u, 0);
-        Fteid s5u = teids.allocate(localS11, 4);
-        CreateSessionResult pgwResult = wire
-                ? createSessionWire(imsi, apn, s5u, pgwS5c)
-                : pgw.createSession(imsi, apn, s5u);
+        Fteid s11c = teids.allocate(localS11, GtpcShapes.IF_S11_SGW);
+        Fteid s1u = teids.allocate(localS1u, GtpcShapes.IF_S1U_SGW);
+        Fteid s5u = teids.allocate(localS1u, GtpcShapes.IF_S5U_SGW);
+        CreateSessionResult pgwResult = pgw.createSession(imsi, apn, s5u);
+        return complete(imsi, apn, s11c, s1u, s5u, null, enbS1u, pgwResult);
+    }
+
+    /** The S11 transaction an SGW-C answers once its S5-C leg completes. */
+    public record S11Context(InetSocketAddress mme, int sequence, byte recovery, Fteid mmeS11,
+                             int ebi, byte[] bearerQos, List<Gtpv2Ie> passThrough) {
+        public S11Context {
+            Objects.requireNonNull(mme);
+            passThrough = passThrough == null ? List.of() : List.copyOf(passThrough);
+        }
+    }
+
+    /** An S11 Create Session outcome: accepted with its result, or rejected with a GTP cause. */
+    public record CreateOutcome(S11Context s11, SgwCreateSessionResult result, int cause) {
+        public boolean accepted() {
+            return result != null;
+        }
+    }
+
+    /** An S11 Delete Session outcome (always answered; cause 16 or the PGW-C's cause). */
+    public record DeleteOutcome(S11Context s11, Fteid mmeS11, int cause) {}
+
+    private record PendingCreate(S11Context s11, Imsi imsi, ApnConfig apn, Fteid s11c, Fteid s1u,
+                                 Fteid s5c, Fteid s5u, int sequence) {}
+
+    private record PendingDelete(S11Context s11, int s11cTeid, int sequence) {}
+
+    /**
+     * Per-session control-plane peers. In memory: {@link SessionCheckpoint} has no fields for the
+     * MME S11 / PGW S5-C F-TEIDs yet, so they do not survive a failover (HA gap, documented).
+     */
+    public record ControlPeers(Fteid mmeS11, Fteid sgwS5c, Fteid pgwS5c, Fteid pgwS5u,
+                               InetSocketAddress pgwc) {}
+
+    /**
+     * S11 Create Session. In-process S5 → the outcome now. Wire S5-C → a Create Session Request to
+     * the PGW-C (TS 29.274 §7.2.1) and an empty result: the S11 answer follows
+     * {@link #onS5cCreateResponse} or {@link #onS5cTimeout}. Never blocks the SBB thread — the
+     * S5-C response is itself a SLEE event that a blocked router could not deliver.
+     */
+    public java.util.Optional<CreateOutcome> beginCreateSession(
+            Imsi imsi, ApnConfig apn, S11Context s11, Fteid pgwS5cFromMme) {
+        if (!wire) {
+            SgwCreateSessionResult r = createSession(imsi, apn, null, pgwS5cFromMme);
+            rememberPeers(r.sgwS11c().teid(), new ControlPeers(s11.mmeS11(), null, r.pgw().pgwS5c(),
+                    r.pgw().pgwS5u(), null));
+            return java.util.Optional.of(new CreateOutcome(s11, r, GtpcShapes.CAUSE_ACCEPTED));
+        }
+        InetSocketAddress peer = resolvePgwcPeer(pgwS5cFromMme);
+        if (gtp == null || peer == null) {
+            throw new IllegalStateException(
+                    "epc.s5c.wire=true but gtpv2c-ra / epc.s5c.pgwc.peer not configured");
+        }
+        Fteid s11c = teids.allocate(localS11, GtpcShapes.IF_S11_SGW);
+        Fteid s1u = teids.allocate(localS1u, GtpcShapes.IF_S1U_SGW);
+        Fteid s5c = teids.allocate(localS11, GtpcShapes.IF_S5C_SGW);
+        Fteid s5u = teids.allocate(localS1u, GtpcShapes.IF_S5U_SGW);
+        int seq = nextS5cSequence();
+        pendingCreates.put(s5c.teid(), new PendingCreate(s11, imsi, apn, s11c, s1u, s5c, s5u, seq));
+        pendingBySeq.put(seq, s5c.teid());
+        gtp.sendCommand(new SendGtpv2Message(
+                buildS5cCreateSessionRequest(imsi, apn, s5c, s5u, s11, seq), peer));
+        return java.util.Optional.empty();
+    }
+
+    /** S5-C Create Session Response: correlated on the header TEID (= our S5-C TEID, §5.5.2). */
+    public java.util.Optional<CreateOutcome> onS5cCreateResponse(Gtpv2Message rsp) {
+        PendingCreate p = takePendingCreate(rsp);
+        if (p == null) {
+            LOG.debug("SgwControl unsolicited S5-C Create Session Response teid=0x{} seq={}",
+                    Integer.toHexString(rsp.teid()), rsp.sequence());
+            return java.util.Optional.empty();
+        }
+        int cause = GtpcShapes.cause(rsp);
+        if (cause != GtpcShapes.CAUSE_ACCEPTED) {
+            return java.util.Optional.of(new CreateOutcome(p.s11(), null, cause < 0
+                    ? GtpcShapes.CAUSE_MANDATORY_IE_MISSING : cause));
+        }
+        S5cSessionResult s5;
+        try {
+            s5 = decodeS5cResponse(rsp);
+        } catch (RuntimeException malformed) {
+            LOG.warn("SgwControl S5-C Create Session Response unusable: {}", malformed.getMessage());
+            return java.util.Optional.of(new CreateOutcome(p.s11(), null, GtpcShapes.CAUSE_MANDATORY_IE_MISSING));
+        }
+        CreateSessionResult pgwResult = new CreateSessionResult(s5.ue(), s5.pgwS5c(), s5.pgwS5u(),
+                ChargingId.NONE, PolicyDecision.staticDefault(), 0L, s5.pco());
+        SgwCreateSessionResult r = complete(p.imsi(), p.apn(), p.s11c(), p.s1u(), p.s5u(), p.s5c(), null, pgwResult);
+        rememberPeers(p.s11c().teid(), new ControlPeers(p.s11().mmeS11(), p.s5c(), s5.pgwS5c(),
+                s5.pgwS5u(), resolvePgwcPeer(s5.pgwS5c())));
+        return java.util.Optional.of(new CreateOutcome(p.s11(), r, GtpcShapes.CAUSE_ACCEPTED));
+    }
+
+    /**
+     * T3 × N3 expired on an S5-C request ({@code GtpProcedureTimeoutEvent}): the MME gets
+     * "Remote peer not responding" (Create) or a local-cleanup accept (Delete).
+     */
+    public java.util.Optional<Object> onS5cTimeout(int sequence) {
+        Integer key = pendingBySeq.remove(sequence);
+        if (key == null) {
+            return java.util.Optional.empty();
+        }
+        PendingCreate c = pendingCreates.remove(key);
+        if (c != null) {
+            return java.util.Optional.of(new CreateOutcome(c.s11(), null,
+                    GtpcShapes.CAUSE_REMOTE_PEER_NOT_RESPONDING));
+        }
+        PendingDelete d = pendingDeletes.remove(key);
+        if (d != null) {
+            return java.util.Optional.of(finishDelete(d.s11(), d.s11cTeid(), GtpcShapes.CAUSE_ACCEPTED));
+        }
+        return java.util.Optional.empty();
+    }
+
+    /**
+     * S11 Delete Session (§7.2.9): wire → Delete Session Request to the PGW-C on its S5-C TEID,
+     * answer when it responds (or times out); in-process → now. The Sxa session goes either way.
+     */
+    public java.util.Optional<DeleteOutcome> beginDeleteSession(int s11cTeid, S11Context s11) {
+        ControlPeers peers = controlPeers.get(s11cTeid);
+        if (!wire || peers == null || peers.pgwS5c() == null || peers.sgwS5c() == null
+                || peers.pgwc() == null || gtp == null) {
+            sessions.findByS11cTeid(s11cTeid).ifPresent(cp ->
+                    pgw.deleteSession(new Imsi(cp.imsiDigits()), cp.apn()));
+            return java.util.Optional.of(finishDelete(s11, s11cTeid, GtpcShapes.CAUSE_ACCEPTED));
+        }
+        int seq = nextS5cSequence();
+        pendingDeletes.put(peers.sgwS5c().teid(), new PendingDelete(s11, s11cTeid, seq));
+        pendingBySeq.put(seq, peers.sgwS5c().teid());
+        gtp.sendCommand(new SendGtpv2Message(new Gtpv2Message(Gtpv2MessageType.DELETE_SESSION_REQUEST,
+                peers.pgwS5c().teid(), seq, (byte) 1,
+                List.of(new Gtpv2Ie(Gtpv2Ie.EBI, 0, new byte[] {(byte) s11.ebi()}))), peers.pgwc()));
+        return java.util.Optional.empty();
+    }
+
+    /** S5-C Delete Session Response, correlated on the header TEID (our S5-C TEID). */
+    public java.util.Optional<DeleteOutcome> onS5cDeleteResponse(Gtpv2Message rsp) {
+        PendingDelete d = pendingDeletes.remove(rsp.teid());
+        if (d == null) {
+            Integer key = pendingBySeq.get(rsp.sequence());
+            d = key == null ? null : pendingDeletes.remove(key);
+        }
+        if (d == null) {
+            return java.util.Optional.empty();
+        }
+        pendingBySeq.remove(d.sequence());
+        int cause = GtpcShapes.cause(rsp);
+        return java.util.Optional.of(finishDelete(d.s11(), d.s11cTeid(),
+                cause == GtpcShapes.CAUSE_CONTEXT_NOT_FOUND ? GtpcShapes.CAUSE_ACCEPTED : cause));
+    }
+
+    /** MME S11 F-TEID of a session (response header TEID on S11, §5.5.2). */
+    public Fteid mmeS11(int s11cTeid) {
+        ControlPeers p = controlPeers.get(s11cTeid);
+        return p == null ? null : p.mmeS11();
+    }
+
+    public ControlPeers controlPeers(int s11cTeid) {
+        return controlPeers.get(s11cTeid);
+    }
+
+    private DeleteOutcome finishDelete(S11Context s11, int s11cTeid, int cause) {
+        ControlPeers peers = controlPeers.remove(s11cTeid);
+        sessions.findByS11cTeid(s11cTeid).ifPresent(cp -> {
+            pfcp.sendCommand(new PfcpSessionDeletion(sgwu, cp.pfcpSeid(), List.of()));
+            sessions.remove(cp.sessionId());
+        });
+        return new DeleteOutcome(s11, peers == null ? null : peers.mmeS11(), cause);
+    }
+
+    private PendingCreate takePendingCreate(Gtpv2Message rsp) {
+        PendingCreate p = pendingCreates.remove(rsp.teid());
+        if (p == null) {
+            // A PGW-C that put TEID 0 in the header (pre-§5.5.2) still correlates on sequence.
+            Integer key = pendingBySeq.get(rsp.sequence());
+            p = key == null ? null : pendingCreates.remove(key);
+        }
+        if (p != null) {
+            pendingBySeq.remove(p.sequence());
+        }
+        return p;
+    }
+
+    private int nextS5cSequence() {
+        // Bottom half of the 24-bit space; gtpv2c-ra keeps the top half for its Echo.
+        return s5cSequence.getAndIncrement() & 0x7f_ffff;
+    }
+
+    private void rememberPeers(int s11cTeid, ControlPeers peers) {
+        controlPeers.put(s11cTeid, peers);
+    }
+
+    /** Sxa program + SGW checkpoint once the PGW-C side is known. */
+    private SgwCreateSessionResult complete(Imsi imsi, ApnConfig apn, Fteid s11c, Fteid s1u, Fteid s5u,
+                                            Fteid s5c, Fteid enbS1u, CreateSessionResult pgwResult) {
         long se = seid.getAndIncrement();
-        pfcp.sendCommand(new PfcpProgramSession(sgwu, se, List.of(
-                new PfcpRule(se, "pdr-ul", pf(s1u), pf(enbS1u), "qer-1", true),
-                new PfcpRule(se, "pdr-dl", pf(enbS1u), pf(s1u), "qer-1", false))));
+        pfcp.sendCommand(new PfcpProgramSession(sgwu, se, accessRules(se, s1u, s5u, pgwResult.pgwS5u(), enbS1u)));
         SessionKeys keys = new SessionKeys(imsi, apn.apn(), new BearerId(5));
         String ue = pgwResult.ue().ipv4() == null ? "" : pgwResult.ue().ipv4().getHostAddress();
         sessions.put(new SessionCheckpoint(
@@ -142,28 +331,17 @@ public final class SgwControl {
         return new SgwCreateSessionResult(pgwResult.ue(), s11c, s1u, s5u, pgwResult);
     }
 
-    /** S5-C split path: send CREATE_SESSION_REQUEST and block for the correlated response. */
-    private CreateSessionResult createSessionWire(
-            Imsi imsi, ApnConfig apn, Fteid sgwS5u, Fteid pgwS5c) {
-        InetSocketAddress peer = resolvePgwcPeer(pgwS5c);
-        if (gtp == null || peer == null) {
-            throw new IllegalStateException(
-                    "epc.s5c.wire=true but gtpv2c-ra / epc.s5c.pgwc.peer not configured");
+    /**
+     * SGW-U tunnels as (local, remote) pairs: uplink S1-U(SGW) → S5-U(PGW); downlink
+     * S5-U(SGW) → S1-U(eNB) once the eNB is known (Modify Bearer).
+     */
+    private static List<PfcpRule> accessRules(long se, Fteid s1u, Fteid s5u, Fteid pgwS5u, Fteid enbS1u) {
+        List<PfcpRule> rules = new java.util.ArrayList<>();
+        rules.add(new PfcpRule(se, "pdr-ul", pf(s1u), pf(pgwS5u), "qer-1", true));
+        if (enbS1u != null) {
+            rules.add(new PfcpRule(se, "pdr-dl", pf(s5u), pf(enbS1u), "qer-1", false));
         }
-        int seq = s5cSequence.getAndIncrement() & 0xff_ffff;
-        Gtpv2Message req = buildS5cCreateSessionRequest(imsi, apn, sgwS5u, seq);
-        CompletableFuture<S5cSessionResult> pending = new CompletableFuture<>();
-        s5cPending.put(seq, pending);
-        gtp.sendCommand(new SendGtpv2Message(req, peer));
-        try {
-            S5cSessionResult r = pending.get(S5C_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
-            return new CreateSessionResult(r.ue(), r.pgwS5c(), r.pgwS5u(),
-                    ChargingId.NONE, PolicyDecision.staticDefault(), 0L, r.pco());
-        } catch (Exception e) {
-            throw new IllegalStateException("S5-C create session failed seq=" + seq, e);
-        } finally {
-            s5cPending.remove(seq);
-        }
+        return rules;
     }
 
     /**
@@ -179,40 +357,43 @@ public final class SgwControl {
         return pgwcPeer;
     }
 
-    /** Complete a pending S5-C request; called by the GTP SBB on CREATE_SESSION_RESPONSE. */
-    public void onS5cResponse(Gtpv2Message response) {
-        CompletableFuture<S5cSessionResult> pending = s5cPending.remove(response.sequence());
-        if (pending == null) {
-            LOG.debug("SgwControl unknown/unsolicited S5-C response seq={}", response.sequence());
-            return;
-        }
-        try {
-            pending.complete(decodeS5cResponse(response));
-        } catch (RuntimeException e) {
-            pending.completeExceptionally(e);
-        }
-    }
-
-    /** Build a split S5-C CREATE_SESSION_REQUEST (IMSI + APN + SGW S5-U F-TEID). */
+    /**
+     * S5-C Create Session Request (TS 29.274 Table 7.2.1-1, S5/S8): IMSI, the MME's pass-through
+     * IEs, Sender F-TEID for CP (SGW S5-C, instance 0), APN, Bearer Context to be created
+     * {EBI, S5/S8-U SGW F-TEID (instance 2), Bearer QoS}. Header TEID 0 (first message).
+     */
     public static Gtpv2Message buildS5cCreateSessionRequest(
-            Imsi imsi, ApnConfig apn, Fteid sgwS5u, int sequence) {
-        return new Gtpv2Message(Gtpv2MessageType.CREATE_SESSION_REQUEST, 0, sequence, (byte) 1,
-                List.of(
-                        new Gtpv2Ie(Gtpv2Ie.IMSI, 0, Gtpv2Ies.tbcd(imsi.digits())),
-                        new Gtpv2Ie(Gtpv2Ie.APN, 0, Gtpv2Ies.encodeApn(apn.apn())),
-                        new Gtpv2Ie(Gtpv2Ie.FTEID, 0, Gtpv2Ies.encodeFteid(gtpFteid(sgwS5u)))));
+            Imsi imsi, ApnConfig apn, Fteid sgwS5c, Fteid sgwS5u, S11Context s11, int sequence) {
+        List<Gtpv2Ie> ies = new java.util.ArrayList<>();
+        ies.add(new Gtpv2Ie(Gtpv2Ie.IMSI, 0, Gtpv2Ies.tbcd(imsi.digits())));
+        if (s11 != null) {
+            ies.addAll(s11.passThrough());
+        }
+        ies.add(GtpcShapes.fteid(0, sgwS5c));
+        ies.add(new Gtpv2Ie(Gtpv2Ie.APN, 0, Gtpv2Ies.encodeApn(apn.apn())));
+        List<Gtpv2Ie> bearer = new java.util.ArrayList<>();
+        bearer.add(GtpcShapes.fteid(2, sgwS5u));
+        if (s11 != null && s11.bearerQos() != null) {
+            bearer.add(new Gtpv2Ie(GtpcShapes.BEARER_QOS, 0, s11.bearerQos()));
+        }
+        ies.add(GtpcShapes.bearerContext(s11 == null ? 5 : s11.ebi(), null, bearer));
+        return new Gtpv2Message(Gtpv2MessageType.CREATE_SESSION_REQUEST, 0, sequence, (byte) 1, ies);
     }
 
-    /** Decode a split S5-C CREATE_SESSION_RESPONSE into the SGW-relevant fields. */
+    /**
+     * S5-C Create Session Response: Sender F-TEID (PGW S5-C, instance 0), PAA, Bearer Context
+     * created {EBI, Cause, S5/S8-U PGW F-TEID}, PCO relayed toward the MME.
+     */
     public static S5cSessionResult decodeS5cResponse(Gtpv2Message response) {
-        Gtpv2Ie fteid = response.first(Gtpv2Ie.FTEID);
-        if (fteid == null) {
-            throw new IllegalArgumentException("CREATE_SESSION_RESPONSE missing S5-C F-TEID");
+        Fteid pgwS5c = GtpcShapes.fteidAt(response, 0);
+        if (pgwS5c == null) {
+            throw new IllegalArgumentException("CREATE_SESSION_RESPONSE missing the PGW S5-C F-TEID");
         }
-        Fteid pgwS5c = apiFteid(Gtpv2Ies.decodeFteid(fteid.value()));
-        Fteid pgwS5u = apiFteid(Gtpv2Ies.s1uFromBearerContext(response));
+        Fteid pgwS5u = GtpcShapes.bearerFteid(GtpcShapes.firstBearer(response), GtpcShapes.IF_S5U_PGW);
+        if (pgwS5u == null) {
+            throw new IllegalArgumentException("CREATE_SESSION_RESPONSE missing the S5/S8-U PGW F-TEID");
+        }
         UeAddresses ue = decodePdnAddress(response);
-        // W3-b: relay PGW PCO (IE 78) verbatim toward the MME.
         return new S5cSessionResult(ue, pgwS5c, pgwS5u, Gtpv2Ies.pcoFrom(response));
     }
 
@@ -231,10 +412,13 @@ public final class SgwControl {
     private Fteid modifyAccess(SessionCheckpoint cp, Fteid newEnbS1u) {
         Fteid s1u = cp.sgwS1u();
         long se = cp.pfcpSeid();
-        pfcp.sendCommand(new PfcpProgramSession(sgwu, se, List.of(
-                new PfcpRule(se, "pdr-ul", pf(s1u), pf(newEnbS1u), "qer-1", true),
-                new PfcpRule(se, "pdr-dl", pf(newEnbS1u), pf(s1u), "qer-1", false))));
+        pfcp.sendCommand(new PfcpProgramSession(sgwu, se,
+                accessRules(se, s1u, cp.sgwS5u(), pgwS5u(cp), newEnbS1u)));
         return s1u;
+    }
+
+    private static Fteid pgwS5u(SessionCheckpoint cp) {
+        return cp.pgwS5u();
     }
 
     /**
@@ -248,8 +432,8 @@ public final class SgwControl {
             // the S5 / UP session alive. ra-pfcp has no discrete FAR modify type
             // yet (task_0001), so represent the deactivation as a session reprogram
             // that retains the uplink S1-U -> S5-U leg and removes the downlink PDR.
-            pfcp.sendCommand(new PfcpProgramSession(sgwu, se, List.of(
-                    new PfcpRule(se, "pdr-ul", pf(cp.sgwS1u()), pf(cp.sgwS5u()), "qer-1", true))));
+            pfcp.sendCommand(new PfcpProgramSession(sgwu, se,
+                    accessRules(se, cp.sgwS1u(), cp.sgwS5u(), pgwS5u(cp), null)));
             return true;
         }).orElse(false);
     }

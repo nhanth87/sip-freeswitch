@@ -92,7 +92,7 @@ class GtpGatewaySbbTest {
                         new Gtpv2Ie(Gtpv2Ie.IMSI, 0, Gtpv2Ies.tbcd("001010000000001")),
                         new Gtpv2Ie(Gtpv2Ie.APN, 0, Gtpv2Ies.encodeApn("internet")),
                         new Gtpv2Ie(Gtpv2Ie.FTEID, 0, Gtpv2Ies.encodeFteid(
-                                new GtpFteid(0x1111, enb, 0)))));
+                                new GtpFteid(0x1111, enb, 10)))));
     }
 
     private static Gtpv2Message mbr(int s11cTeid, int seq, int enbTeid) throws Exception {
@@ -190,13 +190,34 @@ class GtpGatewaySbbTest {
         assertEquals(64, lastCause());
     }
 
+    /** No session behind the TEID: TS 29.274 cause 64, not a blind accept. */
     @Test
-    void deleteSessionAnswersAccepted() throws Exception {
+    void deleteSessionWithoutContextAnswersCause64() throws Exception {
         sbb.onEvent(new Gtpv2MessageEvent(
                 new Gtpv2Message(Gtpv2MessageType.DELETE_SESSION_REQUEST, 0, 9, (byte) 1, List.of()), MME), null);
         Gtpv2Message rsp = last();
         assertEquals(Gtpv2MessageType.DELETE_SESSION_RESPONSE, rsp.type());
         assertEquals(9, rsp.sequence());
+        assertEquals(Gtpv2Ies.CAUSE_CONTEXT_NOT_FOUND, lastCause());
+    }
+
+    /** S11 answers carry the MME's S11 TEID in the header (§5.5.2), Delete included. */
+    @Test
+    void createThenDeleteAnswersOnTheMmeTeid() throws Exception {
+        sbb = new GtpGatewaySbb.$Concrete(sgw(), null, null);
+        inject(sbb, "gtpRa", gtpPort);
+        sbb.onEvent(new Gtpv2MessageEvent(csr(7), MME), null);
+        Gtpv2Message cs = last();
+        assertEquals(0x1111, cs.teid(), "Create Session Response header TEID = MME S11 TEID");
+        int sgwS11 = et.epc.sgwc.GtpcShapes.fteidAt(cs, 0).teid();
+        assertEquals(et.epc.sgwc.GtpcShapes.IF_S11_SGW, et.epc.sgwc.GtpcShapes.fteidAt(cs, 0).interfaceType());
+        assertNotNull(et.epc.sgwc.GtpcShapes.fteidAt(cs, 1), "PGW S5/S8 C-plane F-TEID (instance 1)");
+
+        sbb.onEvent(new Gtpv2MessageEvent(
+                new Gtpv2Message(Gtpv2MessageType.DELETE_SESSION_REQUEST, sgwS11, 9, (byte) 1, List.of()), MME), null);
+        Gtpv2Message ds = last();
+        assertEquals(Gtpv2MessageType.DELETE_SESSION_RESPONSE, ds.type());
+        assertEquals(0x1111, ds.teid());
         assertEquals(Gtpv2Ies.CAUSE_REQUEST_ACCEPTED, lastCause());
     }
 

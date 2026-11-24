@@ -1,6 +1,7 @@
 package et.epc.sgwc;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -31,122 +32,135 @@ import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/** S5-C request/response correlation: SgwControl blocks for the PGW-C reply. */
+/**
+ * S5-C is two-phase: the S11 Create Session goes out as an S5-C request and the SBB thread is
+ * released; the S5-C response (another SLEE event) completes it. The old version blocked the SBB
+ * thread for the answer — on the wire the router could never deliver it (5 s timeout, cause 73).
+ */
 class S5cWireResponseCorrelationTest {
 
     private static final InetSocketAddress PGWC_PEER = new InetSocketAddress("192.0.2.70", 2123);
+    private static final InetSocketAddress MME = new InetSocketAddress("192.0.2.9", 2123);
 
-    @Test
-    void createSessionSendsS5cRequestAndCompletesOnResponse() throws Exception {
+    private final List<SendGtpv2Message> sent = new ArrayList<>();
+    private HeapSessionStore store;
+    private SgwControl sgw;
+
+    private SgwControl wired(boolean wire) throws Exception {
         EpcClusterConfig cfg = EpcClusterConfig.local("epc-sgwc-1");
-        HeapSessionStore store = new HeapSessionStore();
+        store = new HeapSessionStore();
         PfcpRaEndpoint pfcp = new PfcpRaEndpoint();
         pfcp.activate(noop());
         InetAddress local = InetAddress.getByName("192.0.2.30");
         InetSocketAddress sgwu = new InetSocketAddress("192.0.2.40", 8805);
+        PgwControl pgw = new PgwControl(cfg, new Ipam(), new PcefService(), store, pfcp, local, sgwu);
+        RaCommandPort gtp = cmd -> sent.add((SendGtpv2Message) cmd);
+        return new SgwControl(cfg, store, pgw, pfcp, local, local, sgwu, gtp, wire, PGWC_PEER);
+    }
 
-        PgwControl pgw = new PgwControl(cfg, new Ipam(), new PcefService(), store,
-                cmd -> {}, local, sgwu);
+    private static SgwControl.S11Context s11(int seq) {
+        return new SgwControl.S11Context(MME, seq, (byte) 1,
+                new Fteid(0xA001, ip("192.0.2.9"), GtpcShapes.IF_S11_MME), 5, null, List.of());
+    }
 
-        List<SendGtpv2Message> sent = new ArrayList<>();
-        SgwControl[] holder = new SgwControl[1];
-        RaCommandPort gtp = cmd -> {
-            SendGtpv2Message s = (SendGtpv2Message) cmd;
-            sent.add(s);
-            holder[0].onS5cResponse(response(s.message()));
-        };
-        holder[0] = new SgwControl(cfg, store, pgw, pfcp, local, local, sgwu, gtp, true, PGWC_PEER);
-
-        Fteid enb = new Fteid(0x1111, InetAddress.getByName("192.0.2.50"), 0);
-        SgwCreateSessionResult r = holder[0].createSession(
-                new Imsi("001010000000001"), ApnConfig.internet(), enb);
-
+    @Test
+    void createSessionReturnsAtOnceAndTheResponseCompletesIt() throws Exception {
+        sgw = wired(true);
+        var started = sgw.beginCreateSession(new Imsi("001010000000001"), ApnConfig.internet(), s11(4), null);
+        assertTrue(started.isEmpty(), "wire mode never answers S11 before S5-C does");
         assertEquals(1, sent.size());
-        assertEquals(Gtpv2MessageType.CREATE_SESSION_REQUEST, sent.get(0).message().type());
+        Gtpv2Message req = sent.get(0).message();
         assertEquals(PGWC_PEER, sent.get(0).peer());
+        Fteid sgwS5c = GtpcShapes.fteidAt(req, 0);
 
-        assertNotNull(r.ue().ipv4());
+        SgwControl.CreateOutcome o = sgw.onS5cCreateResponse(response(req, sgwS5c.teid())).orElseThrow();
+        assertTrue(o.accepted());
+        assertEquals(4, o.s11().sequence(), "answers the MME's own transaction");
+        SgwCreateSessionResult r = o.result();
         assertEquals("10.64.0.10", r.ue().ipv4().getHostAddress());
-        assertEquals(6, r.pgw().pgwS5c().interfaceType());
+        assertEquals(GtpcShapes.IF_S5C_PGW, r.pgw().pgwS5c().interfaceType());
         assertEquals(0x7777, r.pgw().pgwS5c().teid());
         assertEquals(0x8888, r.pgw().pgwS5u().teid());
-
+        assertEquals(GtpcShapes.IF_S11_SGW, r.sgwS11c().interfaceType());
+        assertEquals(GtpcShapes.IF_S1U_SGW, r.sgwS1u().interfaceType());
+        assertEquals(0xA001, sgw.mmeS11(r.sgwS11c().teid()).teid());
         SessionCheckpoint cp = store.findByS11cTeid(r.sgwS11c().teid()).orElseThrow();
-        assertNotNull(cp.pgwS5uKey());
-        assertTrue(cp.pgwS5uKey().startsWith(Integer.toUnsignedString(0x8888)));
-        // S5-C does not carry the PCEF charging id — the SGW checkpoint stores 0.
-        assertEquals(0L, cp.chargingId());
+        assertEquals(0x8888, cp.pgwS5u().teid());
         assertEquals(1, store.size());
     }
 
     @Test
-    void wireDisabledFallsBackToInProcessPgw() throws Exception {
-        EpcClusterConfig cfg = EpcClusterConfig.local("epc-sgwc-1");
-        HeapSessionStore store = new HeapSessionStore();
-        PfcpRaEndpoint pfcp = new PfcpRaEndpoint();
-        pfcp.activate(noop());
-        InetAddress local = InetAddress.getByName("192.0.2.30");
-        InetSocketAddress sgwu = new InetSocketAddress("192.0.2.40", 8805);
+    void aRejectedS5LegRejectsTheS11Request() throws Exception {
+        sgw = wired(true);
+        sgw.beginCreateSession(new Imsi("001010000000001"), ApnConfig.internet(), s11(5), null);
+        Gtpv2Message req = sent.get(0).message();
+        Gtpv2Message reject = new Gtpv2Message(Gtpv2MessageType.CREATE_SESSION_RESPONSE,
+                GtpcShapes.fteidAt(req, 0).teid(), req.sequence(), (byte) 1, List.of(Gtpv2Ies.cause(73)));
+        SgwControl.CreateOutcome o = sgw.onS5cCreateResponse(reject).orElseThrow();
+        assertFalse(o.accepted());
+        assertEquals(73, o.cause());
+        assertEquals(0, store.size());
+    }
 
-        PgwControl pgw = new PgwControl(cfg, new Ipam(), new PcefService(), store, pfcp, local, sgwu);
-        RaCommandPort gtp = cmd -> {
-            throw new AssertionError("wire must not be used when epc.s5c.wire=false");
-        };
-        SgwControl sgw = new SgwControl(cfg, store, pgw, pfcp, local, local, sgwu,
-                gtp, false, PGWC_PEER);
+    @Test
+    void anUnansweredS5LegIsRemotePeerNotResponding() throws Exception {
+        sgw = wired(true);
+        sgw.beginCreateSession(new Imsi("001010000000001"), ApnConfig.internet(), s11(6), null);
+        int seq = sent.get(0).message().sequence();
+        var o = (SgwControl.CreateOutcome) sgw.onS5cTimeout(seq).orElseThrow();
+        assertEquals(GtpcShapes.CAUSE_REMOTE_PEER_NOT_RESPONDING, o.cause());
+        assertTrue(sgw.onS5cTimeout(seq).isEmpty(), "answered once");
+    }
 
-        Fteid enb = new Fteid(0x1111, InetAddress.getByName("192.0.2.50"), 0);
-        SgwCreateSessionResult r = sgw.createSession(
-                new Imsi("001010000000001"), ApnConfig.internet(), enb);
+    @Test
+    void deleteSessionGoesToThePgwOnItsS5Teid() throws Exception {
+        sgw = wired(true);
+        sgw.beginCreateSession(new Imsi("001010000000001"), ApnConfig.internet(), s11(7), null);
+        Gtpv2Message req = sent.get(0).message();
+        int sgwS5cTeid = GtpcShapes.fteidAt(req, 0).teid();
+        SgwCreateSessionResult r = sgw.onS5cCreateResponse(response(req, sgwS5cTeid)).orElseThrow().result();
 
-        assertNotNull(r.ue().ipv4());
-        assertEquals(1L, r.pgw().chargingId().value());
-        // SGW + PGW checkpoints are both present for the in-process path.
-        assertEquals(2, store.size());
+        assertTrue(sgw.beginDeleteSession(r.sgwS11c().teid(), s11(8)).isEmpty());
+        Gtpv2Message dsr = sent.get(1).message();
+        assertEquals(Gtpv2MessageType.DELETE_SESSION_REQUEST, dsr.type());
+        assertEquals(0x7777, dsr.teid(), "header TEID = PGW S5-C TEID");
+        Gtpv2Message dsResp = new Gtpv2Message(Gtpv2MessageType.DELETE_SESSION_RESPONSE, sgwS5cTeid,
+                dsr.sequence(), (byte) 1, List.of(Gtpv2Ies.causeAccepted()));
+        SgwControl.DeleteOutcome d = sgw.onS5cDeleteResponse(dsResp).orElseThrow();
+        assertEquals(16, d.cause());
+        assertEquals(0xA001, d.mmeS11().teid());
+        assertEquals(0, store.size());
+    }
+
+    @Test
+    void wireDisabledAnswersInProcess() throws Exception {
+        sgw = wired(false);
+        SgwControl.CreateOutcome o = sgw.beginCreateSession(
+                new Imsi("001010000000001"), ApnConfig.internet(), s11(1), null).orElseThrow();
+        assertTrue(o.accepted());
+        assertTrue(sent.isEmpty(), "no S5-C wire when epc.s5c.wire=false");
+        assertEquals(2, store.size(), "SGW + PGW checkpoints in-process");
     }
 
     @Test
     void mmeProvidedPgwFteidOverridesConfiguredPeer() throws Exception {
-        EpcClusterConfig cfg = EpcClusterConfig.local("epc-sgwc-1");
-        HeapSessionStore store = new HeapSessionStore();
-        PfcpRaEndpoint pfcp = new PfcpRaEndpoint();
-        pfcp.activate(noop());
-        InetAddress local = InetAddress.getByName("192.0.2.30");
-        InetSocketAddress sgwu = new InetSocketAddress("192.0.2.40", 8805);
-
-        PgwControl pgw = new PgwControl(cfg, new Ipam(), new PcefService(), store,
-                cmd -> {}, local, sgwu);
-
-        List<SendGtpv2Message> sent = new ArrayList<>();
-        SgwControl[] holder = new SgwControl[1];
-        RaCommandPort gtp = cmd -> {
-            SendGtpv2Message s = (SendGtpv2Message) cmd;
-            sent.add(s);
-            holder[0].onS5cResponse(response(s.message()));
-        };
-        holder[0] = new SgwControl(cfg, store, pgw, pfcp, local, local, sgwu, gtp, true, PGWC_PEER);
-
-        Fteid enb = new Fteid(0x1111, InetAddress.getByName("192.0.2.50"), 0);
-        Fteid mmePgwS5c = new Fteid(0x7777, InetAddress.getByName("192.0.2.99"), 6);
-        holder[0].createSession(new Imsi("001010000000001"), ApnConfig.internet(), enb, mmePgwS5c);
-
-        assertEquals(1, sent.size());
-        assertEquals(InetAddress.getByName("192.0.2.99"), sent.get(0).peer().getAddress());
+        sgw = wired(true);
+        Fteid mmePgwS5c = new Fteid(0x7777, ip("192.0.2.99"), GtpcShapes.IF_S5C_PGW);
+        sgw.beginCreateSession(new Imsi("001010000000001"), ApnConfig.internet(), s11(2), mmePgwS5c);
+        assertEquals(ip("192.0.2.99"), sent.get(0).peer().getAddress());
         assertEquals(PGWC_PEER.getPort(), sent.get(0).peer().getPort());
     }
 
-    private static Gtpv2Message response(Gtpv2Message req) {
+    /** A TS 29.274 S5-C Create Session Response: header TEID = the SGW's S5-C TEID. */
+    private static Gtpv2Message response(Gtpv2Message req, int sgwS5cTeid) {
         return new Gtpv2Message(Gtpv2MessageType.CREATE_SESSION_RESPONSE,
-                req.teid(), req.sequence(), req.recovery(),
+                sgwS5cTeid, req.sequence(), req.recovery(),
                 List.of(
                         Gtpv2Ies.causeAccepted(),
-                        new Gtpv2Ie(Gtpv2Ie.FTEID, 0, Gtpv2Ies.encodeFteid(
-                                new GtpFteid(0x7777, ip("192.0.2.60"), 6))),
+                        GtpcShapes.fteid(0, new Fteid(0x7777, ip("192.0.2.60"), GtpcShapes.IF_S5C_PGW)),
                         new Gtpv2Ie(Gtpv2Ie.PDN_ADDRESS, 0, Gtpv2Ies.encodePaa(ip("10.64.0.10"))),
-                        new Gtpv2Ie(Gtpv2Ie.BEARER_CONTEXT, 0, Gtpv2Ies.encodeBearerContext(
-                                Gtpv2Ies.DEFAULT_BEARER_EBI,
-                                new GtpFteid(0x8888, ip("192.0.2.61"), 5),
-                                Gtpv2Ies.causeAccepted()))));
+                        GtpcShapes.bearerContext(5, 16, List.of(GtpcShapes.fteid(2,
+                                new Fteid(0x8888, ip("192.0.2.61"), GtpcShapes.IF_S5U_PGW))))));
     }
 
     private static InetAddress ip(String host) {

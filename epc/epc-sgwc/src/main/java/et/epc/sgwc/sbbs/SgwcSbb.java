@@ -128,7 +128,8 @@ public abstract class SgwcSbb extends CmpBackedSbb implements SleeEventHandler {
             send(error(ev.message(), 73), ev.peer());
             return;
         }
-        SgwCreateSessionResult r = sgw.createSession(imsi, apn, enbS1u);
+        // A Create Session carries no eNB S1-U F-TEID (that is Modify Bearer's).
+        SgwCreateSessionResult r = sgw.createSession(imsi, apn, null);
         setS11cTeid(r.sgwS11c().teid());
         send(createSessionResponse(ev.message(), r), ev.peer());
     }
@@ -138,7 +139,7 @@ public abstract class SgwcSbb extends CmpBackedSbb implements SleeEventHandler {
             LOG.debug("SgwcSbb S5-C response ignored: no SgwControl");
             return;
         }
-        sgw.onS5cResponse(ev.message());
+        sgw.onS5cCreateResponse(ev.message());
     }
 
     private void modifyBearer(Gtpv2MessageEvent ev) {

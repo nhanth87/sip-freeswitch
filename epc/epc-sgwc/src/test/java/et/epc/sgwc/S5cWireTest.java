@@ -19,23 +19,35 @@ import org.junit.jupiter.api.Test;
 /** S5-C wire encode/decode round-trips through the vendor {@code ra-gtpv2c} helpers. */
 class S5cWireTest {
 
+    /** TS 29.274 Table 7.2.1-1 on S5/S8: Sender F-TEID = SGW S5-C (6), S5-U (4) in the Bearer Context. */
     @Test
-    void createSessionRequestRoundTripsThroughCodec() throws Exception {
+    void createSessionRequestCarriesTheS5ControlAndUserPlaneFteids() throws Exception {
         Imsi imsi = new Imsi("001010000000001");
-        Fteid sgwS5u = new Fteid(0x2222, InetAddress.getByName("192.0.2.30"), 4);
+        Fteid sgwS5c = new Fteid(0x1111, InetAddress.getByName("192.0.2.30"), GtpcShapes.IF_S5C_SGW);
+        Fteid sgwS5u = new Fteid(0x2222, InetAddress.getByName("192.0.2.30"), GtpcShapes.IF_S5U_SGW);
+        byte[] qos = new byte[22];
+        qos[1] = 9;
+        SgwControl.S11Context s11 = new SgwControl.S11Context(new java.net.InetSocketAddress("192.0.2.9", 2123),
+                1, (byte) 1, null, 5, qos, List.of(new Gtpv2Ie(GtpcShapes.RAT_TYPE, 0, new byte[] {6})));
 
-        Gtpv2Message req = SgwControl.buildS5cCreateSessionRequest(imsi, ApnConfig.internet(), sgwS5u, 7);
+        Gtpv2Message req = SgwControl.buildS5cCreateSessionRequest(imsi, ApnConfig.internet(), sgwS5c, sgwS5u, s11, 7);
         Gtpv2Message decoded = Gtpv2Codec.decode(Gtpv2Codec.encode(req));
 
         assertEquals(Gtpv2MessageType.CREATE_SESSION_REQUEST, decoded.type());
+        assertEquals(0, decoded.teid(), "first message on S5-C: header TEID 0");
         assertEquals(7, decoded.sequence());
         assertEquals("001010000000001", Gtpv2Ies.imsiDigits(decoded));
         assertEquals("internet", Gtpv2Ies.apn(decoded));
+        assertNotNull(decoded.first(GtpcShapes.RAT_TYPE), "MME IEs passed through");
 
-        GtpFteid s5u = Gtpv2Ies.senderFteid(decoded);
-        assertEquals(sgwS5u.teid(), s5u.teid());
-        assertEquals(sgwS5u.address(), s5u.address());
-        assertEquals(4, s5u.interfaceType());
+        Fteid sender = GtpcShapes.fteidAt(decoded, 0);
+        assertEquals(GtpcShapes.IF_S5C_SGW, sender.interfaceType());
+        assertEquals(0x1111, sender.teid());
+        List<Gtpv2Ie> bearer = GtpcShapes.firstBearer(decoded);
+        Fteid s5u = GtpcShapes.bearerFteid(bearer, GtpcShapes.IF_S5U_SGW);
+        assertEquals(0x2222, s5u.teid());
+        assertEquals(5, GtpcShapes.ebi(decoded, 0));
+        assertNotNull(GtpcShapes.bearerIe(bearer, GtpcShapes.BEARER_QOS));
     }
 
     @Test
@@ -48,7 +60,7 @@ class S5cWireTest {
                 List.of(
                         Gtpv2Ies.causeAccepted(),
                         new Gtpv2Ie(Gtpv2Ie.FTEID, 0, Gtpv2Ies.encodeFteid(
-                                new GtpFteid(0x7777, pgwS5c, 6))),
+                                new GtpFteid(0x7777, pgwS5c, 7))),
                         new Gtpv2Ie(Gtpv2Ie.PDN_ADDRESS, 0, Gtpv2Ies.encodePaa(ue)),
                         new Gtpv2Ie(Gtpv2Ie.BEARER_CONTEXT, 0, Gtpv2Ies.encodeBearerContext(
                                 Gtpv2Ies.DEFAULT_BEARER_EBI,
@@ -59,7 +71,7 @@ class S5cWireTest {
         S5cSessionResult decoded = SgwControl.decodeS5cResponse(wire);
 
         assertEquals(ue, decoded.ue().ipv4());
-        assertEquals(6, decoded.pgwS5c().interfaceType());
+        assertEquals(7, decoded.pgwS5c().interfaceType());
         assertEquals(0x7777, decoded.pgwS5c().teid());
         assertEquals(5, decoded.pgwS5u().interfaceType());
         assertEquals(0x8888, decoded.pgwS5u().teid());

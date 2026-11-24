@@ -1,0 +1,78 @@
+# SGW-C / PGW-C on the wire (docs/agents/epc-sgw-pgw-wire.md):
+#   docker compose -f docker-compose.yml -f docker-compose.services.yml -f docker-compose.epc-wire.yml \
+#     --profile epc up -d postgres-epc epc-sgwc epc-pgwc epc-pcrf epc-up-linux
+#
+#   MME (lab, host 172.20.0.1) --S11--> SGW-C .14 --S5-C--> PGW-C .13 --Gx--> PCRF .12
+#                                         |  Sxa                |  Sxb
+#                                         +------> UP .16 <-----+       (epc-up-linux, PFCP)
+#
+# Every node is micro-jainslee: gtpv2c-ra / pfcp-ra / diameter-ra carry the wire, the SGW-C /
+# PGW-C / PCEF / UPF SBBs run the procedures. Fixed addresses: GTP / PFCP / Diameter peers are
+# resolved once at start.
+x-java: &java
+  JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true -Xms64m -Xmx512m -XX:+UseSerialGC -Dlog4j2.configurationFile=/etc/volte/log4j2.xml"
+
+x-log4j2: &log4j2
+  - ./deploy/volte/log4j2.xml:/etc/volte/log4j2.xml:ro
+
+services:
+  epc-sgwc:
+    networks: !override
+      sf-net:
+        ipv4_address: 172.20.10.14
+    volumes: *log4j2
+    environment:
+      <<: *java
+      # S11 peer: the lab MME on the host side of sf-net (loadtest/gtp/MmeS11.java).
+      EPC_GTP_PEER_HOST: 172.20.0.1
+      EPC_GTP_PEER_PORT: "2123"
+      EPC_S5C_WIRE: "true"
+      EPC_S5C_PGWC_PEER_HOST: 172.20.10.13
+      EPC_S5C_PGWC_PEER_PORT: "2123"
+      EPC_PFCP_PEER_HOST: 172.20.10.16
+      EPC_SGWU_PEER_HOST: 172.20.10.16
+    depends_on: !override
+      postgres-epc:
+        condition: service_healthy
+
+  epc-pgwc:
+    networks: !override
+      sf-net:
+        ipv4_address: 172.20.10.13
+    volumes: *log4j2
+    environment:
+      <<: *java
+      EPC_GTP_PEER_HOST: 172.20.10.14
+      EPC_S5C_WIRE: "true"
+      EPC_S5C_PGWC_PEER_HOST: 172.20.10.14
+      EPC_S5C_PGWC_PEER_PORT: "2123"
+      EPC_PFCP_PEER_HOST: 172.20.10.16
+      EPC_PGWU_PEER_HOST: 172.20.10.16
+      # Gx (TS 29.212): CCR-I/T from the PGW-C PCEF to the PCRF; the PCRF dials in.
+      EPC_PCRF_WIRE_MODE: wire
+      EPC_PCRF_PEER_HOST: epc-pcrf-1.epc.lab
+      EPC_PCRF_DEST_REALM: epc.lab
+      EPC_DIAMETER_ORIGIN_HOST: epc-pgwc-1.epc.lab
+      EPC_DIAMETER_ORIGIN_REALM: epc.lab
+      EPC_DIAMETER_PEERS: "172.20.10.12:0:server:epc-pcrf-1.epc.lab:epc.lab:gx"
+    depends_on: !override
+      postgres-epc:
+        condition: service_healthy
+
+  epc-pcrf:
+    networks: !override
+      sf-net:
+        ipv4_address: 172.20.10.12
+    volumes: *log4j2
+    environment:
+      <<: *java
+      EPC_DIAMETER_PEERS: "172.20.10.13:3868:client:epc-pgwc-1.epc.lab:epc.lab:gx"
+
+  epc-up-linux:
+    networks: !override
+      sf-net:
+        ipv4_address: 172.20.10.16
+    volumes: *log4j2
+    environment:
+      <<: *java
+    cap_add: [NET_ADMIN]

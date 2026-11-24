@@ -19,6 +19,7 @@ import com.microjainslee.ra.pfcp.PfcpRule;
 import com.microjainslee.ra.pfcp.PfcpUsageReport;
 import com.microjainslee.ra.pfcp.command.PfcpAssociateCommand;
 import com.microjainslee.ra.pfcp.command.PfcpProgramSession;
+import com.microjainslee.ra.pfcp.command.PfcpSessionDeletion;
 import et.epc.pcef.UsageRecord;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -50,6 +51,8 @@ public final class PgwControl {
     private final AtomicLong generation = new AtomicLong(1);
     /** Sxb SEID -> PGW checkpoint id correlate for inbound PFCP Session Reports. */
     private final ConcurrentHashMap<Long, String> bySeid = new ConcurrentHashMap<>();
+    /** PGW S5-C TEID → SGW-C peer (in memory, like the SGW-C's control peers — HA gap). */
+    private final ConcurrentHashMap<Integer, S5cPeer> s5cPeers = new ConcurrentHashMap<>();
 
     public PgwControl(
             EpcClusterConfig cluster,
@@ -88,7 +91,8 @@ public final class PgwControl {
             // decision otherwise) — PcefService.beginGxSession does the gate.
             PolicyDecision policy = pcef.beginGxSession(imsi, apn.apn(), ueIp,
                     charging.value(), WirePcrfClient.REQ_TYPE_INITIAL);
-            Fteid s5c = teids.allocate(localS5, 6);
+            // TS 29.274 §8.22: 7 = S5/S8 PGW GTP-C, 5 = S5/S8 PGW GTP-U.
+            Fteid s5c = teids.allocate(localS5, 7);
             Fteid s5u = teids.allocate(localS5, 5);
             pfcp.sendCommand(new PfcpProgramSession(pgwu, se, List.of(
                     new PfcpRule(se, "pdr-ul", pf(s5u), pf(sgwS5u), "qer-1", true),
@@ -117,9 +121,27 @@ public final class PgwControl {
         sessions.get(SessionCheckpoint.pgwId(keys)).ifPresent(cp -> {
             sessions.remove(cp.sessionId());
             bySeid.remove(cp.pfcpSeid());
+            pfcp.sendCommand(new PfcpSessionDeletion(pgwu, cp.pfcpSeid(), List.of()));
             ipam.release(imsi);
             pcef.close(new ChargingId(cp.chargingId()));
         });
+    }
+
+    /** The SGW-C end of an S5-C session: who to answer, and with which header TEID. */
+    public record S5cPeer(Imsi imsi, String apn, Fteid sgwS5c) {}
+
+    /** Remember the SGW-C's S5-C F-TEID under our PGW S5-C TEID (header TEID of its later requests). */
+    public void registerS5c(int pgwS5cTeid, S5cPeer peer) {
+        s5cPeers.put(pgwS5cTeid, peer);
+    }
+
+    /** S5-C Delete Session (TS 29.274 §7.2.9): correlated on our S5-C TEID; null if unknown. */
+    public S5cPeer deleteByS5cTeid(int pgwS5cTeid) {
+        S5cPeer peer = s5cPeers.remove(pgwS5cTeid);
+        if (peer != null) {
+            deleteSession(peer.imsi(), peer.apn());
+        }
+        return peer;
     }
 
     /**

@@ -55,7 +55,9 @@ class PcoRelayTest {
                 List.of(
                         Gtpv2Ies.causeAccepted(),
                         new Gtpv2Ie(Gtpv2Ie.FTEID, 0, Gtpv2Ies.encodeFteid(
-                                new GtpFteid(0x77c, pgw, 6)))));
+                                new GtpFteid(0x77c, pgw, 7))),
+                        new Gtpv2Ie(Gtpv2Ie.BEARER_CONTEXT, 0, Gtpv2Ies.encodeBearerContext((byte) 5,
+                                new GtpFteid(0x55ab, pgw, 5), Gtpv2Ies.causeAccepted()))));
         S5cSessionResult r = SgwControl.decodeS5cResponse(s5cRsp);
         assertEquals(List.of(), r.pco());
     }

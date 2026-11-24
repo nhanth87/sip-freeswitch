@@ -57,6 +57,10 @@ public class EpcRuntime {
     @ConfigProperty(name = "epc.gtp.peer.port", defaultValue = "2123")
     int gtpPeerPort;
 
+    /** Address advertised in F-TEIDs; blank = this host's first non-loopback IPv4. */
+    @ConfigProperty(name = "epc.local.address")
+    java.util.Optional<String> localAddress;
+
     @ConfigProperty(name = "epc.pfcp.peer.host", defaultValue = "127.0.0.1")
     String pfcpPeerHost;
 
@@ -165,6 +169,8 @@ public class EpcRuntime {
                 .withMmeAllowlist(MmeAllowlist.parse(mmeAllowlistEnabled, mmeAllowlist.orElse(null)))
                 .withS5c(s5cWire, s5cPgwcPeerHost, s5cPgwcPeerPort)
                 .withUp(upUrrMode, upUrrPollMs, upUrrBaselinePersistMs, upQerEnabled,
+                        new InetSocketAddress(pfcpPeerHost, pfcpPeerPort))
+                .withPlane(PlaneAddress.resolve(localAddress.orElse(null)),
                         new InetSocketAddress(pfcpPeerHost, pfcpPeerPort));
         if (datastoreEnabled && dataSource != null) {
             org.flywaydb.core.Flyway.configure()

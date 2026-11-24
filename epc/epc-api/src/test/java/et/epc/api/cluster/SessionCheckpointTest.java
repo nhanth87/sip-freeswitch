@@ -42,7 +42,7 @@ class SessionCheckpointTest {
     void parsesFteidFromKeyWithInterfaceTypes() {
         SessionCheckpoint c = cp();
         assertEquals(11, c.sgwS1u().teid());
-        assertEquals(0, c.sgwS1u().interfaceType());
+        assertEquals(1, c.sgwS1u().interfaceType(), "TS 29.274 §8.22: 1 = S1-U SGW (0 is the eNB)");
         assertEquals("192.0.2.1", c.sgwS1u().address().getHostAddress());
         assertEquals(4, c.sgwS5u().interfaceType());
         assertEquals(5, c.pgwS5u().interfaceType());

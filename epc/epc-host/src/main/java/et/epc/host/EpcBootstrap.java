@@ -21,6 +21,7 @@ import et.epc.api.cluster.SessionCheckpoint;
 import et.epc.api.cluster.SessionStore;
 import com.microjainslee.ra.gtpv2c.Gtpv2RaEndpoint;
 import com.microjainslee.ra.gtpv2c.event.GtpEchoEvent;
+import com.microjainslee.ra.gtpv2c.event.GtpProcedureTimeoutEvent;
 import com.microjainslee.ra.gtpv2c.event.Gtpv2MessageEvent;
 import et.epc.host.sbb.DiameterGatewaySbb;
 import et.epc.host.sbb.GtpGatewaySbb;
@@ -127,6 +128,8 @@ public final class EpcBootstrap {
     private long upUrrBaselinePersistMs = 300_000L;
     private boolean upQerEnabled;
     private InetSocketAddress upCpPeer = new InetSocketAddress("127.0.0.1", 8805);
+    private InetAddress planeLocal;
+    private InetSocketAddress upPeer = new InetSocketAddress("127.0.0.1", 8805);
     private LinuxGtpAgent upAgent;
     private UrrIpIndex upIpIndex;
     private UrrPoller urrPoller;
@@ -168,6 +171,24 @@ public final class EpcBootstrap {
             this.upCpPeer = cpPeer;
         }
         return this;
+    }
+
+    /**
+     * Control/user-plane addressing: {@code local} goes into every F-TEID this node allocates,
+     * {@code up} is the PFCP peer (SGW-U for an SGW-C, PGW-U for a PGW-C).
+     */
+    public EpcBootstrap withPlane(InetAddress local, InetSocketAddress up) {
+        if (local != null) {
+            this.planeLocal = local;
+        }
+        if (up != null) {
+            this.upPeer = up;
+        }
+        return this;
+    }
+
+    private static InetAddress loopback() {
+        return InetAddress.getLoopbackAddress();
     }
 
     public EpcBootstrap withDataSource(DataSource ds) {
@@ -288,6 +309,7 @@ public final class EpcBootstrap {
                     () -> new GtpGatewaySbb.$Concrete(sgw, pgw, pf));
             container.mapEventToSbb(Gtpv2MessageEvent.class, "GtpGatewaySbb");
             container.mapEventToSbb(GtpEchoEvent.class, "GtpGatewaySbb");
+            container.mapEventToSbb(GtpProcedureTimeoutEvent.class, "GtpGatewaySbb");
             container.mapEventToSbb(PfcpMessageEvent.class, "GtpGatewaySbb");
             container.mapEventToSbb(PfcpAssociationEvent.class, "GtpGatewaySbb");
             container.mapEventToSbb(PfcpHeartbeatEvent.class, "GtpGatewaySbb");
@@ -400,13 +422,11 @@ public final class EpcBootstrap {
             cxService = new CxService(hssRepo, secrets, CxService.servingOr(scscfUri));
             wired.add(db ? "secrets-postgres" : "secrets-heap");
         }
-        InetAddress local;
-        try {
-            local = InetAddress.getByName("127.0.0.1");
-        } catch (Exception e) {
-            throw new IllegalStateException(e);
-        }
-        InetSocketAddress up = new InetSocketAddress("127.0.0.1", 8805);
+        // Advertised in every F-TEID we hand out (S11 / S1-U / S5-C / S5-U) and the PFCP peer
+        // (SGW-U on Sxa, PGW-U on Sxb). Both were hard-coded to 127.0.0.1: a split SGW-C / PGW-C
+        // told its peers to answer on their own loopback and programmed a UP that was not there.
+        InetAddress local = planeLocal != null ? planeLocal : loopback();
+        InetSocketAddress up = upPeer;
         if (roles.wireDiameter()) {
             s6a = new S6aPeerWatch();
             s6a.bound();

@@ -54,8 +54,9 @@ public record SessionCheckpoint(
         return new SessionKeys(imsi(), apn, new et.epc.api.BearerId(ebi));
     }
 
+    /** TS 29.274 §8.22 interface type 1 = S1-U SGW GTP-U. */
     public Fteid sgwS1u() {
-        return parseFteid(sgwS1uKey, 0);
+        return parseFteid(sgwS1uKey, 1);
     }
 
     public Fteid sgwS5u() {
