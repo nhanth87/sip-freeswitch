@@ -8,6 +8,8 @@ public final class S6aAvp {
     public static final int ORIGIN_REALM = 296;
     public static final int ORIGIN_HOST = 264;
     public static final int VISITED_PLMN_ID = 1407;
+    public static final int REQUESTED_EUTRAN_AUTH_INFO = 1408;
+    public static final int NUMBER_OF_REQUESTED_VECTORS = 1410;
     public static final int RE_SYNCHRONIZATION_INFO = 1411;
     public static final int RAND = 1447;
     public static final int XRES = 1448;

@@ -3,6 +3,7 @@ package et.epc.hss;
 import com.microjainslee.ra.diameter.avp.DiameterAvp;
 import com.microjainslee.ra.diameter.command.SendDiameterRequest;
 import et.epc.api.Imsi;
+import et.epc.crypto.Auts;
 import et.epc.crypto.Bytes;
 import et.epc.crypto.Milenage;
 import java.security.SecureRandom;
@@ -26,6 +27,9 @@ public final class CxService {
 
     /** Single-node lab default; a {@link ScscfPicker} replaces this by capabilities. */
     public static final String DEFAULT_SCSCF = "sip:scscf.ims.lab:5060";
+
+    /** TS 29.228 SIP-Number-Auth-Items: at most 5 vectors per MAR. */
+    public static final int MAX_AUTH_ITEMS = 5;
 
     /** Lab charging-collection-function names echoed in SAR→SAA Charging-Information(618). */
     public static final String PRIMARY_CCF = "pcrf.ims.lab";
@@ -124,6 +128,24 @@ public final class CxService {
      * SIP-Authenticate(609) = RAND‖AUTN. Never reuses EPS vectors (no KASME path).
      */
     public CxResult mar(String impi, String impu) {
+        return mar(impi, impu, 1, null, null);
+    }
+
+    /**
+     * MAR → MAA with resync and multi-vector support.
+     *
+     * <ul>
+     *   <li>Resync (TS 29.228 §6.3.3, TS 33.203): when the MAR carries
+     *       SIP-Auth-Data-Item with SIP-Authorization = RAND‖AUTS, SQN_MS is recovered
+     *       with {@code Auts.recoverSqnMs} (MAC-S check) and adopted via
+     *       {@code forceSqn} before fresh vectors are reserved — mirroring the S6a AIR
+     *       resync. A present-but-invalid AUTS (wrong length or MAC-S failure) yields
+     *       Experimental-Result 4181 with no SQN consumed.</li>
+     *   <li>Multi-vector: {@code requestedItems} (SIP-Number-Auth-Items, TS 29.228
+     *       §6.1.7) is honored 1..MAX_AUTH_ITEMS; each vector reserves its own SQN.</li>
+     * </ul>
+     */
+    public CxResult mar(String impi, String impu, int requestedItems, byte[] resyncRand, byte[] resyncAuts) {
         SubscriberRecord rec = resolve(impi, impu);
         if (rec == null || !rec.profile().enabled()) {
             return CxResult.error(CxAvp.ERROR_USER_UNKNOWN);
@@ -134,39 +156,68 @@ public final class CxService {
         byte[] ki = secrets.ki(rec.imsi());
         byte[] opc = secrets.opc(rec.imsi());
         byte[] amf = secrets.amf(rec.imsi());
-        long usedSqn = repo.reserveSqn(rec.imsi());
-        byte[] rand = random16();
-        byte[] sqn6 = Bytes.sqnToBytes(usedSqn);
-        Milenage.Result m = Milenage.compute(ki, opc, rand, sqn6, amf);
-        byte[] autn = Bytes.concat(Bytes.xor(sqn6, m.ak()), amf, m.macA());
+        if (resyncRand != null || resyncAuts != null) {
+            // Only the crypto check is 4181; a repository failure is not "bad AUTS" and goes
+            // to the SBB catch-all (5012).
+            long sqnMs;
+            try {
+                if (resyncRand == null || resyncRand.length != 16
+                        || resyncAuts == null || resyncAuts.length != 14) {
+                    throw new IllegalArgumentException("bad MAR resync RAND/AUTS");
+                }
+                sqnMs = Auts.recoverSqnMs(ki, opc, resyncRand, resyncAuts);
+            } catch (RuntimeException badAuts) {
+                return CxResult.error(CxAvp.AUTHENTICATION_DATA_UNAVAILABLE);
+            }
+            repo.forceSqn(rec.imsi(), sqnMs);
+        }
+        int n = Math.max(1, Math.min(MAX_AUTH_ITEMS, requestedItems));
+        record ImsVector(byte[] rand, byte[] autn, byte[] res, byte[] ck, byte[] ik) {}
+        List<ImsVector> vectors = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            long usedSqn = repo.reserveSqn(rec.imsi());
+            byte[] rand = random16();
+            byte[] sqn6 = Bytes.sqnToBytes(usedSqn);
+            Milenage.Result m = Milenage.compute(ki, opc, rand, sqn6, amf);
+            byte[] autn = Bytes.concat(Bytes.xor(sqn6, m.ak()), amf, m.macA());
+            vectors.add(new ImsVector(rand, autn, m.res(), m.ck(), m.ik()));
+        }
+        ImsVector first = vectors.get(0);
 
         LinkedHashMap<Integer, String> avps = new LinkedHashMap<>();
         put(avps, CxAvp.USER_NAME, username(impi, rec));
-        avps.put(CxAvp.SIP_NUMBER_AUTH_ITEMS, "1");
+        avps.put(CxAvp.SIP_NUMBER_AUTH_ITEMS, Integer.toString(n));
         avps.put(CxAvp.SIP_AUTHENTICATION_SCHEME, CxAvp.SCHEME_AKA_V1_MD5);
-        avps.put(CxAvp.SIP_AUTHENTICATE, Bytes.toHex(Bytes.concat(rand, autn)));
-        avps.put(CxAvp.SIP_AUTHORIZATION, Bytes.toHex(m.res()));
-        avps.put(CxAvp.CONFIDENTIALITY_KEY, Bytes.toHex(m.ck()));
-        avps.put(CxAvp.INTEGRITY_KEY, Bytes.toHex(m.ik()));
+        avps.put(CxAvp.SIP_AUTHENTICATE, Bytes.toHex(Bytes.concat(first.rand(), first.autn())));
+        avps.put(CxAvp.SIP_AUTHORIZATION, Bytes.toHex(first.res()));
+        avps.put(CxAvp.CONFIDENTIALITY_KEY, Bytes.toHex(first.ck()));
+        avps.put(CxAvp.INTEGRITY_KEY, Bytes.toHex(first.ik()));
 
         // Open5GS S-CSCF consumes the grouped SIP-Auth-Data-Item(612) with 3GPP-vendor leaves,
         // not the flat map above.
         String publicIdentity = username(impi, rec);
         List<DiameterAvp> structured = new ArrayList<>();
-        structured.add(DiameterAvp.grouped3gpp(CxAvp.SIP_AUTH_DATA_ITEM, List.of(
-                DiameterAvp.utf8(CxAvp.SIP_AUTHENTICATION_SCHEME, DiameterAvp.VENDOR_3GPP,
-                        CxAvp.SCHEME_AKA_V1_MD5, true),
-                DiameterAvp.utf8(CxAvp.SIP_AUTHENTICATE, DiameterAvp.VENDOR_3GPP,
-                        Bytes.toHex(Bytes.concat(rand, autn)), true),
-                DiameterAvp.utf8(CxAvp.SIP_AUTHORIZATION, DiameterAvp.VENDOR_3GPP,
-                        Bytes.toHex(m.res()), true),
-                DiameterAvp.octets(CxAvp.CONFIDENTIALITY_KEY, DiameterAvp.VENDOR_3GPP, m.ck(), true),
-                DiameterAvp.octets(CxAvp.INTEGRITY_KEY, DiameterAvp.VENDOR_3GPP, m.ik(), true))));
+        for (int i = 0; i < vectors.size(); i++) {
+            ImsVector v = vectors.get(i);
+            List<DiameterAvp> item = new ArrayList<>();
+            if (n > 1) {
+                item.add(DiameterAvp.u32(CxAvp.SIP_ITEM_NUMBER, DiameterAvp.VENDOR_3GPP, i, true));
+            }
+            item.add(DiameterAvp.utf8(CxAvp.SIP_AUTHENTICATION_SCHEME, DiameterAvp.VENDOR_3GPP,
+                    CxAvp.SCHEME_AKA_V1_MD5, true));
+            item.add(DiameterAvp.utf8(CxAvp.SIP_AUTHENTICATE, DiameterAvp.VENDOR_3GPP,
+                    Bytes.toHex(Bytes.concat(v.rand(), v.autn())), true));
+            item.add(DiameterAvp.utf8(CxAvp.SIP_AUTHORIZATION, DiameterAvp.VENDOR_3GPP,
+                    Bytes.toHex(v.res()), true));
+            item.add(DiameterAvp.octets(CxAvp.CONFIDENTIALITY_KEY, DiameterAvp.VENDOR_3GPP, v.ck(), true));
+            item.add(DiameterAvp.octets(CxAvp.INTEGRITY_KEY, DiameterAvp.VENDOR_3GPP, v.ik(), true));
+            structured.add(DiameterAvp.grouped3gpp(CxAvp.SIP_AUTH_DATA_ITEM, item));
+        }
         structured.add(DiameterAvp.utf8(CxAvp.PUBLIC_IDENTITY, DiameterAvp.VENDOR_3GPP,
                 publicIdentity, true));
         // TS 29.229 §6.1.8: an MAA has no Server-Name — sent with the M-bit, a conforming
         // peer must reject the whole answer (Corsac did: every re-registration then failed).
-        structured.add(DiameterAvp.u32(CxAvp.SIP_NUMBER_AUTH_ITEMS, DiameterAvp.VENDOR_3GPP, 1L, true));
+        structured.add(DiameterAvp.u32(CxAvp.SIP_NUMBER_AUTH_ITEMS, DiameterAvp.VENDOR_3GPP, n, true));
         structured.add(DiameterAvp.enum32(CxAvp.AUTH_SESSION_STATE, 1L));
         return CxResult.ok(avps, structured);
     }
@@ -386,7 +437,7 @@ public final class CxService {
 
         /**
          * The answer as it goes on the wire (TS 29.229): 3GPP outcomes — UAA registration
-         * states, LIA UNREGISTERED_SERVICE, Cx errors 5001/5002 — as Experimental-Result
+         * states, LIA UNREGISTERED_SERVICE, Cx errors 5001/5002/4181 — as Experimental-Result
          * (Vendor-Id 10415) with no Result-Code; base outcomes as Result-Code. The payload
          * leaves as typed AVPs only: the flat map is the in-process contract, and putting it
          * on the wire sent every value (Result-Code included) as an untyped UTF-8 AVP.
@@ -426,7 +477,8 @@ public final class CxService {
 
         /** Outcomes TS 29.229 reports as Experimental-Result for this command. */
         static boolean experimental(int commandCode, long resultCode) {
-            if (resultCode == CxAvp.ERROR_USER_UNKNOWN || resultCode == CxAvp.ERROR_IDENTITIES_DONT_MATCH) {
+            if (resultCode == CxAvp.ERROR_USER_UNKNOWN || resultCode == CxAvp.ERROR_IDENTITIES_DONT_MATCH
+                    || resultCode == CxAvp.AUTHENTICATION_DATA_UNAVAILABLE) {
                 return true;
             }
             if (commandCode == 300) { // UAA: FIRST / SUBSEQUENT_REGISTRATION, UNREGISTERED_SERVICE

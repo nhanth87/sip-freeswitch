@@ -51,7 +51,35 @@ public class HlrSbb implements Sbb, SleeEventHandler {
     @Override
     public void onEvent(SleeEvent event, ActivityContextInterface aci) {
         if (event instanceof Ss7MapEvent.Service svc && svc.message() instanceof SendAuthenticationInfoRequest sai) {
-            onSendAuthenticationInfo(svc.dialogId(), sai);
+            // H-R2: every request path answers. A repository/JDBC failure inside the AuC must
+            // still return a MAP error (TS 29.002 §8.5.2 systemFailure) and close the TCAP
+            // dialog (MapReturnError does), never leave the VLR waiting for its own timer.
+            try {
+                onSendAuthenticationInfo(svc.dialogId(), sai);
+            } catch (RuntimeException | LinkageError failed) {
+                LOG.warn("[HLR] SAI dialog={} imsi=***{} failed: {}", svc.dialogId(),
+                        imsiSuffix(sai), failed.getClass().getName());
+                try {
+                    send(new Ss7Command.MapReturnError(svc.dialogId(), sai.getInvokeId(),
+                            HlrAuthService.ERR_SYSTEM_FAILURE));
+                } catch (RuntimeException sendFailed) {
+                    LOG.warn("[HLR] SAI dialog={} error not sent: {}", svc.dialogId(),
+                            sendFailed.getClass().getName());
+                }
+            }
+        }
+    }
+
+    /** Last 4 IMSI digits for logs; never Ki/OPc/vectors. */
+    private static String imsiSuffix(SendAuthenticationInfoRequest req) {
+        try {
+            if (req.getImsi() == null || req.getImsi().getData() == null) {
+                return "unknown";
+            }
+            String digits = req.getImsi().getData().trim();
+            return digits.length() <= 4 ? "****" : digits.substring(digits.length() - 4);
+        } catch (RuntimeException unreadable) {
+            return "unknown";
         }
     }
 

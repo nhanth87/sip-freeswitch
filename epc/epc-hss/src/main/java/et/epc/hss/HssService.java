@@ -34,6 +34,8 @@ public final class HssService {
     private static final long SUBSCRIBER_STATUS_SERVICE_GRANTED = 0L;
     /** TS 29.272 Network-Access-Mode: ONLY_PACKET(2) — EPS-only, no CS fallback. */
     private static final long NETWORK_ACCESS_MODE_ONLY_PACKET = 2L;
+    /** TS 29.272 §7.3.11 Requested-EUTRAN-Authentication-Info: at most 5 vectors per AIR. */
+    public static final int MAX_VECTORS = 5;
     /** Subscribed periodic RAU/TAU timer in seconds (Open5GS default 12 min, TS 29.272 7.3.134). */
     private static final long SUBSCRIBED_RAU_TAU_TIMER_SECONDS = 12L * 60L;
 
@@ -107,47 +109,111 @@ public final class HssService {
         if (rec == null || !rec.profile().enabled()) {
             return experimentalError(S6aCommand.AIA, S6aAvp.ERROR_USER_UNKNOWN);
         }
+        byte[] ki = secrets.ki(imsi);
+        byte[] opc = secrets.opc(imsi);
+        byte[] amf = secrets.amf(imsi);
         // Resync (SQN/AUTS) path — ra-diameter now decodes RAND + Re-Synchronization-Info
         // as structured octet AVPs; prefer those, fall back to the flat map.
         byte[] auts = req.structuredBytes(S6aAvp.RE_SYNCHRONIZATION_INFO);
         if (auts == null) {
             auts = req.avp(S6aAvp.RE_SYNCHRONIZATION_INFO);
         }
-        if (auts != null && auts.length >= 14) {
-            byte[] rand = req.structuredBytes(S6aAvp.RAND);
-            if (rand == null) {
-                rand = req.avp(S6aAvp.RAND);
+        if (auts != null) {
+            // TS 29.272 §7.3.15: Re-Synchronization-Info = RAND (16) ‖ AUTS (14). A bare
+            // 14-octet AUTS with the RAND in its own AVP is still accepted (older peers).
+            // Present but unusable (wrong length, missing RAND, MAC-S mismatch) →
+            // Experimental-Result 4181 (§5.2.3.1.3). Only the crypto check maps here;
+            // repo/JDBC failures throw and the SBB catch-all answers 5012 (H-R2).
+            byte[] rand;
+            if (auts.length == 30) {
+                rand = Bytes.copy(auts, 0, 16);
+                auts = Bytes.copy(auts, 16, 14);
+            } else {
+                rand = req.structuredBytes(S6aAvp.RAND);
+                if (rand == null) {
+                    rand = req.avp(S6aAvp.RAND);
+                }
             }
-            long recovered = EpsAka.sqnFromAuts(
-                    secrets.ki(imsi), secrets.opc(imsi), rand, Bytes.copy(auts, 0, 14));
-            repo.forceSqn(imsi, recovered);
+            long sqnMs;
+            try {
+                if (rand == null || rand.length != 16 || auts.length != 14) {
+                    throw new IllegalArgumentException("bad resync RAND/AUTS");
+                }
+                sqnMs = EpsAka.sqnFromAuts(ki, opc, rand, auts);
+            } catch (RuntimeException badAuts) {
+                return experimentalError(S6aCommand.AIA, S6aAvp.AUTHENTICATION_DATA_UNAVAILABLE);
+            }
+            repo.forceSqn(imsi, sqnMs);
         }
-        long used = repo.reserveSqn(imsi);
-        EpsAuthVector v = EpsAka.generate(
-                secrets.ki(imsi), secrets.opc(imsi), secrets.amf(imsi), used, visitedPlmn(req));
+        // TS 29.272 §7.3.11: honor Number-Of-Requested-Vectors (1..MAX_VECTORS);
+        // each vector reserves its own SQN, so vectors never repeat.
+        int n = requestedEutranVectors(req);
+        List<EpsAuthVector> vectors = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            long used = repo.reserveSqn(imsi);
+            vectors.add(EpsAka.generate(ki, opc, amf, used, visitedPlmn(req)));
+        }
+        EpsAuthVector first = vectors.get(0);
         return S6aMessage.builder(S6aCommand.AIA, false)
                 .putUtf8(S6aAvp.USER_NAME, imsi.digits())
                 .put(S6aAvp.RESULT_CODE, u32(S6aAvp.SUCCESS))
-                .put(S6aAvp.RAND, v.rand())
-                .put(S6aAvp.XRES, v.xres())
-                .put(S6aAvp.AUTN, v.autn())
-                .put(S6aAvp.KASME, v.kasme())
-                .structured(aiaStructured(v))
+                .put(S6aAvp.RAND, first.rand())
+                .put(S6aAvp.XRES, first.xres())
+                .put(S6aAvp.AUTN, first.autn())
+                .put(S6aAvp.KASME, first.kasme())
+                .structured(aiaStructured(vectors))
                 .build();
     }
 
     /**
-     * 3GPP-grouped AIA vector: {@code Authentication-Info(1490) -> E-UTRAN-Vector(1491)
-     * -> {RAND, XRES, AUTN, KASME}}, plus base Auth-Session-State(277)=NO_STATE_MAINTAINED.
+     * TS 29.272 §7.3.11 Requested-EUTRAN-Authentication-Info: honor
+     * Number-Of-Requested-Vectors, clamped to 1..MAX_VECTORS. The grouped form
+     * (1408 → 1410) is preferred; the flat string form is a best-effort fallback.
      */
-    private static List<DiameterAvp> aiaStructured(EpsAuthVector v) {
-        DiameterAvp vector = DiameterAvp.grouped3gpp(S6aAvp.E_UTRAN_VECTOR, List.of(
-                DiameterAvp.octets(S6aAvp.RAND, DiameterAvp.VENDOR_3GPP, v.rand(), true),
-                DiameterAvp.octets(S6aAvp.XRES, DiameterAvp.VENDOR_3GPP, v.xres(), true),
-                DiameterAvp.octets(S6aAvp.AUTN, DiameterAvp.VENDOR_3GPP, v.autn(), true),
-                DiameterAvp.octets(S6aAvp.KASME, DiameterAvp.VENDOR_3GPP, v.kasme(), true)));
+    private static int requestedEutranVectors(S6aMessage req) {
+        DiameterAvp direct = req.findStructured(S6aAvp.NUMBER_OF_REQUESTED_VECTORS);
+        if (direct != null) {
+            return clampVectors(direct.asUnsigned32());
+        }
+        DiameterAvp group = req.findStructured(S6aAvp.REQUESTED_EUTRAN_AUTH_INFO);
+        if (group != null) {
+            for (DiameterAvp child : group.children()) {
+                if (child.code() == S6aAvp.NUMBER_OF_REQUESTED_VECTORS) {
+                    return clampVectors(child.asUnsigned32());
+                }
+            }
+        }
+        String flat = req.avpUtf8(S6aAvp.NUMBER_OF_REQUESTED_VECTORS);
+        if (flat != null) {
+            try {
+                return clampVectors(Long.parseLong(flat.trim()));
+            } catch (NumberFormatException notANumber) {
+                // fall through to the default of one vector
+            }
+        }
+        return 1;
+    }
+
+    private static int clampVectors(long v) {
+        return (int) Math.max(1, Math.min(MAX_VECTORS, v));
+    }
+
+    /**
+     * 3GPP-grouped AIA vectors: {@code Authentication-Info(1490) -> E-UTRAN-Vector(1491)*
+     * -> {RAND, XRES, AUTN, KASME}}, plus base Auth-Session-State(277)=NO_STATE_MAINTAINED.
+     * One E-UTRAN-Vector per requested vector (TS 29.272 §7.3.11).
+     */
+    private static List<DiameterAvp> aiaStructured(List<EpsAuthVector> vectors) {
+        List<DiameterAvp> eutran = new ArrayList<>(vectors.size());
+        for (EpsAuthVector v : vectors) {
+            eutran.add(DiameterAvp.grouped3gpp(S6aAvp.E_UTRAN_VECTOR, List.of(
+                    DiameterAvp.octets(S6aAvp.RAND, DiameterAvp.VENDOR_3GPP, v.rand(), true),
+                    DiameterAvp.octets(S6aAvp.XRES, DiameterAvp.VENDOR_3GPP, v.xres(), true),
+                    DiameterAvp.octets(S6aAvp.AUTN, DiameterAvp.VENDOR_3GPP, v.autn(), true),
+                    DiameterAvp.octets(S6aAvp.KASME, DiameterAvp.VENDOR_3GPP, v.kasme(), true))));
+        }
         return List.of(
-                DiameterAvp.grouped3gpp(S6aAvp.AUTHENTICATION_INFO, List.of(vector)),
+                DiameterAvp.grouped3gpp(S6aAvp.AUTHENTICATION_INFO, eutran),
                 DiameterAvp.enum32(S6aAvp.AUTH_SESSION_STATE, 1L));
     }
 
@@ -305,6 +371,11 @@ public final class HssService {
     }
 
     private S6aMessage pur(S6aMessage req) {
+        if (!peerAllowed(req)) {
+            // Same drawbridge as AIR/ULR (H-R11): a peer outside the allowlist must not
+            // mark a subscriber purged — refuse 3002 with no state change.
+            return experimentalError(S6aCommand.PUR, S6aAvp.ERROR_UNKNOWN_PEER);
+        }
         Imsi imsi = imsiOf(req);
         repo.setPurged(imsi, true);
         return ok(S6aCommand.PUA, imsi);

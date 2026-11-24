@@ -1,7 +1,7 @@
 # Standalone HSS links — Diameter, SS7 MAP and HTTP/2 SBI on one AuC
 
 **Status:** code + tests landed 2026-11-20 (HSS upgrade T1–T4, uncommitted when this page was written).
-**Nothing on this page is wire-proven.** See [Proof level](#proof-level-honestly).
+**Wire-proven: the SS7 face only** (MAP SAI over M3UA/SCTP, 2026-11-24, §8.3). Diameter and SBI are not. See [Proof level](#proof-level-honestly).
 **Code:** `epc/epc-hss` — `app/HssMain`, `app/HssLinks`, `app/HssApp`, `app/HssBootstrap`,
 `sbbs/HssSbb`, `sbbs/HlrSbb`, `sbbs/UdmUeauSbb`, `HssService`, `CxService`, `HlrAuthService`,
 `UeauService`; `epc/epc-crypto` — `FiveGAka`, `Sqn`, `Auts`, `Milenage`.
@@ -72,8 +72,7 @@ Malformed values are **refused, not defaulted**: a bad boolean, a bad number, a 
 | `hss.jdbc.password` | `HSS_JDBC_PASSWORD` | `epc` (lab default) | DB password. **Set it outside a lab.** |
 | `epc.hss.mme.allowlist.enabled` | `EPC_HSS_MME_ALLOWLIST_ENABLED` | `false` | S6a AIR/ULR peer allowlist (Open5GS #4337). Parsed leniently (anything but `true` = off). |
 | `epc.hss.mme.allowlist` | `EPC_HSS_MME_ALLOWLIST` | empty | Comma list of origin hosts / realms / PLMNs. |
-
-The home PLMN is **hard-coded to 001/01** in `HssMain` (no key yet).
+| `hss.home-plmn` | `HSS_HOME_PLMN` | `00101` | Home PLMN as MCCMNC (5 or 6 digits, TS 23.003 §2.2). Used when an AIR has no Visited-PLMN-Id. Malformed → refused (exit 2). |
 
 ### 3.2 Diameter link (S6a / Cx)
 
@@ -104,10 +103,13 @@ The home PLMN is **hard-coded to 001/01** in `HssMain` (no key yet).
 | `hss.ss7.remote-ssn` | `HSS_SS7_REMOTE_SSN` | `7` | VLR SSN. |
 | `hss.ss7.routing-context` | `HSS_SS7_ROUTING_CONTEXT` | `100` | M3UA routing context. |
 | `hss.ss7.network-appearance` | `HSS_SS7_NETWORK_APPEARANCE` | `102` | M3UA network appearance. |
-| `hss.ss7.invoke-timeout-ms` | `HSS_SS7_INVOKE_TIMEOUT_MS` | `120000` | TCAP invoke timer. |
+| `hss.ss7.invoke-timeout-ms` | `HSS_SS7_INVOKE_TIMEOUT_MS` | `30000` | TCAP invoke timer (TS 29.002 §17.6 timer *m*, 15–30 s). Keep it ≤ 60 s: jSS7 sets it before the dialog timeout (60 s default) and refuses a larger value at activation. |
 | `hss.ss7.dialog-idle-timeout-ms` | `HSS_SS7_DIALOG_IDLE_TIMEOUT_MS` | `300000` | TCAP dialog idle timer. |
 
-For a lab without the native F-Stack library, use kernel SCTP (`sctp_backend=NETTY_KERNEL`).
+For a lab without the native F-Stack library, use kernel SCTP: `-Dsctp.backend=NETTY_KERNEL --add-modules jdk.sctp`
+(`sctp-impl` 2.27.34 is pinned in the epc-hss pom for that backend).
+jSS7 writes its management XML files (`epc-hss-ss7-*.xml`) into the **working directory** and reloads them
+at the next start: run the HSS from its own directory, never from the repo.
 Never TCP. Check endpoints in `/proc/net/sctp/eps`, not `ss -tlnp`.
 
 ### 3.4 SBI link (Nudm-UEAU)
@@ -154,10 +156,12 @@ enabled faces → register the RAs → `container.start()` → `Bound.verify()`.
   the probe is the proof.
 - An enabled link that did not come up → the container stops, `HssMain` exits **2**. A refused
   config or KEK also exits 2.
-- The status line is printed **once**, at boot:
-  `diameter=bound(tcp h:p, peerReady=false) ss7=active(sctp …, m3uaRouteReady=false) sbi=listening h2c h:p`.
-  `peerReady` and `m3uaRouteReady` are read at boot and are normally `false` then. Bound,
-  active and listening are **local** truth, not peer truth. Nothing re-reports them later.
+- The status line (`epc-hss status diameter=bound(tcp h:p, peerReady=…) ss7=active(sctp …,
+  m3uaRouteReady=…) sbi=listening h2c h:p`) is printed at boot, then re-read every 30 s and printed
+  again **only when it changes** (`HssApp.StatusMonitor`, own daemon thread, not an SBB thread).
+  Bound, active and listening are **local** truth; `peerReady` / `m3uaRouteReady` are peer truth.
+- Diameter enabled on a non-loopback host with an empty `hss.diameter.peers` → WARN at boot: only
+  the loopback server peer exists, a remote MME / S-CSCF cannot connect.
 
 ## 4. Sequence diagrams
 
@@ -331,7 +335,7 @@ Other state: `HssSbb` keeps Session-Id and Application-Id in CMP for the request
 |---|---|---|---|---|
 | Diameter | Watchdog (Tw-style silence limit) | `diameter-ra` `DiameterPeerTracker`, `hss.diameter.watchdog-ms` | 30 s | No CE/DW/app traffic for that long → `peerReady=false`. Inbound DWR is answered with DWA by the RA. `0` = no expiry. |
 | Diameter | Tx (request timer) and DWR origination | Corsac stack inside `diameter-ra` | stack default | Not configurable from `HssLinks`. It only matters for requests the HSS sends (CLR/IDR/DSR); the HSS answers inbound requests and runs no timer on them. Not verified here. |
-| SS7 | TCAP invoke timer | `ra-jss7` TCAP, `hss.ss7.invoke-timeout-ms` | 120 s | Guards invokes the HSS sends. The HLR only answers, so the VLR's own timer is the one that fires if the HSS stays silent. |
+| SS7 | TCAP invoke timer | `ra-jss7` TCAP, `hss.ss7.invoke-timeout-ms` | 30 s | Guards invokes the HSS sends. The HLR only answers, so the VLR's own timer is the one that fires if the HSS stays silent. |
 | SS7 | TCAP dialog idle timer | `ra-jss7` TCAP, `hss.ss7.dialog-idle-timeout-ms` | 300 s | Releases a dialog that the HSS never closed (e.g. the SBB threw). |
 | SBI | Response deadline | `ra-http-server`, `hss.sbi.response-timeout-ms` | 5 s | No `HttpResponseExCommand` in time → the RA answers **504** and frees the stream. `0` disables it. |
 
@@ -374,7 +378,21 @@ Secrets: the SBB never logs the event or a body (a 200 carries XRES* and KAUSF).
 
 ## 8. Proof level, honestly
 
-### 8.1 Unit / integration proven (`mvn test`, 2026-11-20)
+### 8.0 Answers on every path (2026-11-24)
+
+- `HssSbb`: any exception while handling S6a / Cx / Gx / Rx → **5012** `DIAMETER_UNABLE_TO_COMPLY`
+  on the request's hop-by-hop / end-to-end ids (RFC 6733 §7.1.5). `HlrSbb`: → MAP `systemFailure`
+  on the dialog. One WARN with the last 4 IMSI digits; never keys or vectors.
+- Bad AUTS (MAC-S fails, wrong length, no RAND) → Experimental-Result **4181**
+  `DIAMETER_AUTHENTICATION_DATA_UNAVAILABLE` on AIR (TS 29.272 §5.2.3.1.3) and MAR. A repository
+  failure during resync is not "bad AUTS": it goes to the 5012 path.
+- AIR Re-Synchronization-Info is **RAND ‖ AUTS (30 octets)** (TS 29.272 §7.3.15); a bare 14-octet AUTS
+  with a separate RAND AVP is still accepted.
+- MAR resync: SIP-Authorization = RAND ‖ AUTS in SIP-Auth-Data-Item (TS 29.229) → SQN_MS adopted.
+- AIR Number-Of-Requested-Vectors / MAR SIP-Number-Auth-Items honoured, 1..5, one SQN each.
+- PUR from a peer outside the MME allowlist → refused, no state change.
+
+### 8.1 Unit / integration proven (`mvn test`, 2026-11-20; epc-hss 217 on 2026-11-24)
 
 | Test | Count | Proves |
 |---|---|---|
@@ -431,3 +449,44 @@ Full `epc` reactor: see `docs/status/PENDING-ISSUES.md` § HSS links for the per
 - The Infinispan `CachingHssRepository` from that plan is wired in epc-host only. `HssMain`
   uses `JdbcHssRepository` directly, with no cache. The rule "SQN and secrets never cached"
   holds in both.
+
+### 8.3 Wire proof — HLR face, MAP SAI over M3UA / SCTP (2026-11-24)
+
+Standalone `HssMain` (SS7 face only, Postgres DB `epc_hlr` with the lab subscriber
+`001010000000009`) ↔ lab VLR `loadtest/ss7/VlrSai.java` (jSS7 MAP client, SCTP server, M3UA IPSP
+server), kernel SCTP on loopback, OPC 1 / DPC 2, SSN 6 ↔ 7.
+
+```bash
+# HSS (own working directory: jSS7 writes its XML state there)
+HSS_JDBC_URL=jdbc:postgresql://<postgres-epc>:5432/epc_hlr HSS_JDBC_PASSWORD=… \
+java --add-modules jdk.sctp -Dsctp.backend=NETTY_KERNEL -cp "$CP" -Dhss.lab=true \
+  -Dhss.ss7.enabled=true et.epc.hss.app.HssMain
+# VLR: local, HSS, own PC, HLR PC, IMSI, vectors
+java --add-modules jdk.sctp -Dsctp.backend=NETTY_KERNEL -cp "$CP" loadtest/ss7/VlrSai.java \
+  127.0.0.1:2906 127.0.0.1:2905 2 1 001010000000009 2
+```
+
+| Proof | Result |
+|---|---|
+| SCTP INIT/INIT-ACK, M3UA ASPUP/ASPAC + NTFY (both ways) | pcap `loadtest/pcaps/hss/hlr-sai-sctp.pcap` |
+| `invoke sendAuthenticationInfo` → `returnResultLast sendAuthenticationInfo` (TCAP Begin / End) | same pcap, frames 34 / 36 |
+| 2 quintuplets, AMF `3830` in AUTN, SQN 561 → 594 (Annex C) | VLR output |
+| MAC-A and XRES of both vectors recomputed with Milenage from the stored Ki/OPc | **PASS / PASS** (independent check, keys not printed) |
+| Unknown IMSI (heap store) → MAP `unknownSubscriber`, dialog closed | `loadtest/pcaps/hss/hlr-sai-heap.pcap` |
+
+Fixed to get there (none of it showed in unit tests):
+
+1. `ra-jss7` flat config → SCCP rule without GT type / plan → jSS7 9.2.11-j25 refused it
+   (`unsupported gtType 'null'`, then an NPE): every flat-config RA failed activation (micro-jainslee `1aa56fae5`).
+2. `ra-jss7` never declared the peer SSN (`remoteSsn`) as an SCCP remote subsystem → the HLR's answer
+   to SSN 7 was dropped ("no Remote SubSystem = 7") (same commit).
+3. epc-hss resolved `sctp-impl` 1.8.15 through jdiameter → no Netty SCTP backend → pinned 2.27.34.
+4. Default TCAP invoke timeout 120 s > jSS7's 60 s dialog default → activation refused → 30 s.
+5. `ra-jss7` had no SCCP long-message rule → UDT only → a SAI answer with 3 quintuplets was dropped
+   ("message is too long") → XUDT enabled towards the peer DPC (micro-jainslee `541151e8f`).
+   Re-proven with the pom-resolved classpath: 3 quintuplets in two XUDT segments, all three MAC-A /
+   XRES PASS (`loadtest/pcaps/hss/hlr-sai-xudt-3vectors.pcap`).
+
+Not proven yet: Diameter S6a/Cx against this process (the CSCF chain runs against epc-host's HSS),
+SBI against a real AUSF, SS7 through a real STP / SG.
+

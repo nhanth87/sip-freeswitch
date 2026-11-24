@@ -86,21 +86,49 @@ public abstract class HssSbb extends CmpBackedSbb implements SleeEventHandler {
         if (!(event instanceof DiameterRequestEvent req)) {
             return;
         }
-        setSessionId(req.sessionId());
-        setApplicationId(req.applicationId());
-        wireSenders();
-        SendDiameterAnswer answer = switch ((int) req.applicationId()) {
-            case (int) S6A -> s6a(req);
-            case (int) CX -> cx(req);
-            case (int) GX, (int) RX -> pcrf(req);
-            default -> SendDiameterAnswer.error(
+        // H-R2: every request path answers. Any failure below (JDBC error, malformed AVPs,
+        // unknown command) is answered 5012 DIAMETER_UNABLE_TO_COMPLY (RFC 6733 §7.1.5)
+        // with the request's hop-by-hop / end-to-end ids, so the peer never waits for its
+        // own timer. AUTS MAC-S failures are answered 4181 inside the services, not here.
+        SendDiameterAnswer answer;
+        try {
+            setSessionId(req.sessionId());
+            setApplicationId(req.applicationId());
+            wireSenders();
+            answer = switch ((int) req.applicationId()) {
+                case (int) S6A -> s6a(req);
+                case (int) CX -> cx(req);
+                case (int) GX, (int) RX -> pcrf(req);
+                default -> SendDiameterAnswer.error(
+                        req.sessionId(), req.applicationId(), req.commandCode(),
+                        req.hopByHopId(), req.endToEndId(), 3007L);
+            };
+        } catch (RuntimeException | LinkageError failed) {
+            LOG.warn("[HSS] app={} cmd={} imsi=***{} failed: {}", req.applicationId(),
+                    req.commandCode(), imsiSuffix(req), failed.getClass().getName());
+            answer = SendDiameterAnswer.error(
                     req.sessionId(), req.applicationId(), req.commandCode(),
-                    req.hopByHopId(), req.endToEndId(), 3007L);
-        };
+                    req.hopByHopId(), req.endToEndId(), 5012L);
+        }
         RaCommandPort port = diameterRa;
         if (port != null && answer != null) {
-            port.sendCommand(answer);
+            try {
+                port.sendCommand(answer);
+            } catch (RuntimeException sendFailed) {
+                LOG.warn("[HSS] app={} cmd={} imsi=***{} answer not sent: {}", req.applicationId(),
+                        req.commandCode(), imsiSuffix(req), sendFailed.getClass().getName());
+            }
         }
+    }
+
+    /** Last 4 digits of the request User-Name for logs; never keys, vectors or full IMSIs. */
+    private static String imsiSuffix(DiameterRequestEvent req) {
+        String user = req.avps() == null ? null : req.avps().get(S6aAvp.USER_NAME);
+        if (user == null || user.isBlank()) {
+            return "unknown";
+        }
+        String digits = user.trim();
+        return digits.length() <= 4 ? "****" : digits.substring(digits.length() - 4);
     }
 
     private SendDiameterAnswer s6a(DiameterRequestEvent req) {
@@ -126,7 +154,11 @@ public abstract class HssSbb extends CmpBackedSbb implements SleeEventHandler {
             case 301 -> cx.sar(impi, impu, str(avps, CxAvp.SERVER_NAME),
                     parseInt(avps, CxAvp.SERVER_ASSIGNMENT_TYPE, CxAvp.SAT_REGISTRATION));
             case 302 -> cx.lir(impu);
-            case 303 -> cx.mar(impi, impu);
+            case 303 -> {
+                int requestedItems = parseInt(avps, CxAvp.SIP_NUMBER_AUTH_ITEMS, 1);
+                byte[][] resync = extractMarResync(avps, req.avpsStructured());
+                yield cx.mar(impi, impu, requestedItems, resync[0], resync[1]);
+            }
             case 304 -> cx.rta();
             case 305 -> cx.ppa();
             case 306, 307 -> CxService.CxResult.error(CxAvp.UNABLE_TO_COMPLY);
@@ -191,6 +223,57 @@ public abstract class HssSbb extends CmpBackedSbb implements SleeEventHandler {
     }
 
     /**
+     * MAR resync extraction (TS 29.228 §6.3.3): a resync MAR carries SIP-Auth-Data-Item
+     * with SIP-Authorization = RAND‖AUTS (30 octets). Returns {@code {rand, auts)}, or
+     * {@code {null, auts}} when only the 14-octet AUTS is present (missing RAND), or
+     * {@code {null, null}} when there is no resync material. Hex flat values and both
+     * hex-string and raw-octet structured leaves are accepted.
+     */
+    private static byte[][] extractMarResync(Map<Integer, String> avps,
+                                             List<com.microjainslee.ra.diameter.avp.DiameterAvp> structured) {
+        byte[] authz = null;
+        if (structured != null) {
+            for (com.microjainslee.ra.diameter.avp.DiameterAvp item : structured) {
+                if (item.code() == CxAvp.SIP_AUTH_DATA_ITEM) {
+                    for (com.microjainslee.ra.diameter.avp.DiameterAvp leaf : item.children()) {
+                        if (leaf.code() == CxAvp.SIP_AUTHORIZATION) {
+                            authz = leaf.asOctets() != null ? leaf.asOctets() : tryHex(leaf.asUtf8());
+                        }
+                    }
+                }
+            }
+        }
+        if (authz == null) {
+            authz = tryHex(avps.get(CxAvp.SIP_AUTHORIZATION));
+        }
+        if (authz == null) {
+            return new byte[][] {null, null};
+        }
+        if (authz.length == 30) {
+            byte[] rand = new byte[16];
+            byte[] auts = new byte[14];
+            System.arraycopy(authz, 0, rand, 0, 16);
+            System.arraycopy(authz, 16, auts, 0, 14);
+            return new byte[][] {rand, auts};
+        }
+        if (authz.length == 14) {
+            return new byte[][] {null, authz};
+        }
+        return new byte[][] {null, null};
+    }
+
+    private static byte[] tryHex(String s) {
+        if (s == null || s.isBlank()) {
+            return null;
+        }
+        try {
+            return Bytes.parseHex(s.trim().replace(" ", ""));
+        } catch (IllegalArgumentException notHex) {
+            return null;
+        }
+    }
+
+    /**
      * Mirror of {@code epc-host/et/epc/host/S6aDiameterMapper} so epc-hss stays a
      * sibling module with no reverse dependency on epc-host: vendor
      * {@code ra-diameter} event &#8594; {@link S6aMessage}.
@@ -210,6 +293,10 @@ public abstract class HssSbb extends CmpBackedSbb implements SleeEventHandler {
         }
         if (avps.containsKey(S6aAvp.RE_SYNCHRONIZATION_INFO)) {
             b.put(S6aAvp.RE_SYNCHRONIZATION_INFO, hexOrRaw(avps.get(S6aAvp.RE_SYNCHRONIZATION_INFO)));
+        }
+        if (avps.containsKey(S6aAvp.NUMBER_OF_REQUESTED_VECTORS)) {
+            b.putUtf8(S6aAvp.NUMBER_OF_REQUESTED_VECTORS,
+                    avps.get(S6aAvp.NUMBER_OF_REQUESTED_VECTORS));
         }
         if (ev.originHost() != null && b.build().avpUtf8(S6aAvp.ORIGIN_HOST) == null) {
             b.putUtf8(S6aAvp.ORIGIN_HOST, ev.originHost());

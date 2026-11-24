@@ -57,6 +57,11 @@ public final class CxAvp {
     public static final int EXPERIMENTAL_RESULT_CODE = 298;
     public static final long ERROR_AUTHORIZATION_REJECTED = 5003L;
     public static final long UNABLE_TO_COMPLY = 5012L;
+    /**
+     * DIAMETER_AUTHENTICATION_DATA_UNAVAILABLE (4181) — a MAR whose AUTS resync fails
+     * verification is answered with Experimental-Result 4181 (TS 29.228 §6.3.3, TS 33.203).
+     */
+    public static final long AUTHENTICATION_DATA_UNAVAILABLE = 4181L;
 
     /* Cx server-initiated command codes (TS 29.229) emitted as SendDiameterRequest. */
     public static final int RTR = 304;

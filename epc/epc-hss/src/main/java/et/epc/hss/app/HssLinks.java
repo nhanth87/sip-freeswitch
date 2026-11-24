@@ -61,6 +61,7 @@ public final class HssLinks {
 
     public static final String LAB = "hss.lab";
     public static final String KEK = "hss.secret.kek-hex";
+    public static final String HOME_PLMN = "hss.home-plmn";
 
     public static final String DIAMETER_ENABLED = "hss.diameter.enabled";
     public static final String DIAMETER_HOST = "hss.diameter.host";
@@ -96,6 +97,7 @@ public final class HssLinks {
     // ---------------------------------------------------------------- defaults
 
     public static final String DEFAULT_HOST = "127.0.0.1";
+    public static final String DEFAULT_HOME_PLMN = "00101";
     public static final int DEFAULT_DIAMETER_PORT = 3868;
     public static final String DEFAULT_ORIGIN_HOST = "hss.epc.lab";
     public static final String DEFAULT_ORIGIN_REALM = "epc.lab";
@@ -105,7 +107,12 @@ public final class HssLinks {
     /** TS 23.003 §8.1 / Q.713 Annex B: SSN 6 = HLR, SSN 7 = VLR. */
     public static final int SSN_HLR = 6;
     public static final int SSN_VLR = 7;
-    public static final long DEFAULT_SS7_INVOKE_TIMEOUT_MS = 120_000L;
+    /**
+     * TS 29.002 §17.6: SendAuthenticationInfo runs on timer m (15–30 s). Also the boot limit:
+     * jSS7 sets the invoke timeout before the dialog timeout (60 s default) and refuses a
+     * larger invoke timeout — 120 s made the SS7 face fail activation.
+     */
+    public static final long DEFAULT_SS7_INVOKE_TIMEOUT_MS = 30_000L;
     public static final long DEFAULT_SS7_DIALOG_IDLE_TIMEOUT_MS = 300_000L;
     public static final int DEFAULT_SBI_PORT = 7777;
     public static final long DEFAULT_SBI_RESPONSE_TIMEOUT_MS = 5_000L;
@@ -209,7 +216,12 @@ public final class HssLinks {
     }
 
     /** All links + lab flag. The KEK is held but never printed. */
-    public record Config(boolean lab, String kekHex, Diameter diameter, Ss7 ss7, Sbi sbi) {
+    public record Config(boolean lab, String kekHex, PlmnId homePlmn,
+                         Diameter diameter, Ss7 ss7, Sbi sbi) {
+
+        public Config {
+            Objects.requireNonNull(homePlmn, "homePlmn");
+        }
 
         /** The KEK to use; refuses the public default unless {@link #lab()}. */
         public String kek() {
@@ -233,8 +245,8 @@ public final class HssLinks {
 
         @Override
         public String toString() {
-            return "Config[lab=" + lab + ", kekHex=<redacted>, diameter=" + diameter + ", ss7=" + ss7
-                    + ", sbi=" + sbi + "]";
+            return "Config[lab=" + lab + ", kekHex=<redacted>, homePlmn=" + homePlmn
+                    + ", diameter=" + diameter + ", ss7=" + ss7 + ", sbi=" + sbi + "]";
         }
     }
 
@@ -244,6 +256,7 @@ public final class HssLinks {
         Objects.requireNonNull(lookup, "lookup");
         boolean lab = bool(lookup, LAB, false);
         String kek = lookup.get(KEK);
+        PlmnId homePlmn = parseHomePlmn(lookup.get(HOME_PLMN));
 
         Diameter diameter = new Diameter(
                 bool(lookup, DIAMETER_ENABLED, false),
@@ -278,7 +291,20 @@ public final class HssLinks {
                 nonNegativeLong(lookup, SBI_RESPONSE_TIMEOUT_MS, DEFAULT_SBI_RESPONSE_TIMEOUT_MS),
                 parsePlmns(lookup.get(SBI_ALLOWED_SERVING_PLMNS)));
 
-        return new Config(lab, kek, diameter, ss7, sbi);
+        return new Config(lab, kek, homePlmn, diameter, ss7, sbi);
+    }
+
+    /** Home PLMN as MCCMNC, used for S6a fallback vectors and subscription data. */
+    static PlmnId parseHomePlmn(String raw) {
+        String value = raw == null || raw.isBlank() ? DEFAULT_HOME_PLMN : raw.trim();
+        int length = value.length();
+        if ((length != 5 && length != 6)
+                || !value.chars().allMatch(c -> c >= '0' && c <= '9')) {
+            throw new IllegalArgumentException(HOME_PLMN + "='" + value
+                    + "' is malformed: expected MCCMNC (5 or 6 ASCII digits, default " + DEFAULT_HOME_PLMN + ")");
+        }
+        // TS 23.003 §2.2: home PLMN = 3-digit MCC + 2/3-digit MNC.
+        return new PlmnId(value.substring(0, 3), value.substring(3));
     }
 
     /**

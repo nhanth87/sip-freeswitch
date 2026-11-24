@@ -102,6 +102,8 @@ TS 29.229, no Server-Name in MAA, Cx with the AuC secrets, AMF = 2 octets from t
 configurable S-CSCF (`EPC_HSS_SCSCF_URI`), live S6a status, `EPC_DIAMETER_PEERS`; Elisa — typed 3GPP Cx
 requests, UAA/LIA success codes, a split S-CSCF does not send UAR.
 
+Fixed 2026-11-24 — REGISTER 200 ~3 s after SAA: the S-CSCF ran the AS refresh (new ESL session per call, `xml_flush_cache` + `sofia profile internal rescan`) on the SBB thread *before* the 200 OK. Now the 200 goes first and the refresh runs on a virtual thread, coalesced (`IscThirdPartyRegister`, `IscThirdPartyRegisterTest`). Lab re-run pending.
+
 Open (seen during the run): MISSING_ENTITY routing in Elisa (entities leave the pool while still
 routed — now harmless, still to root-cause); a BYE ping-pong between P- and I-CSCF after a failed
 REGISTER; S-CSCF answers 200 to REGISTER ~4 s after SAA; MVNO console forms do not submit from the

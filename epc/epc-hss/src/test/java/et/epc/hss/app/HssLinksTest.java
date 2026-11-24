@@ -18,6 +18,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
@@ -68,6 +69,7 @@ class HssLinksTest {
         assertFalse(c.ss7().enabled());
         assertFalse(c.sbi().enabled());
         assertTrue(c.faces().isEmpty());
+        assertEquals(new PlmnId("001", "01"), c.homePlmn());
 
         assertEquals("127.0.0.1", c.diameter().host());
         assertEquals(3868, c.diameter().port());
@@ -321,5 +323,33 @@ class HssLinksTest {
         assertEquals("diameter=bound(tcp 127.0.0.1:" + port + ", peerReady=false) ss7=off sbi=off",
                 running.links().statusLine());
         assertEquals(List.of("SbbType:HssSbb", "EventMapping:DiameterRequestEvent->HssSbb"), running.app().wired());
+    }
+
+    @Test
+    void homePlmnIsConfigurableAndMalformedValuesAreRefused() {
+        assertEquals(new PlmnId("452", "04"), load(HssLinks.HOME_PLMN, "45204").homePlmn());
+        assertEquals(new PlmnId("310", "410"), load(HssLinks.HOME_PLMN, "310410").homePlmn());
+        for (String bad : new String[] {"0010", "0010100", "00a01", "452-04"}) {
+            assertThrows(IllegalArgumentException.class, () -> load(HssLinks.HOME_PLMN, bad), bad);
+        }
+    }
+
+    /** jSS7 refuses an invoke timeout above its 60 s default dialog timeout at activation. */
+    @Test
+    void ss7InvokeTimeoutDefaultsToMapTimerM() {
+        assertEquals(30_000L, load().ss7().invokeTimeoutMs());
+    }
+
+    @Test
+    void statusMonitorPrintsTheFirstLineThenOnlyChanges() {
+        String[] state = {"diameter=bound(peerReady=false)"};
+        List<String> printed = new ArrayList<>();
+        HssApp.StatusMonitor monitor = new HssApp.StatusMonitor(() -> state[0], printed::add);
+        monitor.poll();
+        monitor.poll();
+        state[0] = "diameter=bound(peerReady=true)";
+        monitor.poll();
+        monitor.poll();
+        assertEquals(List.of("diameter=bound(peerReady=false)", "diameter=bound(peerReady=true)"), printed);
     }
 }

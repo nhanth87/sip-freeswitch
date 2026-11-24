@@ -58,6 +58,21 @@
       </exclusions>
     </dependency>
     <dependency>
+      <!-- Kernel SCTP backend (NettySctpManagementImpl) for the HLR face (sctp.backend=NETTY_KERNEL).
+           ra-jss7 does not pull sctp-impl, and jdiameter-impl (via ra-diameter) resolves 1.8.15,
+           which has no Netty backend: the SS7 link failed activation with ClassNotFoundException.
+           Same version as ra-jss7's sctp-api/core (sctp 2.27.34). -->
+      <groupId>org.mobicents.protocols.sctp</groupId>
+      <artifactId>sctp-impl</artifactId>
+      <version>2.27.34</version>
+      <exclusions>
+        <exclusion>
+          <groupId>log4j</groupId>
+          <artifactId>log4j</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
       <!-- UDM face: Nudm-UEAU over HTTP/2 cleartext prior knowledge (TS 29.500 §5.2.2).
            Vert.x 4.5 HTTP server; also supplies io.vertx.core.json (Jackson) used by
            UdmUeauSbb to parse/encode the TS 29.503 JSON bodies. -->

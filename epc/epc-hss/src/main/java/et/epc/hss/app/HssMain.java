@@ -4,6 +4,8 @@ import com.microjainslee.core.MicroSleeConfiguration;
 import com.microjainslee.core.MicroSleeContainer;
 import et.epc.api.PlmnId;
 import et.epc.hss.MmeAllowlist;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.Objects;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -57,6 +59,7 @@ public final class HssMain {
     public static Running boot(HssLinks.Lookup lookup) {
         HssLinks.Config links = HssLinks.load(lookup);
         String kek = links.kek();
+        warnIfOnlyLoopbackDiameterPeer(links);
 
         String jdbcUrl = lookup.get("hss.jdbc.url");
         String user = orDefault(lookup.get("hss.jdbc.user"), "epc");
@@ -66,7 +69,7 @@ public final class HssMain {
                 orDefault(lookup.get("epc.hss.mme.allowlist.enabled"), "false"));
         MmeAllowlist allowlist = MmeAllowlist.parse(allowlistEnabled,
                 orDefault(lookup.get("epc.hss.mme.allowlist"), ""));
-        PlmnId homePlmn = new PlmnId("001", "01");
+        PlmnId homePlmn = links.homePlmn();
 
         HssBootstrap.Services svc = HssBootstrap.wire(homePlmn,
                 jdbcUrl == null || jdbcUrl.isBlank() ? null : jdbcUrl, user, password, kek, allowlist,
@@ -92,9 +95,36 @@ public final class HssMain {
             LOG.warn("epc-hss started with every link off — set {} / {} / {}=true",
                     HssLinks.DIAMETER_ENABLED, HssLinks.SS7_ENABLED, HssLinks.SBI_ENABLED);
         }
-        LOG.info("epc-hss started {} mode={} durable={} lab={} wired={}",
-                bound.statusLine(), svc.mode(), svc.durable(), links.lab(), app.wired());
-        return new Running(container, app, bound, svc);
+        LOG.info("epc-hss started mode={} durable={} lab={} homePlmn={}{} wired={}",
+                svc.mode(), svc.durable(), links.lab(), homePlmn.mcc(), homePlmn.mnc(), app.wired());
+        HssApp.StatusMonitor status = new HssApp.StatusMonitor(bound::statusLine,
+                line -> LOG.info("epc-hss status {}", line));
+        try {
+            status.start();
+        } catch (RuntimeException e) {
+            status.close();
+            container.stop();
+            throw e;
+        }
+        return new Running(container, app, bound, svc, status);
+    }
+
+    static void warnIfOnlyLoopbackDiameterPeer(HssLinks.Config links) {
+        HssLinks.Diameter diameter = links.diameter();
+        if (!diameter.enabled() || !diameter.peers().isEmpty() || isLoopback(diameter.host())) {
+            return;
+        }
+        LOG.warn("epc-hss has only a loopback Diameter server peer: {} is empty while {}={} is non-loopback; "
+                        + "remote MME/S-CSCF peers cannot connect — configure {}",
+                HssLinks.DIAMETER_PEERS, HssLinks.DIAMETER_HOST, diameter.host(), HssLinks.DIAMETER_PEERS);
+    }
+
+    private static boolean isLoopback(String host) {
+        try {
+            return InetAddress.getByName(host).isLoopbackAddress();
+        } catch (UnknownHostException e) {
+            return false; // a non-loopback/unresolved bind still gets the conservative warning
+        }
     }
 
     private static String orDefault(String v, String def) {
@@ -103,16 +133,18 @@ public final class HssMain {
 
     /** A started HSS. */
     public record Running(MicroSleeContainer container, HssApp app, HssLinks.Bound links,
-                          HssBootstrap.Services services) {
+                          HssBootstrap.Services services, HssApp.StatusMonitor statusMonitor) {
 
         public Running {
             Objects.requireNonNull(container);
             Objects.requireNonNull(app);
             Objects.requireNonNull(links);
             Objects.requireNonNull(services);
+            Objects.requireNonNull(statusMonitor);
         }
 
         public void stop() {
+            statusMonitor.close();
             if (container.getState() == MicroSleeContainer.State.STARTED) {
                 container.stop();
             }

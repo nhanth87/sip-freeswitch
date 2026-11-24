@@ -133,14 +133,15 @@ public final class ScscfRegisterSbb implements Sbb, SleeEventHandler {
         bindings.upsert(impu, contact, e.pathHeader(), e.callId(), expires,
                 e.receivedHost(), e.receivedPort(), e.receivedTransport());
         mirrorSubscriberProfile(impi, impu);
-        if (thirdParty != null) {
-            thirdParty.notifyAs(impu, contact, expires);
-        }
         send(SendResponse.withHeaders(e.callId(), 200, "OK", Map.of(
                 "Service-Route", "<" + roles.scscfUri() + ";lr>",
                 "Path", e.pathHeader() == null ? "<" + roles.pcscfUri() + ";lr>" : e.pathHeader()
         )));
         LOG.debug("[S-CSCF] REGISTER ok impu={} expires={}", impu, expires);
+        // TS 24.229 §5.4.1.2.2: third-party REGISTER to the AS after the UE has its 200 OK.
+        if (thirdParty != null) {
+            thirdParty.notifyAs(impu, contact, expires);
+        }
     }
 
     /** 401 with an RFC 3310 AKAv1-MD5 challenge built from a Cx MAA. */
@@ -192,14 +193,15 @@ public final class ScscfRegisterSbb implements Sbb, SleeEventHandler {
         bindings.upsert(impu, contact, e.pathHeader(), e.callId(), expires,
                 e.receivedHost(), e.receivedPort(), e.receivedTransport());
         mirrorSubscriberProfile(impi, impu);
-        if (thirdParty != null) {
-            thirdParty.notifyAs(impu, contact, expires);
-        }
         send(SendResponse.withHeaders(e.callId(), 200, "OK", Map.of(
                 "Service-Route", "<" + roles.scscfUri() + ";lr>",
                 "Path", e.pathHeader() == null ? "<" + roles.pcscfUri() + ";lr>" : e.pathHeader()
         )));
         LOG.debug("[S-CSCF] Digest REGISTER ok impu={} expires={}", impu, expires);
+        // TS 24.229 §5.4.1.2.2: third-party REGISTER to the AS after the UE has its 200 OK.
+        if (thirdParty != null) {
+            thirdParty.notifyAs(impu, contact, expires);
+        }
         return true;
     }
 

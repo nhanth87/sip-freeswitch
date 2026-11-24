@@ -24,18 +24,18 @@ Doc: [`docs/agents/hss-links.md`](../agents/hss-links.md). Changes are in the wo
 
 | # | Item | Detail |
 |---|------|--------|
-| H-W1 | **Wire proof — none yet** | no real MME/S-CSCF (Diameter), no VLR/SGSN/STP (SS7 never on a live SCTP association), no AUSF; no 3GPP-published 5G AKA vector (self-derived KAT only) |
+| H-W1 | **Wire proof — SS7 only** | ✅ MAP SAI over M3UA/SCTP against a jSS7 VLR, quintuplets verified (2026-11-24, `hss-links.md` §8.3). Open: Diameter S6a/Cx against `HssMain`, a real AUSF, a real STP/SG; no 3GPP-published 5G AKA vector (self-derived KAT only) |
 | H-R1 | Blocking JDBC on the SBB event thread | `JdbcHssRepository` (`reserveSqn`) runs on the event thread |
-| H-R2 | `HssSbb` / `HlrSbb` have no catch-all in `onEvent` | JDBC error or an S6a AIR with bad AUTS / missing RAND throws → no AIA / no MAP answer; peer waits for its own timer (`UdmUeauSbb` already answers 500) |
-| H-R3 | Startup status printed once | `peerReady` / `m3uaRouteReady` are read `false` at boot; no live link status afterwards |
-| H-R4 | Diameter default peer 127.0.0.1 | empty `hss.diameter.peers` = one server-role peer on loopback → set `hss.diameter.peers` for a real MME/S-CSCF |
-| H-R5 | Home PLMN hard-coded 001/01 in `HssMain` | AIR without Visited-PLMN-Id → KASME bound to 001/01 |
+| ~~H-R2~~ | `HssSbb` / `HlrSbb` have no catch-all in `onEvent` | JDBC error or an S6a AIR with bad AUTS / missing RAND throws → no AIA / no MAP answer; peer waits for its own timer (`UdmUeauSbb` already answers 500) — **done 2026-11-24** |
+| ~~H-R3~~ | Startup status printed once | `peerReady` / `m3uaRouteReady` are read `false` at boot; no live link status afterwards — **done 2026-11-24** |
+| ~~H-R4~~ | Diameter default peer 127.0.0.1 | empty `hss.diameter.peers` = one server-role peer on loopback → set `hss.diameter.peers` for a real MME/S-CSCF — **done 2026-11-24** |
+| ~~H-R5~~ | Home PLMN hard-coded 001/01 in `HssMain` | AIR without Visited-PLMN-Id → KASME bound to 001/01 — **done 2026-11-24** |
 | H-R6 | `hss.jdbc.password` default `epc` | require it outside a lab |
 | H-R7 | **epc-host KEK default** | compose `epc-hss` (epc-host) still defaults `epc.hss.secret.kek-hex` to the public KEK: `epc/epc-host/src/main/resources/application.properties`, `dist/epc/configs/application.properties`, `EpcRuntime.java` — not covered by the new `hss.lab` rule |
 | H-R8 | Jackson BOM | any module that puts Vert.x next to `ra-jss7` needs `jackson-bom` 2.21.8 |
 | H-R9 | SBB factory rule | SBBs registered via `registerSbbType` must not have a no-arg constructor |
-| H-R10 | 3GPP gaps vs `epc-hss-pcrf-full3gpp.md` Phase A.3 | AIR returns one vector (ignores Number-Of-Requested-Vectors); no Δ window on resync; Cx MAR has no AUTS resync |
-| H-R11 | PUR has no MME allowlist check | any Diameter peer can mark a subscriber purged |
+| H-R10 | 3GPP gaps vs `epc-hss-pcrf-full3gpp.md` Phase A.3 | AIR returns one vector (ignores Number-Of-Requested-Vectors); no Δ window on resync; Cx MAR has no AUTS resync — vectors + MAR resync **done 2026-11-24**; Δ window on resync still open |
+| ~~H-R11~~ | PUR has no MME allowlist check | any Diameter peer can mark a subscriber purged — **done 2026-11-24** |
 | H-P1 | `HssMain` packaging | no dist / run script / compose service starts it; prove-the-artifact not done |
 | H-D1 | Owner decisions pending | Elisa `HssLiteService` (second AuC + SQN space) · ~~GitHub repo visibility~~ decided 2026-11-24: **public** |
 

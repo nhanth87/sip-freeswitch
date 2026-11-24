@@ -73,4 +73,29 @@ class HssServiceResyncTest {
         long expected = et.epc.crypto.Sqn.next(Math.max(et.epc.crypto.Sqn.next(0), 5L));
         assertEquals(expected, repo.find(IMSI).orElseThrow().sqn());
     }
+
+    /** TS 29.272 §7.3.15: the MME sends Re-Synchronization-Info = RAND ‖ AUTS, no RAND AVP. */
+    @Test
+    void resyncInfoCarryingRandAndAutsIsAccepted() {
+        hss.handle(S6aMessage.builder(S6aCommand.AIR, true)
+                .putUtf8(S6aAvp.USER_NAME, IMSI.digits())
+                .put(S6aAvp.VISITED_PLMN_ID, HOME.snId()).build());
+        byte[] rand = Bytes.parseHex("00112233445566778899aabbccddeeff");
+        byte[] ki = secrets.ki(IMSI);
+        byte[] opc = secrets.opc(IMSI);
+        byte[] amfStar = new byte[] {0, 0};
+        long ahead = 1L << 20;
+        byte[] sqnMs = Bytes.sqnToBytes(ahead);
+        byte[] aks = Milenage.compute(ki, opc, rand, new byte[6], amfStar).aks();
+        byte[] macS = Milenage.compute(ki, opc, rand, sqnMs, amfStar).macS();
+        byte[] auts = Bytes.concat(Bytes.xor(sqnMs, aks), macS);
+
+        S6aMessage resync = hss.handle(S6aMessage.builder(S6aCommand.AIR, true)
+                .putUtf8(S6aAvp.USER_NAME, IMSI.digits())
+                .put(S6aAvp.VISITED_PLMN_ID, HOME.snId())
+                .put(S6aAvp.RE_SYNCHRONIZATION_INFO, Bytes.concat(rand, auts)).build());
+        assertEquals(S6aAvp.SUCCESS, u32(resync.avp(S6aAvp.RESULT_CODE)));
+        assertEquals(et.epc.crypto.Sqn.next(ahead), repo.find(IMSI).orElseThrow().sqn(),
+                "SQN_MS (ahead of the HE) adopted, next vector continues from it");
+    }
 }

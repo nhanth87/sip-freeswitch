@@ -134,6 +134,8 @@ class ScscfRegisterSbbTest {
         IscThirdPartyRegister tp = new IscThirdPartyRegister() {
             @Override
             public void notifyAs(String impu, String contact, int expires) {
+                // the UE already has its 200 OK: the AS refresh never delays the registration
+                assertEquals(200, ra.ofType(SendResponse.class).getFirst().statusCode());
                 notify.incrementAndGet();
             }
         };

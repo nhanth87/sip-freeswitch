@@ -13,6 +13,10 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -103,6 +107,63 @@ public final class HssApp {
     private void record(String entry) {
         if (!wired.contains(entry)) {
             wired.add(entry);
+        }
+    }
+
+    @FunctionalInterface
+    interface LinkProbe {
+        String statusLine();
+    }
+
+    /** First status is always emitted; later polls emit only actual peer-state changes. */
+    public static final class StatusMonitor implements AutoCloseable {
+        static final long PERIOD_SECONDS = 30;
+
+        private final LinkProbe probe;
+        private final Consumer<String> sink;
+        private String previous;
+        private ScheduledExecutorService scheduler;
+
+        StatusMonitor(LinkProbe probe, Consumer<String> sink) {
+            this.probe = Objects.requireNonNull(probe, "probe");
+            this.sink = Objects.requireNonNull(sink, "sink");
+        }
+
+        void start() {
+            if (scheduler != null) {
+                throw new IllegalStateException("link status monitor already started");
+            }
+            poll();
+            scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread thread = new Thread(r, "hss-link-status");
+                thread.setDaemon(true);
+                return thread;
+            });
+            scheduler.scheduleWithFixedDelay(this::pollQuietly, PERIOD_SECONDS, PERIOD_SECONDS, TimeUnit.SECONDS);
+        }
+
+        synchronized void poll() {
+            String current = Objects.requireNonNull(probe.statusLine(), "statusLine");
+            if (!current.equals(previous)) {
+                previous = current;
+                sink.accept(current);
+            }
+        }
+
+        private void pollQuietly() {
+            try {
+                poll();
+            } catch (RuntimeException e) {
+                LOG.warn("epc-hss link status probe failed: {}", e.toString());
+            }
+        }
+
+        @Override
+        public void close() {
+            ScheduledExecutorService current = scheduler;
+            if (current != null) {
+                current.shutdownNow();
+            }
         }
     }
 }
