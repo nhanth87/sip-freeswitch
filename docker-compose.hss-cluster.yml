@@ -1,0 +1,45 @@
+# Two HSS / AuC nodes on epc-cluster (DIST_SYNC), one Postgres (docs/agents/hss-links.md "Two-node HSS / AuC"):
+#   docker compose -f docker-compose.yml -f docker-compose.services.yml -f docker-compose.hss-cluster.yml \
+#     --profile epc up -d postgres-epc epc-hss epc-hss-2
+# loadtest/diameter/AirClient.java drives S6a AIR at both nodes at once for one IMSI; every vector's SQN is
+# recovered from AUTN — no two may be equal (SQN is reserved with UPDATE … RETURNING, never from a cache).
+x-hss: &hss
+  JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true -Xms64m -Xmx512m -XX:+UseSerialGC -Dlog4j2.configurationFile=/etc/volte/log4j2.xml"
+  EPC_CLUSTER_ISPN_MODE: DIST_SYNC
+  EPC_CLUSTER_ISPN_NAME: epc-cluster
+  EPC_DIAMETER_PEER_HOST: ""
+  EPC_DIAMETER_ORIGIN_REALM: epc.lab
+
+services:
+  epc-hss:
+    networks: !override
+      sf-net:
+        ipv4_address: 172.20.10.11
+    volumes:
+      - ./deploy/volte/log4j2.xml:/etc/volte/log4j2.xml:ro
+    environment:
+      <<: *hss
+      EPC_CLUSTER_NODE_ID: epc-hss-1
+      EPC_CLUSTER_NODE_INDEX: "1"
+      EPC_DIAMETER_ORIGIN_HOST: epc-hss-1.epc.lab
+      EPC_DIAMETER_PEERS: "172.20.0.1:0:server:air-a.epc.lab:epc.lab:s6a"
+
+  epc-hss-2:
+    profiles: ["epc"]
+    image: sip-freeswitch-epc-pgwc
+    env_file: [./deploy/epc/roles/hss.env]
+    networks:
+      sf-net:
+        ipv4_address: 172.20.10.21
+    volumes:
+      - ./deploy/volte/log4j2.xml:/etc/volte/log4j2.xml:ro
+    environment:
+      <<: *hss
+      EPC_JDBC_URL: jdbc:postgresql://postgres-epc:5432/epc
+      EPC_CLUSTER_NODE_ID: epc-hss-2
+      EPC_CLUSTER_NODE_INDEX: "5"
+      EPC_DIAMETER_ORIGIN_HOST: epc-hss-2.epc.lab
+      EPC_DIAMETER_PEERS: "172.20.0.1:0:server:air-b.epc.lab:epc.lab:s6a"
+    depends_on:
+      postgres-epc:
+        condition: service_healthy

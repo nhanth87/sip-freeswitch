@@ -21,3 +21,6 @@ epc/**/.quarkus/
 *.log.[0-9]*
 # lab-only console passwords (docs/agents/volte-e2e.md)
 deploy/volte/demo-accounts.env
+
+# RAN interop lab UE credentials (docker-compose.epc-ran.yml)
+epc/loadtest/ran/ue.env

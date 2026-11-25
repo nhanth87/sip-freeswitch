@@ -1,0 +1,70 @@
+# 4G attach interop (docs/agents/epc-ran-interop.md): srsUE + srsENB over ZMQ and the open5gs MME are the
+# only third-party pieces; HSS/AuC, SGW-C, PGW-C, PCRF and the UP are ours.
+#   docker compose -f docker-compose.yml -f docker-compose.services.yml -f docker-compose.epc-wire.yml \
+#     -f docker-compose.epc-ran.yml --profile epc up -d epc-hss mme srsenb srsue
+# UE credentials: TS 35.208 test set, from the git-ignored epc/loadtest/ran/ue.env (see ue.env.example).
+#   srsUE --ZMQ-- srsENB --S1-MME(SCTP)--> MME --S6a--> epc-hss
+#                     |                    \--S11--> epc-sgwc .14 --S5-C--> epc-pgwc .13 --Gx--> epc-pcrf
+#                     \--S1-U--> epc-up-linux .16   (Sxa / Sxb from SGW-C / PGW-C)
+services:
+  epc-hss:
+    networks: !override
+      sf-net:
+        ipv4_address: 172.20.10.11
+    environment:
+      EPC_DIAMETER_PEER_HOST: 172.20.10.20
+
+  mme:
+    networks: !override
+      sf-net:
+        ipv4_address: 172.20.10.20
+    volumes: !override
+      - ./epc/loadtest/ran/mme.yaml:/etc/open5gs/mme.yaml:ro
+      - ./epc/loadtest/open5gs/config/mme.conf:/etc/freeDiameter/mme.conf:ro
+      - ./epc/loadtest/open5gs/config/tls:/etc/open5gs/tls-lab:ro
+      - ./loadtest/pcaps/ran:/mnt/out
+    depends_on: !override
+      epc-hss:
+        condition: service_started
+
+  srsenb:
+    profiles: ["epc"]
+    image: docker_srslte
+    privileged: true
+    command: []
+    volumes:
+      - ./epc/loadtest/ran:/mnt/srslte
+      - ./loadtest/pcaps/ran:/mnt/out
+    environment:
+      COMPONENT_NAME: enb_zmq
+      MCC: "001"
+      MNC: "01"
+      TAC: "1"
+      MME_IP: 172.20.10.20
+      SRS_ENB_IP: 172.20.10.30
+      SRS_UE_IP: 172.20.10.31
+    networks:
+      sf-net:
+        ipv4_address: 172.20.10.30
+    depends_on: [mme]
+
+  srsue:
+    profiles: ["epc"]
+    image: docker_srslte
+    privileged: true
+    cap_add: [NET_ADMIN]
+    volumes:
+      - ./epc/loadtest/ran:/mnt/srslte
+      - ./loadtest/pcaps/ran:/mnt/out
+    env_file: [./epc/loadtest/ran/ue.env]
+    environment:
+      COMPONENT_NAME: ue_zmq
+      MCC: "001"
+      MNC: "01"
+      TAC: "1"
+      SRS_ENB_IP: 172.20.10.30
+      SRS_UE_IP: 172.20.10.31
+    networks:
+      sf-net:
+        ipv4_address: 172.20.10.31
+    depends_on: [srsenb]

@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit;
  * Bearers, Modify Bearer (new eNB TEID), Delete Session. Prints every answer's IEs.
  *
  * <pre>
- * java -cp "$CP" loadtest/gtp/MmeS11.java &lt;local ip&gt; &lt;sgwc ip&gt; [imsi] [apn] [enb ip]
+ * java -cp "$CP" loadtest/gtp/MmeS11.java &lt;local ip&gt; &lt;sgwc ip&gt; [imsi] [apn] [enb ip] [failover sgwc ip] [pause s]
  * </pre>
  */
 public final class MmeS11 {
@@ -88,6 +88,15 @@ public final class MmeS11 {
         if (sgwS11 == null) {
             gtp.deactivate();
             System.exit(1);
+        }
+
+        // Failover test: [failover sgwc ip] [pause s] — the rest of the session goes to another node
+        // of the SGW-C cluster (the service address moved), which must answer from the shared store.
+        if (a.length > 6) {
+            int pause = Integer.parseInt(a[6]);
+            System.out.println("FAILOVER: Create done on " + sgwc + "; pausing " + pause + " s, then -> " + a[5]);
+            Thread.sleep(pause * 1000L);
+            sgwc = new InetSocketAddress(a[5], 2123);
         }
 
         // Modify Bearer: the eNB's S1-U F-TEID (TS 29.274 §7.2.7).

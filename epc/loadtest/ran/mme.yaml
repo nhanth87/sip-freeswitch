@@ -1,0 +1,61 @@
+# open5gs MME for the RAN interop lab (docker-compose.epc-ran.yml): srsENB/srsUE over ZMQ,
+# everything else ours — HSS (S6a), SGW-C 172.20.10.14 (S11), PGW-C 172.20.10.13 (S5/S8 F-TEID).
+#   * S6a = Diameter CLIENT via /etc/freeDiameter/mme.conf -> epc-hss (S6a server)
+#   * S11 = GTPv2-C client -> our epc-sgwc (SGW-C)
+#   * No MongoDB, no S1 eNB — the lab smoke path (S6a CEA + S11 Echo) needs neither.
+# Values used to match our stack:
+#   plmn mcc/mnc = 001/01 (2-digit)              -> matches HSS PlmnId("001","01")
+#   hss_map realm/host -> epc.hss origin host    -> epc-hss-1.epc.lab / epc.lab
+logger:
+  file:
+    path: /mnt/out/mme.log
+  level: info
+
+global:
+  max:
+    ue: 1024
+
+mme:
+  freeDiameter: /etc/freeDiameter/mme.conf
+  s1ap:
+    server:
+      - address: 172.20.10.20
+  gtpc:
+    server:
+      - address: 172.20.10.20
+    client:
+      # S11 SGW-C selection: our epc-sgwc listens :2123 in the epc profile.
+      sgwc:
+        - address: 172.20.10.14
+      # SMF/PGW selection (open5gs MME REQUIRES a non-empty pgw list at startup).
+      # In our co-located SGW-C/PGW-C model the PGW F-TEID is consumed internally
+      # by epc-sgwc(SgwControl->PgwControl); epc-pgwc is the real S5-C terminator.
+      smf:
+        - address: 172.20.10.13
+  gummei:
+    - plmn_id:
+        mcc: 001
+        mnc: 01
+      mme_gid: 1
+      mme_code: 1
+  tai:
+    - plmn_id:
+        mcc: 001
+        mnc: 01
+      tac: 1
+  # REQUIRED by open5gs-mmed (fatal at boot if missing).
+  security:
+    integrity_order: [ EIA2, EIA1, EIA0 ]
+    ciphering_order: [ EEA0, EEA1, EEA2 ]
+  network_name:
+    full: Ethiopia-lab EPC
+    short: ETH-EPC
+  mme_name: open5gs-mme0
+  # S6a Destination-Host/Realm for AIR/ULR/PUR -> our external HSS. In this
+  # open5gs version host/realm live INSIDE plmn_id (mme-context.c hss_map parse).
+  hss_map:
+    - plmn_id:
+        mcc: 001
+        mnc: 01
+        host: epc-hss-1.epc.lab
+        realm: epc.lab
