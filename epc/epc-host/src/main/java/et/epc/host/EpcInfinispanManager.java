@@ -48,6 +48,14 @@ public final class EpcInfinispanManager {
     @ConfigProperty(name = "epc.cluster.ttl-seconds", defaultValue = "7200")
     long ttlSeconds;
 
+    /**
+     * JGroups stack: empty = Infinispan default (UDP multicast, compose labs); {@code kubernetes} = TCP +
+     * DNS_PING (set {@code -Djgroups.dns.query=<headless service FQDN>}; env EPC_CLUSTER_JGROUPS_STACK); {@code tcp} = TCP + MPING.
+     * Any of Infinispan's {@code default-configs/default-jgroups-<stack>.xml}.
+     */
+    @ConfigProperty(name = "epc.cluster.jgroups-stack")
+    java.util.Optional<String> jgroupsStack = java.util.Optional.empty();
+
     private EmbeddedCacheManager manager;
     private boolean dist;
 
@@ -65,6 +73,11 @@ public final class EpcInfinispanManager {
         global.cacheManagerName("epc-" + logical);
         if (dist) {
             global.transport().defaultTransport().clusterName(clusterName).nodeName(logical);
+            String stack = jgroupsStack == null ? "" : jgroupsStack.map(String::trim).orElse("");
+            if (!stack.isEmpty()) {
+                global.transport().addProperty("configurationFile", "default-configs/default-jgroups-" + stack + ".xml");
+                LOG.info("JGroups stack {} for cluster {}", stack, clusterName);
+            }
         } else {
             global.nonClusteredDefault();
             global.transport().nodeName(logical);

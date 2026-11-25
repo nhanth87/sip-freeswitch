@@ -1,0 +1,86 @@
+# Elisa IMS on Kubernetes (docs/agents/k8s.md). Lab defaults: one node (k3s), small heaps.
+image:
+  # Elisa runtime + the admin UI (/html) baked in: deploy/k8s/images/elisa.Dockerfile
+  repository: sip-freeswitch/elisa
+  tag: lab
+  pullPolicy: Never
+
+realm: ims.lab
+javaOpts: "-Djava.net.preferIPv4Stack=true -Xms64m -Xmx320m -XX:+UseSerialGC"
+
+# Secrets created by deploy/k8s/lab.sh, never in git:
+#   elisa-db   : password
+#   elisa-lab  : admin-api-key, admin-hmac-secret, admin-bootstrap-password, esl-password,
+#                turn-username, turn-password
+dbSecret: elisa-db
+labSecret: elisa-lab
+# Lab only: admin/admin dev login on the admin UI.
+adminDevLogin: true
+
+resources:
+  requests: {cpu: 50m, memory: 400Mi}
+  limits: {memory: 800Mi}
+
+postgres:
+  image: postgres:16
+  storage: 1Gi
+
+coturn:
+  image: coturn/coturn:4.6.2
+  realm: sip-freeswitch.lab
+
+freeswitch:
+  image: safarov/freeswitch:latest
+  # The S-CSCF owns :5060 in the shared pod network namespace; its FreeSWITCH trunks on :5080.
+  sipPort: 5080
+  # ConfigMap made by deploy/k8s/lab.sh from freeswitch/conf (single source of truth).
+  configMap: freeswitch-conf
+
+edge:
+  image: sip-freeswitch/nginx-edge
+  tag: lab
+  # k3s ServiceLB puts these on the node address.
+  serviceType: LoadBalancer
+
+# Network functions (one StatefulSet each). The role flags mirror deploy/elisa/roles/*.env.
+pcscf:
+  replicas: 1
+  env:
+    SF_IMS_PCSCF: "true"
+    SF_IMS_ISC_AS: sip:unused-isc.lab:5060
+
+icscf:
+  replicas: 1
+  env:
+    SF_IMS_ICSCF: "true"
+    SF_IMS_ISC_AS: sip:unused-isc.lab:5060
+    SF_IMS_CX_ENABLED: "true"
+    SF_IMS_CX_PEER_HOST: hss-0.hss-hl
+    SF_IMS_CX_PEER_PORT: "3868"
+    SF_IMS_CX_ORIGIN: icscf.ims.lab
+    SF_IMS_CX_DEST_HOST: hss.ims.lab
+    SF_IMS_CX_DEST_REALM: ims.lab
+
+hss:
+  replicas: 1
+  env:
+    SF_IMS_HSS: "true"
+    SF_IMS_ISC_AS: sip:unused-isc.lab:5060
+    SF_IMS_CX_ENABLED: "true"
+    SF_IMS_CX_PEER_HOST: icscf-0.icscf-hl
+    SF_IMS_CX_PEER_PORT: "3868"
+    SF_IMS_CX_ORIGIN: hss.ims.lab
+    SF_IMS_CX_REALM: ims.lab
+
+# S-CSCF N–N: every pod = Elisa S-CSCF + its own FreeSWITCH (1:1 by construction).
+scscf:
+  replicas: 2
+  env:
+    SF_IMS_SCSCF: "true"
+    # In-process HSS-lite reads the same Postgres (as in docker-compose.services.yml).
+    SF_IMS_HSS: "true"
+    SF_IMS_CX_ENABLED: "true"
+    SF_IMS_CX_DEST_HOST: hss
+    SF_IMS_CX_DEST_REALM: ims.lab
+    SF_IMS_FEATURE_CHARGING: "false"
+    SF_IMS_FEATURE_ENUM: "false"

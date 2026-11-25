@@ -1,0 +1,105 @@
+{{- /*
+S-CSCF N–N. Each pod = Elisa S-CSCF + its FreeSWITCH (MRF/AS): 1:1 by construction, ESL and xml_curl on
+localhost, SIP trunk on :{{ .Values.freeswitch.sipPort }} (the S-CSCF owns :5060 in the pod). Pods form
+elisa-cluster over JGroups DNS_PING on scscf-hl.
+*/ -}}
+{{- $fs := .Values.freeswitch }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: scscf-hl
+  labels: {{- include "elisa.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: scscf
+  ports:
+    - {name: sip-udp, port: 5060, protocol: UDP}
+    - {name: jgroups, port: 7800, protocol: TCP}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: scscf
+  labels: {{- include "elisa.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: scscf
+  sessionAffinity: ClientIP
+  ports:
+    - {name: sip-udp, port: 5060, protocol: UDP}
+    - {name: sip-tcp, port: 5060, protocol: TCP}
+    - {name: http, port: 8088, protocol: TCP}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: scscf
+  labels: {{- include "elisa.labels" . | nindent 4 }}
+spec:
+  serviceName: scscf-hl
+  replicas: {{ .Values.scscf.replicas }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: scscf
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: scscf
+        {{- include "elisa.labels" . | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: 20
+      initContainers:
+        {{- include "elisa.waitDeps" (dict "root" . "names" "") | nindent 8 }}
+      containers:
+        - name: scscf
+          image: {{ include "elisa.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            {{- include "elisa.env" (dict "root" . "name" "scscf" "nf" .Values.scscf "dist" true) | nindent 12 }}
+            {{- include "elisa.mediaEnv" . | nindent 12 }}
+            - {name: SF_IMS_SCSCF_URI, value: "sip:$(POD_NAME).scscf-hl:5060"}
+            - {name: SF_ESL_HOST, value: "127.0.0.1"}
+            - {name: SF_ESL_PORT, value: "8021"}
+            - name: SF_ESL_PASSWORD
+              valueFrom: {secretKeyRef: {name: {{ .Values.labSecret }}, key: esl-password}}
+            - {name: SF_TRUNK_FREESWITCH_URI, value: "sip:1000@127.0.0.1:{{ $fs.sipPort }}"}
+            - {name: SF_IMS_ISC_AS, value: "sip:1000@127.0.0.1:{{ $fs.sipPort }}"}
+          ports:
+            - {name: http, containerPort: 8088, protocol: TCP}
+            - {name: sip-udp, containerPort: 5060, protocol: UDP}
+            - {name: sip-tcp, containerPort: 5060, protocol: TCP}
+            - {name: jgroups, containerPort: 7800, protocol: TCP}
+          {{- include "elisa.probes" . | nindent 10 }}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+        - name: freeswitch
+          image: {{ $fs.image }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - {name: fs-sip, containerPort: {{ $fs.sipPort }}, protocol: UDP}
+            - {name: esl, containerPort: 8021, protocol: TCP}
+          readinessProbe:
+            exec: {command: ["sh", "-c", "fs_cli -x status 2>/dev/null | grep -q UP"]}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 50m, memory: 96Mi}
+            limits: {memory: 512Mi}
+          volumeMounts:
+            {{- range $file, $dest := dict
+                  "event_socket.conf.xml" "autoload_configs/event_socket.conf.xml"
+                  "acl.conf.xml" "autoload_configs/acl.conf.xml"
+                  "xml_curl.conf.xml" "autoload_configs/xml_curl.conf.xml"
+                  "external.xml" "sip_profiles/external.xml" }}
+            - {name: fs-conf, mountPath: /etc/freeswitch/{{ $dest }}, subPath: {{ $file }}, readOnly: true}
+            {{- end }}
+            # Vanilla internal also binds :5060 / steals the port — off (docs/freeswitch/conf.md).
+            {{- range $p := list "internal.xml" "internal-ipv6.xml" "external-ipv6.xml" }}
+            - {name: fs-conf, mountPath: /etc/freeswitch/sip_profiles/{{ $p }}, subPath: disabled.xml, readOnly: true}
+            {{- end }}
+      volumes:
+        - name: fs-conf
+          configMap:
+            name: {{ $fs.configMap }}

@@ -1,0 +1,13 @@
+# The S11 / S6a peer name the SGW-C and HSS are configured with. Selects the lab MME harness
+# (deploy/k8s/lab.sh epc-attach); with nothing behind it the name still resolves.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.mme.serviceName }}
+  labels: {{- include "epc.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: mme
+  ports:
+    - {name: gtpc, port: 2123, protocol: UDP}
+    - {name: s6a, port: 3868, protocol: TCP}

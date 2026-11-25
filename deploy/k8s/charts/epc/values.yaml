@@ -1,0 +1,119 @@
+# EPC on Kubernetes (docs/agents/k8s.md). Lab defaults: one node (k3s), small heaps.
+image:
+  repository: sip-freeswitch/epc-host
+  tag: lab
+  # Lab images are imported into the node, never pulled (deploy/k8s/lab.sh).
+  pullPolicy: Never
+
+realm: epc.lab
+javaOpts: "-Djava.net.preferIPv4Stack=true -Xms64m -Xmx256m -XX:+UseSerialGC"
+
+# Secret with key `password` for the EPC database (created by deploy/k8s/lab.sh — never in git).
+dbSecret: epc-db
+
+postgres:
+  image: postgres:16
+  storage: 1Gi
+
+resources:
+  requests: {cpu: 50m, memory: 320Mi}
+  limits: {memory: 640Mi}
+
+# One StatefulSet per network function. Each gets:
+#   <name>     ClusterIP Service — GTP-C / PFCP peers (stable address; replies come back through it)
+#   <name>-hl  headless Service  — per-pod DNS (<name>-N.<name>-hl) for Diameter peers and JGroups DNS_PING
+# clusterMode DIST_SYNC = an Infinispan cluster of that role only (epc-<role>-cluster): SGW-C state is
+# replicated to the other SGW-C, never to a PGW-C. nodeIndexBase + pod ordinal = TEID / SEID partition.
+nfs:
+  hss:
+    enabled: true
+    role: HSS
+    replicas: 1
+    clusterMode: LOCAL
+    nodeIndexBase: 1
+    ports:
+      - {name: s6a, port: 3868, protocol: TCP}
+    env:
+      # S6a toward the MME (the lab runs no MME in the cluster; srsRAN/open5gs stay in docker).
+      EPC_DIAMETER_PEER_HOST: mme
+      EPC_DIAMETER_PEER_PORT: "3868"
+      EPC_DIAMETER_PEER_ROLE: client
+      EPC_DIAMETER_DEST_HOST: mme.epc.lab
+      EPC_DIAMETER_DEST_REALM: epc.lab
+      EPC_HSS_MME_ALLOWLIST_ENABLED: "false"
+
+  sgwc:
+    enabled: true
+    role: SGWC
+    replicas: 2
+    clusterMode: DIST_SYNC
+    nodeIndexBase: 1
+    # S11 from one MME always lands on the same SGW-C (like the nginx hash for SIP); the peer takes over
+    # through Infinispan when it dies.
+    sessionAffinity: ClientIP
+    ports:
+      - {name: gtpc, port: 2123, protocol: UDP}
+    env:
+      EPC_GTP_PEER_HOST: mme
+      EPC_GTP_PEER_PORT: "2123"
+      EPC_S5C_WIRE: "true"
+      EPC_S5C_PGWC_PEER_HOST: epc-pgwc
+      EPC_S5C_PGWC_PEER_PORT: "2123"
+      EPC_PFCP_PEER_HOST: epc-up
+      EPC_PFCP_PEER_PORT: "8805"
+      EPC_SGWU_PEER_HOST: epc-up
+
+  pgwc:
+    enabled: true
+    role: PGWC
+    replicas: 1
+    clusterMode: DIST_SYNC
+    nodeIndexBase: 1
+    ports:
+      - {name: gtpc, port: 2123, protocol: UDP}
+      - {name: gx, port: 3868, protocol: TCP}
+    # Gx: the PGW-C listens, the PCRF dials in (peer list built from the pcrf replicas).
+    gxServer: true
+    env:
+      EPC_GTP_PEER_HOST: epc-sgwc
+      EPC_S5C_WIRE: "true"
+      EPC_S5C_PGWC_PEER_HOST: epc-sgwc
+      EPC_S5C_PGWC_PEER_PORT: "2123"
+      EPC_PFCP_PEER_HOST: epc-up
+      EPC_PFCP_PEER_PORT: "8805"
+      EPC_PGWU_PEER_HOST: epc-up
+      EPC_PCRF_WIRE_MODE: wire
+      EPC_PCRF_DEST_REALM: epc.lab
+
+  pcrf:
+    enabled: true
+    role: PCRF
+    # One PCRF: ra-diameter takes at most one server-role peer per RA, so the PGW-C side lists it once.
+    replicas: 1
+    clusterMode: LOCAL
+    nodeIndexBase: 1
+    ports:
+      - {name: gx, port: 3868, protocol: TCP}
+    gxClient: true
+    env:
+      EPC_DIAMETER_PEER_ROLE: client
+
+  up:
+    enabled: true
+    role: UP
+    replicas: 1
+    clusterMode: LOCAL
+    nodeIndexBase: 1
+    ports:
+      - {name: pfcp, port: 8805, protocol: UDP}
+      - {name: gtpu, port: 2152, protocol: UDP}
+    capabilities: [NET_ADMIN]
+    env:
+      EPC_UP_QER_ENABLED: "false"
+      EPC_UP_URR_MODE: poll
+      EPC_UP_URR_POLL_MS: "60000"
+      EPC_UP_URR_BASELINE_PERSIST_MS: "300000"
+
+# Lab MME harness (loadtest/gtp/MmeS11.java) — `mme` Service selects it; deploy/k8s/lab.sh runs it.
+mme:
+  serviceName: mme

@@ -1,0 +1,57 @@
+# Dedicated EPC database — never the Elisa one.
+apiVersion: v1
+kind: Service
+metadata:
+  name: epc-postgres
+  labels: {{- include "epc.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: epc-postgres
+  ports:
+    - {name: pg, port: 5432, protocol: TCP}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: epc-postgres
+  labels: {{- include "epc.labels" . | nindent 4 }}
+spec:
+  serviceName: epc-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: epc-postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: epc-postgres
+        {{- include "epc.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: POSTGRES_DB, value: epc}
+            - {name: POSTGRES_USER, value: epc}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: {{ .Values.dbSecret }}, key: password}}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+          ports:
+            - {name: pg, containerPort: 5432}
+          readinessProbe:
+            exec: {command: ["pg_isready", "-U", "epc", "-d", "epc"]}
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {memory: 512Mi}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage }}

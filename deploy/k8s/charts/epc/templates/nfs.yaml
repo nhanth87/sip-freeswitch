@@ -1,0 +1,136 @@
+{{- $root := . }}
+{{- range $name, $nf := .Values.nfs }}
+{{- if $nf.enabled }}
+{{- $full := printf "epc-%s" $name }}
+{{- $waitFor := include "epc.waitFor" (dict "nf" $nf "root" $root) }}
+---
+# Per-pod DNS (<pod>.{{ $full }}-hl) and JGroups DNS_PING. Not-ready pods are published so members find
+# each other while they start.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-hl
+  labels: {{- include "epc.labels" $root | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: {{ $full }}
+  ports:
+    - {name: jgroups, port: 7800, protocol: TCP}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}
+  labels: {{- include "epc.labels" $root | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ $full }}
+  {{- with $nf.sessionAffinity }}
+  sessionAffinity: {{ . }}
+  {{- end }}
+  ports:
+    {{- range $nf.ports }}
+    - {name: {{ .name }}, port: {{ .port }}, protocol: {{ .protocol }}}
+    {{- end }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $full }}
+  labels: {{- include "epc.labels" $root | nindent 4 }}
+spec:
+  serviceName: {{ $full }}-hl
+  replicas: {{ $nf.replicas }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $full }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $full }}
+        app.kubernetes.io/component: {{ $name }}
+        {{- include "epc.labels" $root | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: 20
+      initContainers:
+        - name: wait-deps
+          image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          command:
+            - bash
+            - -c
+            - |
+              until (echo > /dev/tcp/epc-postgres/5432) 2>/dev/null; do echo "waiting for epc-postgres"; sleep 2; done
+              for h in {{ $waitFor }}; do
+                until getent hosts "$h" >/dev/null; do echo "waiting for $h"; sleep 2; done
+              done
+      containers:
+        - name: {{ $name }}
+          image: "{{ $root.Values.image.repository }}:{{ $root.Values.image.tag }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          # TEID / SEID partition = nodeIndexBase + pod ordinal (unique inside the role's cluster).
+          command:
+            - sh
+            - -c
+            - export EPC_CLUSTER_NODE_INDEX=$$(( $${HOSTNAME##*-} + {{ $nf.nodeIndexBase }} )); exec java -jar /work/quarkus-run.jar
+          env:
+            - name: POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+            - name: POD_IP
+              valueFrom: {fieldRef: {fieldPath: status.podIP}}
+            - {name: JAVA_TOOL_OPTIONS, value: "{{ $root.Values.javaOpts }} -Djgroups.dns.query={{ $full }}-hl.$(POD_NAMESPACE).svc.cluster.local"}
+            {{- range $r := list "HSS" "SGWC" "PGWC" "PCRF" "PCEF" "UP" }}
+            - {name: EPC_ROLE_{{ $r }}, value: "{{ eq $r $nf.role }}"}
+            {{- end }}
+            - {name: EPC_CLUSTER_NODE_ID, value: "$(POD_NAME)"}
+            - {name: EPC_CLUSTER_ISPN_MODE, value: {{ $nf.clusterMode }}}
+            - {name: EPC_CLUSTER_ISPN_NAME, value: "epc-{{ $name }}-cluster"}
+            - {name: EPC_CLUSTER_JGROUPS_STACK, value: kubernetes}
+            - {name: EPC_LOCAL_ADDRESS, value: "$(POD_IP)"}
+            - {name: EPC_HTTP_PORT, value: "8099"}
+            - {name: EPC_JDBC_URL, value: "jdbc:postgresql://epc-postgres:5432/epc"}
+            - {name: EPC_DB_USERNAME, value: epc}
+            - name: EPC_DB_PASSWORD
+              valueFrom: {secretKeyRef: {name: {{ $root.Values.dbSecret }}, key: password}}
+            - {name: EPC_DIAMETER_ORIGIN_HOST, value: "$(POD_NAME).{{ $root.Values.realm }}"}
+            - {name: EPC_DIAMETER_ORIGIN_REALM, value: {{ $root.Values.realm }}}
+            {{- if $nf.gxServer }}
+            - {name: EPC_PCRF_PEER_HOST, value: "epc-pcrf-0.{{ $root.Values.realm }}"}
+            - {name: EPC_DIAMETER_PEERS, value: "epc-pcrf-0.epc-pcrf-hl:0:server:epc-pcrf-0.{{ $root.Values.realm }}:{{ $root.Values.realm }}:gx"}
+            {{- end }}
+            {{- if $nf.gxClient }}
+            - {name: EPC_DIAMETER_PEERS, value: {{ include "epc.pcrfPeers" $root | quote }}}
+            {{- end }}
+            {{- range $k, $v := $nf.env }}
+            - {name: {{ $k }}, value: {{ $v | quote }}}
+            {{- end }}
+          ports:
+            - {name: http, containerPort: 8099, protocol: TCP}
+            - {name: jgroups, containerPort: 7800, protocol: TCP}
+            {{- range $nf.ports }}
+            - {name: {{ .name }}, containerPort: {{ .port }}, protocol: {{ .protocol }}}
+            {{- end }}
+          {{- with $nf.capabilities }}
+          securityContext:
+            capabilities:
+              add: {{ toJson . }}
+          {{- end }}
+          startupProbe:
+            httpGet: {path: /epc/status, port: http}
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet: {path: /epc/status, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /epc/status, port: http}
+            periodSeconds: 20
+            failureThreshold: 6
+          resources: {{- toYaml $root.Values.resources | nindent 12 }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,9 @@
+apiVersion: v2
+name: elisa-ims
+description: >-
+  Elisa lab IMS core on Kubernetes: P-CSCF, I-CSCF, HSS-lite and S-CSCF as separate StatefulSets, each
+  S-CSCF pod paired 1:1 with its FreeSWITCH (MRF/AS, ESL on localhost), nginx SIP/admin edge, coturn,
+  Postgres. S-CSCFs form elisa-cluster over JGroups DNS_PING. docs/agents/k8s.md
+type: application
+version: 0.1.0
+appVersion: "lab"

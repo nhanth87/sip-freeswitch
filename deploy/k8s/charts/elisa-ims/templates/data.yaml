@@ -1,0 +1,117 @@
+{{- /* Postgres (Elisa DB — never the EPC one) and coturn (TURN/STUN for ICE; RTP bypasses nginx). */ -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: elisa-postgres
+  labels: {{- include "elisa.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: elisa-postgres
+  ports:
+    - {name: pg, port: 5432, protocol: TCP}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: elisa-postgres
+  labels: {{- include "elisa.labels" . | nindent 4 }}
+spec:
+  serviceName: elisa-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: elisa-postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: elisa-postgres
+        {{- include "elisa.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: POSTGRES_DB, value: elisa}
+            - {name: POSTGRES_USER, value: elisa}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: {{ .Values.dbSecret }}, key: password}}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+          ports:
+            - {name: pg, containerPort: 5432}
+          readinessProbe:
+            exec: {command: ["pg_isready", "-U", "elisa", "-d", "elisa"]}
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {memory: 512Mi}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: coturn
+  labels: {{- include "elisa.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: coturn
+  ports:
+    - {name: turn-udp, port: 3478, protocol: UDP}
+    - {name: turn-tcp, port: 3478, protocol: TCP}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coturn
+  labels: {{- include "elisa.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: coturn
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: coturn
+        {{- include "elisa.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: coturn
+          image: {{ .Values.coturn.image }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TURN_USER
+              valueFrom: {secretKeyRef: {name: {{ .Values.labSecret }}, key: turn-username}}
+            - name: TURN_PASS
+              valueFrom: {secretKeyRef: {name: {{ .Values.labSecret }}, key: turn-password}}
+          args:
+            - -n
+            - --log-file=stdout
+            - --listening-port=3478
+            - --fingerprint
+            - --lt-cred-mech
+            - --user=$(TURN_USER):$(TURN_PASS)
+            - --realm={{ .Values.coturn.realm }}
+            - --no-cli
+            - --no-tls
+            - --no-dtls
+            - --listening-ip=0.0.0.0
+            - --relay-ip=0.0.0.0
+          ports:
+            - {name: turn-udp, containerPort: 3478, protocol: UDP}
+            - {name: turn-tcp, containerPort: 3478, protocol: TCP}
+          readinessProbe:
+            tcpSocket: {port: 3478}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 20m, memory: 32Mi}
+            limits: {memory: 256Mi}

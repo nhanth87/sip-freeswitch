@@ -1,0 +1,79 @@
+{{- /* P-CSCF, I-CSCF, HSS-lite: one StatefulSet each, single node (LOCAL Infinispan). */ -}}
+{{- $root := . }}
+{{- range $name := list "pcscf" "icscf" "hss" }}
+{{- $nf := index $root.Values $name }}
+{{- $cx := has $name (list "icscf" "hss") }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-hl
+  labels: {{- include "elisa.labels" $root | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+  ports:
+    - {name: sip-udp, port: 5060, protocol: UDP}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "elisa.labels" $root | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+  ports:
+    - {name: sip-udp, port: 5060, protocol: UDP}
+    - {name: sip-tcp, port: 5060, protocol: TCP}
+    - {name: http, port: 8088, protocol: TCP}
+    {{- if $cx }}
+    - {name: cx, port: 3868, protocol: TCP}
+    {{- end }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels: {{- include "elisa.labels" $root | nindent 4 }}
+spec:
+  serviceName: {{ $name }}-hl
+  replicas: {{ $nf.replicas }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+        {{- include "elisa.labels" $root | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: 20
+      initContainers:
+        {{- $names := "" }}
+        {{- if eq $name "icscf" }}{{ $names = "hss-0.hss-hl" }}{{ end }}
+        {{- if eq $name "hss" }}{{ $names = "icscf-0.icscf-hl" }}{{ end }}
+        {{- include "elisa.waitDeps" (dict "root" $root "names" $names) | nindent 8 }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "elisa.image" $root }}
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          env:
+            {{- include "elisa.env" (dict "root" $root "name" $name "nf" $nf "dist" false) | nindent 12 }}
+            - {name: SF_IMS_SCSCF_URI, value: "sip:scscf:5060"}
+            {{- if eq $name "pcscf" }}
+            {{- include "elisa.mediaEnv" $root | nindent 12 }}
+            {{- end }}
+          ports:
+            - {name: http, containerPort: 8088, protocol: TCP}
+            - {name: sip-udp, containerPort: 5060, protocol: UDP}
+            - {name: sip-tcp, containerPort: 5060, protocol: TCP}
+            {{- if $cx }}
+            - {name: cx, containerPort: 3868, protocol: TCP}
+            {{- end }}
+          {{- include "elisa.probes" $root | nindent 10 }}
+          resources: {{- toYaml $root.Values.resources | nindent 12 }}
+{{- end }}

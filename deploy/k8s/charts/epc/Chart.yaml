@@ -1,0 +1,9 @@
+apiVersion: v2
+name: epc
+description: >-
+  4G EPC control plane on micro-jainslee, one StatefulSet per network function (HSS/AuC, SGW-C, PGW-C,
+  PCRF, UP) with its own headless Service and its own Infinispan cluster (JGroups DNS_PING).
+  Sibling of the elisa-ims chart — never joins elisa-cluster. docs/agents/k8s.md
+type: application
+version: 0.1.0
+appVersion: "lab"
