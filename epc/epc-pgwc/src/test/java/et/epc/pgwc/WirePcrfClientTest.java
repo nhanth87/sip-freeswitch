@@ -1,5 +1,6 @@
 package et.epc.pgwc;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -44,9 +45,7 @@ class WirePcrfClientTest {
             SendDiameterRequest req = (SendDiameterRequest) command;
             requests.add(req);
             DiameterAnswerEvent answer = responder == null ? null : responder.apply(req);
-            if (answer != null && client != null) {
-                client.onCca(answer);
-            }
+            // Answers are events now: tests hand them to WirePcrfClient#decision.
         }
     }
 
@@ -93,106 +92,87 @@ class WirePcrfClientTest {
         return avps;
     }
 
+    private static DiameterAvp child(List<DiameterAvp> avps, int code) {
+        return avps.stream().filter(a -> a.code() == code).findFirst().orElse(null);
+    }
+
+    /** TS 29.212 §5.6.2: typed CCR-I, nothing in the string map; no wait on the CCA. */
     @Test
-    void ccrEncodesFlatAvpsAndCcaRoundTripsIntoPolicyDecision() {
-        FakeDiameterPort port = new FakeDiameterPort(req ->
-                cca(req.sessionId(), 2001L, successCcaAvps(encodeRule(
-                        "ims-voice-qci1", 1, 1, true, false,
-                        512_000_000L, 512_000_000L, 256_000_000L, 256_000_000L,
-                        7, "ims-rtp", "permit out udp from any to any", true)), List.of()));
+    void ccrIsTypedAndSentWithoutWaiting() {
+        FakeDiameterPort port = new FakeDiameterPort(null);
         WirePcrfClient client = client(port, true, 2_000L);
 
-        PolicyDecision decision = client.beginGxSession(IMSI, "ims", "10.65.0.2", 42L, "1");
+        String sid = client.sendCcr(IMSI, "internet", "10.64.0.2", 0x2a, 1, 0).orElseThrow();
 
         assertEquals(1, port.requests.size());
         SendDiameterRequest ccr = port.requests.get(0);
-        assertEquals(WirePcrfClient.GX_APP_ID, ccr.applicationId());
-        assertEquals(WirePcrfClient.CCR_CMD, ccr.commandCode());
-        assertEquals(PCRF_HOST, ccr.destinationHost());
-        assertEquals("epc.lab", ccr.destinationRealm());
-        assertTrue(ccr.sessionId().startsWith("epc-pgwc-1.epc.lab;gx-wire;"));
-        Map<Integer, String> body = ccr.avps();
-        assertEquals(IMSI.digits(), body.get(WirePcrfClient.SUBSCRIPTION_ID_DATA));
-        assertEquals("1", body.get(WirePcrfClient.SUBSCRIPTION_ID_TYPE));
-        assertEquals("ims", body.get(WirePcrfClient.CALLED_STATION_ID));
-        assertEquals("10.65.0.2", body.get(WirePcrfClient.FRAMED_IP_ADDRESS));
-        assertEquals("42", body.get(WirePcrfClient.CHARGING_ID));
-        assertEquals("1", body.get(WirePcrfClient.CC_REQUEST_TYPE));
-        assertEquals("1", body.get(WirePcrfClient.AUTH_SESSION_STATE));
-
-        assertEquals(1, decision.rules().size());
-        PccRule rule = decision.rules().get(0);
-        assertEquals("ims-voice-qci1", rule.name());
-        assertEquals("ims-voice-qci1", decision.ruleName());
-        assertEquals(1, rule.qci());
-        assertEquals(1, rule.arpPriority());
-        assertTrue(rule.preemptionCapable());
-        assertFalse(rule.preemptionVulnerable());
-        assertEquals(512_000_000L, rule.mbrUlBps());
-        assertEquals(256_000_000L, rule.gbrDlBps());
-        assertEquals(7, rule.ratingGroup());
-        assertEquals("ims-rtp", rule.serviceId());
-        assertEquals("permit out udp from any to any", rule.flowDescription());
-        assertTrue(decision.gatingOpen());
-        assertEquals(5, decision.qos().qci());
-        assertEquals(1, decision.qos().arpPriority());
-        assertEquals(2_000_000_000L, decision.qos().ueAmbrDlBps());
-        assertEquals(0, client.pendingCount());
+        assertEquals(sid, ccr.sessionId());
+        assertTrue(ccr.avps().isEmpty(), "no string-encoded AVPs");
+        List<DiameterAvp> t = ccr.avpsStructured();
+        assertEquals(WirePcrfClient.GX_APP_ID, child(t, 258).asUnsigned32());
+        assertEquals(DiameterAvp.Type.ENUMERATED32, child(t, 416).type());
+        assertEquals(1L, child(t, 416).asUnsigned32());
+        DiameterAvp sub = child(t, 443);
+        assertEquals(DiameterAvp.Type.GROUPED, sub.type());
+        assertEquals(1L, child(sub.children(), 450).asUnsigned32());
+        assertEquals(IMSI.digits(), child(sub.children(), 444).asUtf8());
+        assertArrayEquals(new byte[] {10, 64, 0, 2}, child(t, 8).asOctets());
+        assertEquals(10415L, child(t, 1027).vendorId());
+        assertEquals(5L, child(t, 1027).asUnsigned32());
+        assertEquals(1004L, child(t, 1032).asUnsigned32());
+        assertEquals("internet", child(t, 30).asUtf8());
+        assertEquals(sid, client.sessionIdFor(0x2a), "Session-Id derives from the Charging-Id");
     }
 
     @Test
-    void peerNotReadyFallsBackStaticAndSendsNothing() {
+    void ccrTerminationCarriesNoUeAddress() {
         FakeDiameterPort port = new FakeDiameterPort(null);
-        WirePcrfClient client = client(port, false, 2_000L);
-
-        PolicyDecision decision = client.beginGxSession(IMSI, "internet", "10.64.0.2", 1L, null);
-
-        assertTrue(port.requests.isEmpty());
-        assertEquals("static-default", decision.ruleName());
-        assertEquals("ims-qci5",
-                client.beginGxSession(IMSI, "ims", null, 0L, null).ruleName());
-        assertEquals(0, client.pendingCount());
-    }
-
-    @Test
-    void inProcessModeFallsBackEvenWhenPeerReady() {
-        FakeDiameterPort port = new FakeDiameterPort(null);
-        WirePcrfClient client = new WirePcrfClient(port, () -> true, GxWireConfig.inProcess());
-        port.client = client;
-
-        PolicyDecision decision = client.beginGxSession(IMSI, "internet", null, 0L, null);
-
-        assertTrue(port.requests.isEmpty());
-        assertEquals("static-default", decision.ruleName());
-        assertFalse(client.wireEnabled());
-    }
-
-    @Test
-    void ccaTimeoutFallsBackStaticAndClearsPending() {
-        FakeDiameterPort port = new FakeDiameterPort(null); // never answers
-        WirePcrfClient client = client(port, true, 50L);
-
-        long start = System.nanoTime();
-        PolicyDecision decision = client.beginGxSession(IMSI, "internet", null, 0L, null);
-        long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
-
-        assertEquals(1, port.requests.size());
-        assertEquals("static-default", decision.ruleName());
-        assertEquals(0, client.pendingCount());
-        assertTrue(elapsedMs >= 40, "expected the CCA wait, took " + elapsedMs + "ms");
-    }
-
-    @Test
-    void nonSuccessCcaFallsBackStatic() {
-        FakeDiameterPort port = new FakeDiameterPort(req ->
-                cca(req.sessionId(), 5001L,
-                        Map.of(WirePcrfClient.RESULT_CODE, "5001"), List.of()));
         WirePcrfClient client = client(port, true, 2_000L);
+        client.sendCcr(IMSI, "internet", null, 0x2a, 3, 1).orElseThrow();
+        List<DiameterAvp> t = port.requests.get(0).avpsStructured();
+        assertEquals(3L, child(t, 416).asUnsigned32());
+        assertEquals(1L, child(t, 415).asUnsigned32());
+        assertEquals(null, child(t, 8));
+    }
 
-        PolicyDecision decision = client.beginGxSession(IMSI, "internet", null, 0L, null);
+    @Test
+    void peerNotReadyOrInProcessSendsNothing() {
+        FakeDiameterPort port = new FakeDiameterPort(null);
+        assertTrue(client(port, false, 2_000L).sendCcr(IMSI, "internet", "10.64.0.2", 1, 1, 0).isEmpty());
+        WirePcrfClient inProc = new WirePcrfClient(port,
+                () -> true, new GxWireConfig(false, PCRF_HOST, 3868, 2_000L, "epc.lab"));
+        assertTrue(inProc.sendCcr(IMSI, "internet", "10.64.0.2", 1, 1, 0).isEmpty());
+        assertTrue(port.requests.isEmpty());
+        // The synchronous seam never waits: static policy at once.
+        assertEquals("static-default", inProc.beginGxSession(IMSI, "internet", null, 0L, null).ruleName());
+    }
 
-        assertEquals("static-default", decision.ruleName());
-        assertEquals(1, port.requests.size());
+    /** Typed CCA: Default-EPS-Bearer-QoS (1049) and command-level APN-AMBR become the policy. */
+    @Test
+    void typedCcaBecomesThePolicy() {
+        WirePcrfClient client = client(new FakeDiameterPort(null), true, 2_000L);
+        DiameterAvp dq = DiameterAvp.grouped3gpp(1049, List.of(
+                DiameterAvp.v3gpp(1028, 6L),
+                DiameterAvp.grouped3gpp(1034, List.of(
+                        DiameterAvp.u32(1046, 10415L, 2L, true),
+                        DiameterAvp.v3gpp(1047, 0L),       // ENABLED
+                        DiameterAvp.v3gpp(1048, 1L)))));   // DISABLED
+        DiameterAvp ambr = DiameterAvp.grouped3gpp(1016, List.of(
+                DiameterAvp.u32(1041, 10415L, 50_000_000L, true),
+                DiameterAvp.u32(1040, 10415L, 100_000_000L, true)));
+        PolicyDecision d = client.decision("internet", cca("s", 2001L, Map.of(), List.of(dq, ambr)));
+        assertEquals(6, d.qos().qci());
+        assertEquals(2, d.qos().arpPriority());
+        assertTrue(d.qos().preemptionCapability());
+        assertFalse(d.qos().preemptionVulnerability());
+        assertEquals(50_000_000L, d.qos().apnAmbrUlBps());
+        assertEquals(100_000_000L, d.qos().apnAmbrDlBps());
+    }
+
+    @Test
+    void refusedCcaIsNoPolicy() {
+        WirePcrfClient client = client(new FakeDiameterPort(null), true, 2_000L);
+        assertEquals(null, client.decision("internet", cca("s", 5030L, Map.of(), List.of())));
     }
 
     @Test
@@ -215,16 +195,16 @@ class WirePcrfClientTest {
                                         WirePcrfClient.ALLOCATION_RETENTION_PRIORITY, List.of(
                                                 DiameterAvp.u32(WirePcrfClient.PRIORITY_LEVEL,
                                                         10415L, 1L, true),
-                                                DiameterAvp.v3gpp(
-                                                        WirePcrfClient.PRE_EMPTION_CAPABILITY, 1L),
-                                                DiameterAvp.v3gpp(
+                                                DiameterAvp.v3gpp(          // 0 = ENABLED
+                                                        WirePcrfClient.PRE_EMPTION_CAPABILITY, 0L),
+                                                DiameterAvp.v3gpp(          // 1 = DISABLED
                                                         WirePcrfClient.PRE_EMPTION_VULNERABILITY,
-                                                        0L))))),
+                                                        1L))))),
                         DiameterAvp.grouped3gpp(WirePcrfClient.FLOW_INFORMATION, List.of(
                                 DiameterAvp.octets(WirePcrfClient.FLOW_DESCRIPTION, 10415L,
                                         "permit out udp from any to any"
                                                 .getBytes(StandardCharsets.UTF_8), true),
-                                DiameterAvp.v3gpp(WirePcrfClient.FLOW_STATUS, 1L)))));
+                                DiameterAvp.v3gpp(WirePcrfClient.FLOW_STATUS, 2L)))));   // ENABLED
         DiameterAvp install = DiameterAvp.grouped3gpp(
                 WirePcrfClient.CHARGING_RULE_INSTALL, List.of(definition));
         FakeDiameterPort port = new FakeDiameterPort(req ->
@@ -232,7 +212,8 @@ class WirePcrfClientTest {
                         List.of(install)));
         WirePcrfClient client = client(port, true, 2_000L);
 
-        PolicyDecision decision = client.beginGxSession(IMSI, "ims", null, 0L, null);
+        PolicyDecision decision = client.decision("ims",
+                cca("s", 2001L, Map.of(WirePcrfClient.RESULT_CODE, "2001"), List.of(install)));
 
         assertEquals(1, decision.rules().size());
         PccRule rule = decision.rules().get(0);

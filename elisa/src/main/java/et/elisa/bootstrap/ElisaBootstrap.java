@@ -358,6 +358,11 @@ final class ElisaBootstrap {
             diameterConfigSet(cfg, "setPeerPort", int.class, cxPeerPort);
         }
         DiameterResourceAdaptor ra = new DiameterResourceAdaptor();
+        if (elisaIspn != null && elisaIspn.enabled() && elisaIspn.distSync() && elisaIspn.manager() != null) {
+            // Cx sessions (UAR/LIR/MAR/SAR) owned per node on elisa-cluster, like the SIP RA (ADR 0002).
+            ra.setClusterManager(ClusterManager.adopt(elisaIspn.manager(), fsPairRegistry.nodeId(), true));
+            ra.setMicroSleeContainer(container);
+        }
         diameterEndpoint = new DiameterRaEndpoint(ra);
         diameterEndpoint.setConfig(cfg);
         container.registerRa(diameterEndpoint, diameterEndpoint);

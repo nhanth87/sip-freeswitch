@@ -97,17 +97,13 @@ class PcrfSbbTest {
         assertEquals(GxHandler.CCR_CMD, ans.commandCode());
         assertEquals(2001L, ans.resultCode());
 
-        String install = ans.avps().get(GxHandler.CHARGING_RULE_INSTALL);
-        assertNotNull(install);
-        assertTrue(install.contains("name=ims-signal-qci5"));
-        assertTrue(install.contains("qci=5"));
-
-        String qos = ans.avps().get(GxHandler.DEFAULT_EPS_BEARER_QOS);
-        assertNotNull(qos);
-        assertTrue(qos.contains("qci=5"));
-
-        assertTrue(ans.avps().get(GxHandler.USAGE_MONITORING_INFORMATION)
-                .contains("key=pilot-volume"));
+        // Typed CCA only (TS 29.212 §5.6.3): no string-encoded grouped AVPs on the wire.
+        assertTrue(ans.avps().isEmpty());
+        assertEquals(GxHandler.APP_ID, child(ans.avpsStructured(), 258).asUnsigned32());
+        assertEquals(1L, child(ans.avpsStructured(), GxHandler.CC_REQUEST_TYPE).asUnsigned32());
+        DiameterAvp dq = child(ans.avpsStructured(), et.epc.api.diameter.GxAvp.DEFAULT_EPS_BEARER_QOS);
+        assertNotNull(dq, "Default-EPS-Bearer-QoS(1049)");
+        assertEquals(5L, child(children(dq), GxHandler.QOS_CLASS_IDENTIFIER).asUnsigned32());
 
         assertFalse(ans.avpsStructured().isEmpty());
 
@@ -115,9 +111,30 @@ class PcrfSbbTest {
         assertNotNull(installAvp, "CCA must carry grouped Charging-Rule-Install(1001)");
         DiameterAvp definition = child(children(installAvp), GxHandler.CHARGING_RULE_DEFINITION);
         assertNotNull(definition, "install must carry grouped Charging-Rule-Definition(1003)");
-        DiameterAvp sessionState = child(ans.avpsStructured(), GxHandler.AUTH_SESSION_STATE);
-        assertNotNull(sessionState, "CCA must carry Auth-Session-State(277)");
-        assertEquals(1L, sessionState.asUnsigned32());
+        assertNotNull(child(children(definition), GxHandler.CHARGING_RULE_NAME));
+    }
+
+    /** CCR-T (TS 29.212 §4.5.7): accepted, typed head echoed, no rules. */
+    @Test
+    void ccrTerminationIsAcceptedWithoutRules() {
+        List<DiameterAvp> structured = List.of(
+                DiameterAvp.enum32(GxHandler.CC_REQUEST_TYPE, 3L),
+                DiameterAvp.u32(GxHandler.CC_REQUEST_NUMBER, 1L),
+                DiameterAvp.grouped(443, 0L, true, List.of(
+                        DiameterAvp.enum32(450, 1L), DiameterAvp.utf8(444, "001010000000001"))));
+        sbb.onEvent(reqStructured(PcrfSbb.GX, GxHandler.CCR_CMD, Map.of(), structured), null);
+        SendDiameterAnswer ans = last();
+        assertEquals(2001L, ans.resultCode());
+        assertEquals(3L, child(ans.avpsStructured(), GxHandler.CC_REQUEST_TYPE).asUnsigned32());
+        assertEquals(null, child(ans.avpsStructured(), GxHandler.CHARGING_RULE_INSTALL));
+    }
+
+    /** No IMSI in the CCR → DIAMETER_USER_UNKNOWN (RFC 4006 §9.1). */
+    @Test
+    void ccrWithoutImsiIsUserUnknown() {
+        sbb.onEvent(reqStructured(PcrfSbb.GX, GxHandler.CCR_CMD, Map.of(),
+                List.of(DiameterAvp.enum32(GxHandler.CC_REQUEST_TYPE, 1L))), null);
+        assertEquals(5030L, last().resultCode());
     }
 
     @Test
@@ -132,10 +149,7 @@ class PcrfSbbTest {
 
         SendDiameterAnswer ans = last();
         assertEquals(2001L, ans.resultCode());
-        String install = ans.avps().get(GxHandler.CHARGING_RULE_INSTALL);
-        assertNotNull(install);
-        assertTrue(install.contains("name=ims-signal-qci5"));
-        assertFalse(ans.avpsStructured().isEmpty());
+        assertNotNull(child(ans.avpsStructured(), GxHandler.CHARGING_RULE_INSTALL));
     }
 
     @Test

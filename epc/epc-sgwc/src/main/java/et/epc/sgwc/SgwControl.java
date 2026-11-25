@@ -9,10 +9,10 @@ import com.microjainslee.ra.gtpv2c.Gtpv2MessageType;
 import com.microjainslee.ra.gtpv2c.command.GtpEchoCommand;
 import com.microjainslee.ra.gtpv2c.command.SendGtpv2Message;
 import com.microjainslee.ra.pfcp.PfcpFteid;
-import com.microjainslee.ra.pfcp.PfcpRule;
 import com.microjainslee.ra.pfcp.command.PfcpAssociateCommand;
-import com.microjainslee.ra.pfcp.command.PfcpProgramSession;
 import com.microjainslee.ra.pfcp.command.PfcpSessionDeletion;
+import com.microjainslee.ra.pfcp.command.PfcpSessionEstablishment;
+import com.microjainslee.ra.pfcp.command.PfcpSessionModification;
 import et.epc.api.ApnConfig;
 import et.epc.api.BearerId;
 import et.epc.api.Fteid;
@@ -151,8 +151,8 @@ public final class SgwControl {
     private record PendingDelete(S11Context s11, int s11cTeid, int sequence) {}
 
     /**
-     * Per-session control-plane peers. In memory: {@link SessionCheckpoint} has no fields for the
-     * MME S11 / PGW S5-C F-TEIDs yet, so they do not survive a failover (HA gap, documented).
+     * Per-session control-plane peers. Kept in the {@link SessionCheckpoint} (shared store), the
+     * map is a node-local cache: after a failover another node rebuilds them from the store.
      */
     public record ControlPeers(Fteid mmeS11, Fteid sgwS5c, Fteid pgwS5c, Fteid pgwS5u,
                                InetSocketAddress pgwc) {}
@@ -242,7 +242,7 @@ public final class SgwControl {
      * answer when it responds (or times out); in-process → now. The Sxa session goes either way.
      */
     public java.util.Optional<DeleteOutcome> beginDeleteSession(int s11cTeid, S11Context s11) {
-        ControlPeers peers = controlPeers.get(s11cTeid);
+        ControlPeers peers = controlPeers(s11cTeid);
         if (!wire || peers == null || peers.pgwS5c() == null || peers.sgwS5c() == null
                 || peers.pgwc() == null || gtp == null) {
             sessions.findByS11cTeid(s11cTeid).ifPresent(cp ->
@@ -276,16 +276,30 @@ public final class SgwControl {
 
     /** MME S11 F-TEID of a session (response header TEID on S11, §5.5.2). */
     public Fteid mmeS11(int s11cTeid) {
-        ControlPeers p = controlPeers.get(s11cTeid);
+        ControlPeers p = controlPeers(s11cTeid);
         return p == null ? null : p.mmeS11();
     }
 
+    /** Local cache, else the shared session store (a session another node set up). */
     public ControlPeers controlPeers(int s11cTeid) {
-        return controlPeers.get(s11cTeid);
+        ControlPeers local = controlPeers.get(s11cTeid);
+        if (local != null) {
+            return local;
+        }
+        return sessions.findByS11cTeid(s11cTeid)
+                .filter(cp -> cp.mmeS11Key() != null)
+                .map(cp -> {
+                    ControlPeers p = new ControlPeers(cp.mmeS11(), cp.sgwS5c(), cp.pgwS5c(), cp.pgwS5u(),
+                            hostPort(cp.pgwcPeer()));
+                    controlPeers.put(s11cTeid, p);
+                    return p;
+                })
+                .orElse(null);
     }
 
     private DeleteOutcome finishDelete(S11Context s11, int s11cTeid, int cause) {
-        ControlPeers peers = controlPeers.remove(s11cTeid);
+        ControlPeers peers = controlPeers(s11cTeid);
+        controlPeers.remove(s11cTeid);
         sessions.findByS11cTeid(s11cTeid).ifPresent(cp -> {
             pfcp.sendCommand(new PfcpSessionDeletion(sgwu, cp.pfcpSeid(), List.of()));
             sessions.remove(cp.sessionId());
@@ -313,13 +327,26 @@ public final class SgwControl {
 
     private void rememberPeers(int s11cTeid, ControlPeers peers) {
         controlPeers.put(s11cTeid, peers);
+        sessions.findByS11cTeid(s11cTeid).ifPresent(cp -> sessions.put(cp.withControlPeers(
+                peers.mmeS11(), peers.sgwS5c(), peers.pgwS5c(),
+                peers.pgwc() == null ? null : peers.pgwc().getAddress().getHostAddress() + ":" + peers.pgwc().getPort(),
+                0)));
+    }
+
+    private static InetSocketAddress hostPort(String hp) {
+        if (hp == null || hp.isBlank()) {
+            return null;
+        }
+        int c = hp.lastIndexOf(':');
+        return new InetSocketAddress(hp.substring(0, c), Integer.parseInt(hp.substring(c + 1)));
     }
 
     /** Sxa program + SGW checkpoint once the PGW-C side is known. */
     private SgwCreateSessionResult complete(Imsi imsi, ApnConfig apn, Fteid s11c, Fteid s1u, Fteid s5u,
                                             Fteid s5c, Fteid enbS1u, CreateSessionResult pgwResult) {
         long se = seid.getAndIncrement();
-        pfcp.sendCommand(new PfcpProgramSession(sgwu, se, accessRules(se, s1u, s5u, pgwResult.pgwS5u(), enbS1u)));
+        pfcp.sendCommand(new PfcpSessionEstablishment(sgwu, se,
+                SxaRules.establish(s1u, s5u, pgwResult.pgwS5u(), enbS1u, pgwResult.ue().ipv4())));
         SessionKeys keys = new SessionKeys(imsi, apn.apn(), new BearerId(5));
         String ue = pgwResult.ue().ipv4() == null ? "" : pgwResult.ue().ipv4().getHostAddress();
         sessions.put(new SessionCheckpoint(
@@ -331,18 +358,6 @@ public final class SgwControl {
         return new SgwCreateSessionResult(pgwResult.ue(), s11c, s1u, s5u, pgwResult);
     }
 
-    /**
-     * SGW-U tunnels as (local, remote) pairs: uplink S1-U(SGW) → S5-U(PGW); downlink
-     * S5-U(SGW) → S1-U(eNB) once the eNB is known (Modify Bearer).
-     */
-    private static List<PfcpRule> accessRules(long se, Fteid s1u, Fteid s5u, Fteid pgwS5u, Fteid enbS1u) {
-        List<PfcpRule> rules = new java.util.ArrayList<>();
-        rules.add(new PfcpRule(se, "pdr-ul", pf(s1u), pf(pgwS5u), "qer-1", true));
-        if (enbS1u != null) {
-            rules.add(new PfcpRule(se, "pdr-dl", pf(s5u), pf(enbS1u), "qer-1", false));
-        }
-        return rules;
-    }
 
     /**
      * Resolve the S5-C peer: prefer the MME-provided PGW S5/S8 control F-TEID,
@@ -409,16 +424,13 @@ public final class SgwControl {
         return modifyAccess(cp, newEnbS1u);
     }
 
+    /**
+     * Modify Bearer (TS 23.401 §5.3.4.1 step 13 / TS 29.244 §7.5.4): Session Modification on the
+     * existing Sxa session — Update FAR of the downlink to FORW toward the eNB S1-U F-TEID.
+     */
     private Fteid modifyAccess(SessionCheckpoint cp, Fteid newEnbS1u) {
-        Fteid s1u = cp.sgwS1u();
-        long se = cp.pfcpSeid();
-        pfcp.sendCommand(new PfcpProgramSession(sgwu, se,
-                accessRules(se, s1u, cp.sgwS5u(), pgwS5u(cp), newEnbS1u)));
-        return s1u;
-    }
-
-    private static Fteid pgwS5u(SessionCheckpoint cp) {
-        return cp.pgwS5u();
+        pfcp.sendCommand(new PfcpSessionModification(sgwu, cp.pfcpSeid(), SxaRules.downlinkTo(newEnbS1u)));
+        return cp.sgwS1u();
     }
 
     /**
@@ -427,13 +439,9 @@ public final class SgwControl {
      */
     public boolean releaseAccessByTeid(int s11cTeid) {
         return sessions.findByS11cTeid(s11cTeid).map(cp -> {
-            long se = cp.pfcpSeid();
-            // This is a Deactivate-DL FAR: drop the S1-U downlink PDR while keeping
-            // the S5 / UP session alive. ra-pfcp has no discrete FAR modify type
-            // yet (task_0001), so represent the deactivation as a session reprogram
-            // that retains the uplink S1-U -> S5-U leg and removes the downlink PDR.
-            pfcp.sendCommand(new PfcpProgramSession(sgwu, se,
-                    accessRules(se, cp.sgwS1u(), cp.sgwS5u(), pgwS5u(cp), null)));
+            // TS 23.401 §5.3.5 S1 release: the downlink FAR buffers and notifies the CP
+            // (Downlink Data Notification); the uplink and the S5 leg stay.
+            pfcp.sendCommand(new PfcpSessionModification(sgwu, cp.pfcpSeid(), SxaRules.downlinkBuffered()));
             return true;
         }).orElse(false);
     }

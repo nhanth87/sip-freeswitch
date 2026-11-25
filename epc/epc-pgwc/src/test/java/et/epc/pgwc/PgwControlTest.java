@@ -9,7 +9,7 @@ import com.microjainslee.api.OutboundCommand;
 import com.microjainslee.api.RaCommandPort;
 import com.microjainslee.ra.pfcp.PfcpIe;
 import com.microjainslee.ra.pfcp.PfcpUsageReport;
-import com.microjainslee.ra.pfcp.command.PfcpProgramSession;
+import com.microjainslee.ra.pfcp.command.PfcpSessionEstablishment;
 import et.epc.api.ApnConfig;
 import et.epc.api.Fteid;
 import et.epc.api.Imsi;
@@ -56,9 +56,13 @@ class PgwControlTest {
         assertEquals(1, r.chargingId().value());
         assertTrue(r.pfcpSeid() != 0);
         assertEquals(1, pfcp.cmds.size());
-        assertTrue(pfcp.cmds.get(0) instanceof PfcpProgramSession);
-        PfcpProgramSession p = (PfcpProgramSession) pfcp.cmds.get(0);
-        assertEquals(2, p.rules().size());
+        // Sxb anchor rules as TS 29.244 IEs (SxbRules): UL F-TEID → SGi, DL UE IP → GTP-U to the SGW.
+        assertTrue(pfcp.cmds.get(0) instanceof PfcpSessionEstablishment);
+        PfcpSessionEstablishment p = (PfcpSessionEstablishment) pfcp.cmds.get(0);
+        var tunnels = com.microjainslee.ra.pfcp.PfcpSessionState.empty().apply(p.ies()).tunnels(p.seid());
+        assertEquals(1, tunnels.size());
+        assertEquals(r.pgwS5u().teid(), tunnels.get(0).local().teid());
+        assertEquals(sgwS5u().teid(), tunnels.get(0).remote().teid());
         assertEquals(1, store.size());
         SessionCheckpoint cp = store.get(SessionCheckpoint.pgwId(
                 new et.epc.api.SessionKeys(IMSI, "internet", new et.epc.api.BearerId(5)))).orElseThrow();

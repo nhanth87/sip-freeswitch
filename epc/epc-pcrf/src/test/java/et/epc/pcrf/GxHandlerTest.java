@@ -125,7 +125,7 @@ class GxHandlerTest {
         DiameterAvp flowStatus = child(flowInfo.children(), GxHandler.FLOW_STATUS);
         assertNotNull(flowStatus, "Flow-Information must carry Flow-Status(511)");
         assertEquals(GxHandler.VENDOR_3GPP, flowStatus.vendorId());
-        assertEquals(1L, flowStatus.asUnsigned32());
+        assertEquals(2L, flowStatus.asUnsigned32(), "TS 29.214 §5.3.11 ENABLED = 2");
 
         // QoS-Information: QCI + ARP + MBR/GBR leaves.
         DiameterAvp arp = child(qosInfo.children(), GxHandler.ALLOCATION_RETENTION_PRIORITY);
@@ -145,8 +145,11 @@ class GxHandlerTest {
         assertEquals(defaultQos.qci(), child(child(body, GxHandler.DEFAULT_EPS_BEARER_QOS).children(),
                 GxHandler.QOS_CLASS_IDENTIFIER).asUnsigned32());
 
-        assertEquals(1L, child(body, GxHandler.AUTH_SESSION_STATE).asUnsigned32(),
-                "CCA must carry Auth-Session-State(277)=NO_STATE_MAINTAINED");
+        // §5.3.15: authorized APN-AMBR in a command-level QoS-Information (1040 DL / 1041 UL).
+        DiameterAvp ambr = child(body, GxHandler.QOS_INFORMATION);
+        assertNotNull(ambr);
+        assertEquals(defaultQos.apnAmbrDlBps(), child(ambr.children(), 1040).asUnsigned32());
+        assertEquals(defaultQos.apnAmbrUlBps(), child(ambr.children(), 1041).asUnsigned32());
     }
 
     private static DiameterAvp child(List<DiameterAvp> avps, int code) {

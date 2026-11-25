@@ -66,6 +66,13 @@ public final class PcrfService {
      * the RAR fan-out target list on an admin policy change. Empty when no
      * durable repo is wired (heap/lab path).
      */
+    /** CCR-T: forget the IP-CAN session (TS 29.212 §4.5.7). */
+    public void terminate(String sessionId) {
+        if (repo != null && sessionId != null) {
+            repo.deleteIpCanSession(sessionId);
+        }
+    }
+
     public List<String> activeGxSessionIds(String imsi, String apn) {
         Objects.requireNonNull(imsi);
         Objects.requireNonNull(apn);

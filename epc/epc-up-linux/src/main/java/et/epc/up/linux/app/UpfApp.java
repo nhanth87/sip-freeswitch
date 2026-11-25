@@ -5,6 +5,7 @@ import com.microjainslee.ra.pfcp.event.PfcpMessageEvent;
 import et.epc.up.linux.LinuxGtpAgent;
 import et.epc.up.linux.UrrIpIndex;
 import et.epc.up.linux.events.UpfProgramSessionEvent;
+import et.epc.up.linux.UpfSessionTable;
 import et.epc.up.linux.sbbs.UpfPfcpSbb;
 import et.epc.up.linux.sbbs.UpfSbb;
 import java.util.ArrayList;
@@ -44,7 +45,9 @@ public final class UpfApp {
         container.mapEventToSbb(UpfProgramSessionEvent.class, SBB_NAME);
         record("EventMapping:UpfProgramSessionEvent->" + SBB_NAME);
 
-        container.registerSbbType(UpfPfcpSbb.class, () -> new UpfPfcpSbb.$Concrete(agent, ipIndex));
+        // One session table for all pooled entities: Modification / Deletion may land on another entity.
+        UpfSessionTable sessions = new UpfSessionTable();
+        container.registerSbbType(UpfPfcpSbb.class, () -> new UpfPfcpSbb.$Concrete(agent, ipIndex, sessions));
         record("SbbType:" + PFCP_SBB_NAME);
 
         container.mapEventToSbb(PfcpMessageEvent.class, PFCP_SBB_NAME);

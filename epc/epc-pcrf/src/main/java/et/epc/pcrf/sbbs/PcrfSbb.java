@@ -49,6 +49,8 @@ public abstract class PcrfSbb extends CmpBackedSbb implements SleeEventHandler {
     public static final int ASR_CMD = 274;
 
     private static final Logger LOG = LogManager.getLogger(PcrfSbb.class);
+    /** RFC 4006 §9.1 DIAMETER_USER_UNKNOWN. */
+    static final long RESULT_USER_UNKNOWN = 5030L;
 
     private final PcrfService pcrf;
     private final GxHandler gx;
@@ -120,19 +122,30 @@ public abstract class PcrfSbb extends CmpBackedSbb implements SleeEventHandler {
         };
     }
 
+    /**
+     * Gx CCR → CCA (TS 29.212 §4.5): typed AVPs both ways. CCR-I/U decide and persist the
+     * IP-CAN session; CCR-T forgets it. No IMSI → DIAMETER_USER_UNKNOWN (RFC 4006 §9.1, 5030).
+     */
     private SendDiameterAnswer gx(DiameterRequestEvent req) {
         if (req.commandCode() != GxHandler.CCR_CMD) {
             return unsupported(req, GX);
         }
-        Map<Integer, String> ccr = enrichedAvps(req);
-        Map<Integer, String> cca = gx.handleCcr(ccr, req.sessionId());
-        List<DiameterAvp> structured = List.of();
-        if (GxHandler.RESULT_SUCCESS.equals(cca.get(GxHandler.RESULT_CODE))) {
-            GxHandler.GxCcr parsed = GxHandler.GxCcr.parse(ccr, req.sessionId());
-            PccDecision decision = pcrf.decide(parsed.imsi(), parsed.apn());
-            structured = gx.ccaStructured(parsed, decision);
+        GxHandler.GxCcr ccr = GxHandler.GxCcr.parse(enrichedAvps(req), req.avpsStructured(), req.sessionId());
+        List<DiameterAvp> body = new java.util.ArrayList<>(GxHandler.ccaHead(ccr));
+        if (GxHandler.REQ_TYPE_TERMINATION.equals(ccr.requestType())) {
+            pcrf.terminate(req.sessionId());
+            return new SendDiameterAnswer(req.sessionId(), GX, req.commandCode(), SendDiameterAnswer.SUCCESS,
+                    req.hopByHopId(), req.endToEndId(), Map.of(), body);
         }
-        return answer(req, GX, cca, structured);
+        if (ccr.imsi().isBlank()) {
+            return new SendDiameterAnswer(req.sessionId(), GX, req.commandCode(), RESULT_USER_UNKNOWN,
+                    req.hopByHopId(), req.endToEndId(), Map.of(), body);
+        }
+        PccDecision decision = pcrf.decide(ccr.imsi(), ccr.apn());
+        pcrf.persistDecision(req.sessionId(), ccr.imsi(), ccr.apn(), ccr.framedIp(), ccr.chargingId(), decision);
+        body.addAll(gx.ccaStructured(ccr, decision));
+        return new SendDiameterAnswer(req.sessionId(), GX, req.commandCode(), SendDiameterAnswer.SUCCESS,
+                req.hopByHopId(), req.endToEndId(), Map.of(), body);
     }
 
     private SendDiameterAnswer rx(DiameterRequestEvent req) {

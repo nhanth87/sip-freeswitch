@@ -72,6 +72,10 @@ public final class JdbcPolicyRepository implements PolicyRepository {
             SELECT DISTINCT imsi FROM epc_ipcan_session WHERE apn = ?
             """;
 
+    static final String SQL_DELETE_IPCAN = """
+            DELETE FROM epc_ipcan_session WHERE session_id = ?
+            """;
+
     private final DataSource ds;
 
     public JdbcPolicyRepository(DataSource ds) {
@@ -218,5 +222,16 @@ public final class JdbcPolicyRepository implements PolicyRepository {
             return m.group(1);
         }
         return json.trim().isEmpty() ? "" : json.trim();
+    }
+
+    @Override
+    public void deleteIpCanSession(String sessionId) {
+        try (java.sql.Connection c = ds.getConnection();
+             java.sql.PreparedStatement ps = c.prepareStatement(SQL_DELETE_IPCAN)) {
+            ps.setString(1, sessionId);
+            ps.executeUpdate();
+        } catch (java.sql.SQLException e) {
+            throw new IllegalStateException("epc ipcan session delete", e);
+        }
     }
 }

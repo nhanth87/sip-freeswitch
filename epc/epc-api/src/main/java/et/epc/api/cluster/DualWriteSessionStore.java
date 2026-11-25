@@ -54,4 +54,13 @@ public final class DualWriteSessionStore implements SessionStore {
         }
         return durable.findByS11cTeid(s11cTeid);
     }
+
+    @Override
+    public Optional<SessionCheckpoint> findByS5cTeid(int s5cTeid) {
+        Optional<SessionCheckpoint> hotHit = hot.findByS5cTeid(s5cTeid);
+        if (hotHit.isPresent()) {
+            return hotHit;
+        }
+        return durable.findByS5cTeid(s5cTeid);
+    }
 }

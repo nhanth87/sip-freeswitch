@@ -18,7 +18,7 @@ import com.microjainslee.ra.pfcp.PfcpIe;
 import com.microjainslee.ra.pfcp.PfcpMessage;
 import com.microjainslee.ra.pfcp.PfcpMessageType;
 import com.microjainslee.ra.pfcp.PfcpUsageReport;
-import com.microjainslee.ra.pfcp.command.PfcpProgramSession;
+import com.microjainslee.ra.pfcp.command.PfcpSessionEstablishment;
 import com.microjainslee.ra.pfcp.command.SendPfcpMessage;
 import com.microjainslee.ra.pfcp.event.PfcpMessageEvent;
 import et.epc.api.BearerId;
@@ -89,7 +89,7 @@ class PgwSbbTest {
         assertNotNull(sbb.getPfcpSeid());
 
         assertEquals(1, pfcpSent.size());
-        assertTrue(pfcpSent.get(0) instanceof PfcpProgramSession);
+        assertTrue(pfcpSent.get(0) instanceof PfcpSessionEstablishment);
         assertEquals(1, store.size());
         SessionCheckpoint cp = store.get(SessionCheckpoint.pgwId(
                 new SessionKeys(IMSI, "internet", new BearerId(5)))).orElseThrow();

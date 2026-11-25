@@ -30,6 +30,8 @@ public final class EpcInfinispanManager {
     public static final String CACHE_SESSIONS = "epc-sessions";
     public static final String CACHE_SUBSCRIBERS = "epc-subscribers";
     public static final String CACHE_PCC = "epc-pcc";
+    /** Secondary keys of {@link #CACHE_SESSIONS}: {@code s11|<teid>} / {@code s5c|<teid>} → session id. */
+    public static final String CACHE_SESSION_INDEX = "epc-session-index";
 
     @ConfigProperty(name = "epc.cluster.enabled", defaultValue = "true")
     boolean enabled;
@@ -78,6 +80,7 @@ public final class EpcInfinispanManager {
         allow.addRegexp("et\\.epc\\..*");
         manager = new DefaultCacheManager(global.build());
         defineCache(CACHE_SESSIONS, 100_000);
+        defineCache(CACHE_SESSION_INDEX, 200_000);
         defineCache(CACHE_SUBSCRIBERS, 200_000);
         defineCache(CACHE_PCC, 200_000);
         LOG.info("EpcInfinispanManager ready cluster={} mode={} ttl={}s caches=[{},{},{}]",

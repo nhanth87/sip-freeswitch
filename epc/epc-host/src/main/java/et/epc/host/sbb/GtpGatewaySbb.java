@@ -69,6 +69,14 @@ public abstract class GtpGatewaySbb extends CmpBackedSbb implements SleeEventHan
         this.profiles = profiles;
     }
 
+    /** PGW-C S5-C create with Gx in between (two-phase); null = one-step create. */
+    private volatile PgwS5cProcedure pgwProcedure;
+
+    public GtpGatewaySbb withPgwProcedure(PgwS5cProcedure procedure) {
+        this.pgwProcedure = procedure;
+        return this;
+    }
+
     @CmpField("imsi")
     public abstract String getImsi();
 
@@ -214,10 +222,16 @@ public abstract class GtpGatewaySbb extends CmpBackedSbb implements SleeEventHan
                     msg.recovery(), List.of(Gtpv2Ies.cause(GtpcShapes.CAUSE_MANDATORY_IE_MISSING))), ev.peer());
             return;
         }
+        PgwS5cProcedure proc = pgwProcedure;
+        if (proc != null) {
+            // Two-phase with Gx (CCR-I → CCA event): never waits here.
+            proc.begin(msg, ev.peer(), imsi, apn, sgwS5c, sgwS5u);
+            return;
+        }
         CreateSessionResult r = pgw.createSession(imsi, apn, sgwS5u);
         pgw.registerS5c(r.pgwS5c().teid(), new PgwControl.S5cPeer(imsi, apn.apn(), sgwS5c));
         setPfcpSeid(r.pfcpSeid());
-        send(pgwCreateSessionResponse(msg, sgwS5c, GtpcShapes.ebi(msg, 5), r), ev.peer());
+        send(PgwS5cProcedure.response(msg, sgwS5c, GtpcShapes.ebi(msg, 5), r), ev.peer());
     }
 
     private void s5cResponse(Gtpv2MessageEvent ev) {
@@ -326,8 +340,14 @@ public abstract class GtpGatewaySbb extends CmpBackedSbb implements SleeEventHan
             return;
         }
         if (pgw != null) {
-            // S5-C Delete Session on the PGW-C: correlated on our S5-C TEID.
+            // S5-C Delete Session on the PGW-C: correlated on our S5-C TEID; CCR-T after (§4.5.7).
+            PgwControl.S5cPeer known = pgw.s5cPeer(msg.teid());
+            long chargingId = known == null ? 0L : pgw.chargingId(known.imsi(), known.apn());
             PgwControl.S5cPeer peer = pgw.deleteByS5cTeid(msg.teid());
+            PgwS5cProcedure proc = pgwProcedure;
+            if (peer != null && proc != null) {
+                proc.terminate(peer.imsi(), peer.apn(), chargingId);
+            }
             send(new Gtpv2Message(Gtpv2MessageType.DELETE_SESSION_RESPONSE,
                     peer == null ? 0 : peer.sgwS5c().teid(), msg.sequence(), msg.recovery(),
                     List.of(Gtpv2Ies.cause(peer == null
@@ -355,8 +375,10 @@ public abstract class GtpGatewaySbb extends CmpBackedSbb implements SleeEventHan
     private void releaseAccessBearers(Gtpv2MessageEvent ev) {
         boolean released = sgw != null && sgw.releaseAccessByTeid(ev.message().teid());
         int cause = released ? Gtpv2Ies.CAUSE_REQUEST_ACCEPTED : Gtpv2Ies.CAUSE_CONTEXT_NOT_FOUND;
+        // §5.5.2: the response carries the MME's S11 TEID, not ours (0 when the session is unknown).
+        Fteid mme = sgw == null ? null : sgw.mmeS11(ev.message().teid());
         send(new Gtpv2Message(Gtpv2MessageType.RELEASE_ACCESS_BEARERS_RESPONSE,
-                ev.message().teid(), ev.message().sequence(), ev.message().recovery(),
+                mme == null ? 0 : mme.teid(), ev.message().sequence(), ev.message().recovery(),
                 List.of(Gtpv2Ies.cause(cause))), ev.peer());
     }
 
@@ -381,26 +403,6 @@ public abstract class GtpGatewaySbb extends CmpBackedSbb implements SleeEventHan
     }
 
     /** S5-C Create Session Response (Table 7.2.2-1, S5/S8), header TEID = SGW S5-C TEID. */
-    private static Gtpv2Message pgwCreateSessionResponse(Gtpv2Message req, Fteid sgwS5c, int ebi,
-                                                         CreateSessionResult r) {
-        List<Gtpv2Ie> ies = new java.util.ArrayList<>();
-        ies.add(Gtpv2Ies.causeAccepted());
-        ies.add(GtpcShapes.fteid(0, r.pgwS5c()));
-        if (r.ue().ipv4() != null) {
-            ies.add(new Gtpv2Ie(Gtpv2Ie.PDN_ADDRESS, 0, Gtpv2Ies.encodePaa(r.ue().ipv4())));
-        }
-        List<Gtpv2Ie> bearer = new java.util.ArrayList<>();
-        bearer.add(GtpcShapes.fteid(2, r.pgwS5u()));
-        bearer.add(new Gtpv2Ie(Gtpv2Ie.CHARGING_ID, 0, java.nio.ByteBuffer.allocate(4)
-                .putInt((int) r.chargingId().value()).array()));
-        ies.add(GtpcShapes.bearerContext(ebi, GtpcShapes.CAUSE_ACCEPTED, bearer));
-        if (!r.pco().isEmpty()) {
-            ies.add(Gtpv2Ies.pco(r.pco()));
-        }
-        return new Gtpv2Message(Gtpv2MessageType.CREATE_SESSION_RESPONSE,
-                sgwS5c.teid(), req.sequence(), req.recovery(), ies);
-    }
-
     private static Gtpv2Message error(Gtpv2Message req, int cause) {
         Gtpv2MessageType rsp = switch (req.type()) {
             case CREATE_SESSION_REQUEST -> Gtpv2MessageType.CREATE_SESSION_RESPONSE;

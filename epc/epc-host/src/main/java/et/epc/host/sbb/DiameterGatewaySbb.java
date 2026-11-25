@@ -47,6 +47,8 @@ public abstract class DiameterGatewaySbb extends CmpBackedSbb implements SleeEve
      * Gx wire client completes its pending CCR here. Null = drop.
      */
     private volatile Consumer<DiameterAnswerEvent> answerSink;
+    /** Tx-timer expiry of our own requests (Gx CCR) — the requester's procedure finishes on it. */
+    private volatile Consumer<com.microjainslee.ra.diameter.events.DiameterTimeoutEvent> timeoutSink;
 
     @InjectRa(name = "diameter-ra")
     private volatile RaCommandPort diameterRa;
@@ -68,6 +70,12 @@ public abstract class DiameterGatewaySbb extends CmpBackedSbb implements SleeEve
     /** Attach (or detach, if {@code null}) the PCRF bridge without rebuilding. */
     public DiameterGatewaySbb withPcrf(PcrfPort pcrf) {
         this.pcrf = pcrf;
+        return this;
+    }
+
+    public DiameterGatewaySbb withTimeoutSink(
+            Consumer<com.microjainslee.ra.diameter.events.DiameterTimeoutEvent> sink) {
+        this.timeoutSink = sink;
         return this;
     }
 
@@ -100,6 +108,13 @@ public abstract class DiameterGatewaySbb extends CmpBackedSbb implements SleeEve
             Consumer<DiameterAnswerEvent> sink = answerSink;
             if (sink != null) {
                 sink.accept(ans);
+            }
+            return;
+        }
+        if (event instanceof com.microjainslee.ra.diameter.events.DiameterTimeoutEvent t) {
+            var sink = timeoutSink;
+            if (sink != null) {
+                sink.accept(t);
             }
             return;
         }

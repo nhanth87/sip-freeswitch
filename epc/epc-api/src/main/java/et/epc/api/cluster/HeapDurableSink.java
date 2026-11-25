@@ -46,4 +46,14 @@ public final class HeapDurableSink implements DurableSink {
         }
         return Optional.empty();
     }
+
+    @Override
+    public Optional<SessionCheckpoint> findByS5cTeid(int s5cTeid) {
+        for (SessionCheckpoint cp : rows.values()) {
+            if ("pgw".equals(cp.role()) && s5cTeid != 0 && cp.s5cTeid() == s5cTeid) {
+                return Optional.of(cp);
+            }
+        }
+        return Optional.empty();
+    }
 }

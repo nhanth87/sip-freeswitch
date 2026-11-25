@@ -29,6 +29,10 @@ public interface PolicyRepository {
         return List.of();
     }
 
+    /** CCR-T (TS 29.212 §4.5.7): the IP-CAN session is gone. */
+    default void deleteIpCanSession(String sessionId) {
+    }
+
     /** Admin write: create or replace the PCC rule {@code (apn, rule.name)}. */
     default void upsertRule(String apn, PccRule rule) {
         throw new UnsupportedOperationException("read-only policy repository");

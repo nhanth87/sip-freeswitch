@@ -23,8 +23,9 @@ public final class JdbcDurableSink implements DurableSink {
             INSERT INTO epc_session_checkpoint (
               session_id, role, imsi, apn, ebi, owner_node_id, generation,
               ue_ipv4, sgw_s1u_key, sgw_s5u_key, pgw_s5u_key, charging_id,
-              pfcp_seid_hex, s11c_teid, pfcp_seid)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+              pfcp_seid_hex, s11c_teid, pfcp_seid,
+              mme_s11_key, sgw_s5c_key, pgw_s5c_key, pgwc_peer, s5c_teid)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT (session_id) DO UPDATE SET
               role = EXCLUDED.role,
               imsi = EXCLUDED.imsi,
@@ -39,7 +40,12 @@ public final class JdbcDurableSink implements DurableSink {
               charging_id = EXCLUDED.charging_id,
               pfcp_seid_hex = EXCLUDED.pfcp_seid_hex,
               s11c_teid = EXCLUDED.s11c_teid,
-              pfcp_seid = EXCLUDED.pfcp_seid
+              pfcp_seid = EXCLUDED.pfcp_seid,
+              mme_s11_key = EXCLUDED.mme_s11_key,
+              sgw_s5c_key = EXCLUDED.sgw_s5c_key,
+              pgw_s5c_key = EXCLUDED.pgw_s5c_key,
+              pgwc_peer = EXCLUDED.pgwc_peer,
+              s5c_teid = EXCLUDED.s5c_teid
             """;
 
     static final String SQL_DELETE = """
@@ -55,7 +61,8 @@ public final class JdbcDurableSink implements DurableSink {
     static final String SQL_LOAD = """
             SELECT session_id, role, imsi, apn, ebi, owner_node_id, generation,
                    ue_ipv4, sgw_s1u_key, sgw_s5u_key, pgw_s5u_key, charging_id,
-                   pfcp_seid_hex, s11c_teid, pfcp_seid
+                   pfcp_seid_hex, s11c_teid, pfcp_seid,
+                   mme_s11_key, sgw_s5c_key, pgw_s5c_key, pgwc_peer, s5c_teid
               FROM epc_session_checkpoint
              WHERE session_id = ?
             """;
@@ -63,7 +70,8 @@ public final class JdbcDurableSink implements DurableSink {
     static final String SQL_LOAD_BY_OWNER = """
             SELECT session_id, role, imsi, apn, ebi, owner_node_id, generation,
                    ue_ipv4, sgw_s1u_key, sgw_s5u_key, pgw_s5u_key, charging_id,
-                   pfcp_seid_hex, s11c_teid, pfcp_seid
+                   pfcp_seid_hex, s11c_teid, pfcp_seid,
+                   mme_s11_key, sgw_s5c_key, pgw_s5c_key, pgwc_peer, s5c_teid
               FROM epc_session_checkpoint
              WHERE owner_node_id = ?
              ORDER BY session_id
@@ -72,9 +80,20 @@ public final class JdbcDurableSink implements DurableSink {
     static final String SQL_FIND_BY_S11C_TEID = """
             SELECT session_id, role, imsi, apn, ebi, owner_node_id, generation,
                    ue_ipv4, sgw_s1u_key, sgw_s5u_key, pgw_s5u_key, charging_id,
-                   pfcp_seid_hex, s11c_teid, pfcp_seid
+                   pfcp_seid_hex, s11c_teid, pfcp_seid,
+                   mme_s11_key, sgw_s5c_key, pgw_s5c_key, pgwc_peer, s5c_teid
               FROM epc_session_checkpoint
              WHERE s11c_teid = ? AND role = 'sgw'
+             LIMIT 1
+            """;
+
+    static final String SQL_FIND_BY_S5C_TEID = """
+            SELECT session_id, role, imsi, apn, ebi, owner_node_id, generation,
+                   ue_ipv4, sgw_s1u_key, sgw_s5u_key, pgw_s5u_key, charging_id,
+                   pfcp_seid_hex, s11c_teid, pfcp_seid,
+                   mme_s11_key, sgw_s5c_key, pgw_s5c_key, pgwc_peer, s5c_teid
+              FROM epc_session_checkpoint
+             WHERE s5c_teid = ? AND role = 'pgw'
              LIMIT 1
             """;
 
@@ -97,6 +116,11 @@ public final class JdbcDurableSink implements DurableSink {
             ps.setString(13, session.pfcpSeidHex());
             ps.setInt(14, session.s11cTeid());
             ps.setLong(15, session.pfcpSeid());
+            ps.setString(16, session.mmeS11Key());
+            ps.setString(17, session.sgwS5cKey());
+            ps.setString(18, session.pgwS5cKey());
+            ps.setString(19, session.pgwcPeer());
+            ps.setInt(20, session.s5cTeid());
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("epc session checkpoint upsert", e);
@@ -159,6 +183,21 @@ public final class JdbcDurableSink implements DurableSink {
         }
     }
 
+    @Override
+    public Optional<SessionCheckpoint> findByS5cTeid(int s5cTeid) {
+        try (Connection c = ds.getConnection(); PreparedStatement ps = c.prepareStatement(SQL_FIND_BY_S5C_TEID)) {
+            ps.setInt(1, s5cTeid);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return Optional.empty();
+                }
+                return Optional.of(map(rs));
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("epc session checkpoint find-by-s5c-teid", e);
+        }
+    }
+
     private static SessionCheckpoint map(ResultSet rs) throws SQLException {
         return new SessionCheckpoint(
                 rs.getString("session_id"),
@@ -175,6 +214,11 @@ public final class JdbcDurableSink implements DurableSink {
                 rs.getLong("charging_id"),
                 rs.getString("pfcp_seid_hex"),
                 rs.getInt("s11c_teid"),
-                rs.getLong("pfcp_seid"));
+                rs.getLong("pfcp_seid"),
+                rs.getString("mme_s11_key"),
+                rs.getString("sgw_s5c_key"),
+                rs.getString("pgw_s5c_key"),
+                rs.getString("pgwc_peer"),
+                rs.getInt("s5c_teid"));
     }
 }

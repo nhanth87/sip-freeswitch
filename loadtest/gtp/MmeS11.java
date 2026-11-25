@@ -21,7 +21,8 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Lab MME on S11 (TS 29.274): Create Session → Modify Bearer (eNB S1-U) → Delete Session against
- * an SGW-C, over micro-jainslee's {@code ra-gtpv2c}. Prints every answer's IEs.
+ * an SGW-C, over micro-jainslee's {@code ra-gtpv2c}: Create Session, Modify Bearer, Release Access
+ * Bearers, Modify Bearer (new eNB TEID), Delete Session. Prints every answer's IEs.
  *
  * <pre>
  * java -cp "$CP" loadtest/gtp/MmeS11.java &lt;local ip&gt; &lt;sgwc ip&gt; [imsi] [apn] [enb ip]
@@ -96,6 +97,19 @@ public final class MmeS11 {
         long t1 = System.nanoTime();
         gtp.sendCommand(new SendGtpv2Message(mbr, sgwc));
         await(in, Gtpv2MessageType.MODIFY_BEARER_RESPONSE, t1);
+
+        // Release Access Bearers (S1 release, TS 29.274 §7.2.21), then Modify Bearer again (service request).
+        Gtpv2Message rab = new Gtpv2Message(Gtpv2MessageType.RELEASE_ACCESS_BEARERS_REQUEST, sgwS11.teid(), 4,
+                (byte) 1, List.of());
+        long t3 = System.nanoTime();
+        gtp.sendCommand(new SendGtpv2Message(rab, sgwc));
+        await(in, Gtpv2MessageType.RELEASE_ACCESS_BEARERS_RESPONSE, t3);
+        Gtpv2Message mbr2 = new Gtpv2Message(Gtpv2MessageType.MODIFY_BEARER_REQUEST, sgwS11.teid(), 5, (byte) 1,
+                List.of(new Gtpv2Ie(Gtpv2Ie.BEARER_CONTEXT, 0,
+                        Gtpv2Ies.encodeBearerContext((byte) 5, new GtpFteid(0x0000E002, enb, S1U_ENB)))));
+        long t4 = System.nanoTime();
+        gtp.sendCommand(new SendGtpv2Message(mbr2, sgwc));
+        await(in, Gtpv2MessageType.MODIFY_BEARER_RESPONSE, t4);
 
         Thread.sleep(1_000);
         Gtpv2Message dsr = new Gtpv2Message(Gtpv2MessageType.DELETE_SESSION_REQUEST, sgwS11.teid(), 3, (byte) 1,

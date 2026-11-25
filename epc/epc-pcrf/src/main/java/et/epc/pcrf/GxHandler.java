@@ -2,6 +2,7 @@ package et.epc.pcrf;
 
 import com.microjainslee.ra.diameter.avp.DiameterAvp;
 import et.epc.api.QosProfile;
+import et.epc.api.diameter.GxAvp;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -52,7 +53,7 @@ public final class GxHandler {
     public static final int CHARGING_RULE_REMOVE = 1002;
     public static final int CHARGING_RULE_DEFINITION = 1003;
     public static final int CHARGING_RULE_NAME = 1005;
-    public static final int DEFAULT_EPS_BEARER_QOS = 1023;
+    public static final int DEFAULT_EPS_BEARER_QOS = GxAvp.DEFAULT_EPS_BEARER_QOS;
     public static final int USAGE_MONITORING_INFORMATION = 1067;
     public static final int FLOW_DESCRIPTION = 507;
     public static final int FLOW_STATUS = 511;
@@ -62,19 +63,19 @@ public final class GxHandler {
     public static final int OFFLINE = 1008;
     public static final int FLOW_INFORMATION = 1058;
     public static final int FLOW_DIRECTION = 1080;
-    public static final int PRECEDENCE = 1017;
+    public static final int PRECEDENCE = GxAvp.PRECEDENCE;
     public static final int QOS_INFORMATION = 1016;
     public static final int QOS_CLASS_IDENTIFIER = 1028;
-    public static final int MAX_REQUESTED_BANDWIDTH_UL = 516;
-    public static final int MAX_REQUESTED_BANDWIDTH_DL = 517;
-    public static final int GUARANTEED_BITRATE_UL = 518;
-    public static final int GUARANTEED_BITRATE_DL = 519;
+    public static final int MAX_REQUESTED_BANDWIDTH_UL = GxAvp.MAX_REQUESTED_BANDWIDTH_UL;
+    public static final int MAX_REQUESTED_BANDWIDTH_DL = GxAvp.MAX_REQUESTED_BANDWIDTH_DL;
+    public static final int GUARANTEED_BITRATE_UL = GxAvp.GUARANTEED_BITRATE_UL;
+    public static final int GUARANTEED_BITRATE_DL = GxAvp.GUARANTEED_BITRATE_DL;
     public static final int ALLOCATION_RETENTION_PRIORITY = 1034;
     public static final int PRIORITY_LEVEL = 1046;
     public static final int PRE_EMPTION_CAPABILITY = 1047;
     public static final int PRE_EMPTION_VULNERABILITY = 1048;
-    public static final int APN_AGGREGATE_MAX_BITRATE_UL = 1041;
-    public static final int APN_AGGREGATE_MAX_BITRATE_DL = 1042;
+    public static final int APN_AGGREGATE_MAX_BITRATE_UL = GxAvp.APN_AGGREGATE_MAX_BITRATE_UL;
+    public static final int APN_AGGREGATE_MAX_BITRATE_DL = GxAvp.APN_AGGREGATE_MAX_BITRATE_DL;
     public static final int IP_CAN_TYPE = 1027;
     public static final int RAT_TYPE = 1032;
 
@@ -87,8 +88,13 @@ public final class GxHandler {
     public static final long FLOW_DIRECTION_UPLINK = 3L;
     public static final long FLOW_DIRECTION_BIDIRECTIONAL = 4L;
 
+    /** Online / Offline (TS 29.212 §5.3.?, RFC 4006 style): 1 = ENABLE, 0 = DISABLE. */
     private static final long ENUM_ENABLED = 1L;
     private static final long ENUM_DISABLED = 0L;
+    /** Pre-emption-Capability / -Vulnerability (§5.3.46 / §5.3.47): 0 = ENABLED, 1 = DISABLED. */
+    static final long PRE_EMPTION_ENABLED = 0L, PRE_EMPTION_DISABLED = 1L;
+    /** Flow-Status (TS 29.214 §5.3.11): 2 = ENABLED, 3 = DISABLED. */
+    static final long FLOW_ENABLED = 2L, FLOW_DISABLED = 3L;
     private static final long DEFAULT_RULE_PRECEDENCE = 1L;
 
     public static final String RESULT_SUCCESS = "2001";
@@ -106,6 +112,59 @@ public final class GxHandler {
     /** Parsed CCR request fields (request flag is conveyed by the event type). */
     public record GxCcr(String sessionId, String imsi, String apn, String framedIp,
                         long chargingId, String requestType, long ccRequestNumber) {
+
+        /**
+         * CCR (TS 29.212 §5.6.2) from the typed AVP tree: Subscription-Id {END_USER_IMSI, Data},
+         * Called-Station-Id, Framed-IP-Address (4 octets), 3GPP-Charging-Id, CC-Request-Type /
+         * -Number. Missing typed values fall back to the flat view.
+         */
+        public static GxCcr parse(Map<Integer, String> flat, List<DiameterAvp> typed, String sessionId) {
+            GxCcr f = parse(flat, sessionId);
+            List<DiameterAvp> t = typed == null ? List.of() : typed;
+            String imsi = null;
+            for (DiameterAvp a : t) {
+                if (a.code() == GxAvp.SUBSCRIPTION_ID) {
+                    DiameterAvp type = child(a.children(), GxAvp.SUBSCRIPTION_ID_TYPE);
+                    DiameterAvp data = child(a.children(), GxAvp.SUBSCRIPTION_ID_DATA);
+                    if (data != null && (type == null || type.asUnsigned32() == GxAvp.SUBSCRIPTION_END_USER_IMSI)) {
+                        imsi = data.asUtf8();
+                        break;
+                    }
+                }
+            }
+            DiameterAvp apn = child(t, GxAvp.CALLED_STATION_ID);
+            DiameterAvp ip = child(t, GxAvp.FRAMED_IP_ADDRESS);
+            String framed = f.framedIp();
+            if (ip != null && ip.asOctets() != null && ip.asOctets().length == 4) {
+                byte[] b = ip.asOctets();
+                framed = (b[0] & 0xff) + "." + (b[1] & 0xff) + "." + (b[2] & 0xff) + "." + (b[3] & 0xff);
+            }
+            DiameterAvp cid = null;
+            for (DiameterAvp a : t) {
+                if (a.code() == GxAvp.CHARGING_ID_3GPP && a.vendorId() == GxAvp.VENDOR_3GPP) {
+                    cid = a;
+                }
+            }
+            DiameterAvp type = child(t, GxAvp.CC_REQUEST_TYPE);
+            DiameterAvp number = child(t, GxAvp.CC_REQUEST_NUMBER);
+            return new GxCcr(sessionId,
+                    imsi != null && !imsi.isBlank() ? imsi : f.imsi(),
+                    apn != null && apn.asUtf8() != null ? apn.asUtf8() : f.apn(),
+                    framed,
+                    cid != null ? cid.asUnsigned32() : f.chargingId(),
+                    type != null ? Long.toString(type.asUnsigned32()) : f.requestType(),
+                    number != null ? number.asUnsigned32() : f.ccRequestNumber());
+        }
+
+        private static DiameterAvp child(List<DiameterAvp> avps, int code) {
+            for (DiameterAvp a : avps) {
+                if (a.code() == code) {
+                    return a;
+                }
+            }
+            return null;
+        }
+
         public static GxCcr parse(Map<Integer, String> avps, String sessionId) {
             Map<Integer, String> a = avps == null ? Map.of() : avps;
             String imsi = a.getOrDefault(SUBSCRIPTION_ID_DATA,
@@ -170,8 +229,35 @@ public final class GxHandler {
             body.add(DiameterAvp.grouped3gpp(CHARGING_RULE_INSTALL, install));
         }
         body.add(defaultEpsBearerQosGroup(decision.defaultBearerQos()));
-        body.add(DiameterAvp.enum32(AUTH_SESSION_STATE, 1L));
+        if (decision.usageMonitorThreshold() != null) {
+            // §5.3.60 Usage-Monitoring-Information {Monitoring-Key, Granted-Service-Unit
+            // {CC-Total-Octets}, Usage-Monitoring-Level SESSION_LEVEL (0)}.
+            body.add(DiameterAvp.grouped3gpp(USAGE_MONITORING_INFORMATION, List.of(
+                    DiameterAvp.octets(1066, VENDOR_3GPP,
+                            PcrfService.MONITORING_KEY.getBytes(StandardCharsets.UTF_8), true),
+                    DiameterAvp.grouped(431, 0L, true, List.of(
+                            DiameterAvp.u64(421, decision.usageMonitorThreshold()))),
+                    DiameterAvp.v3gpp(1068, 0L))));
+        }
+        // §4.5.2.6 / §5.3.15: the authorized APN-AMBR travels in a command-level QoS-Information.
+        body.add(DiameterAvp.grouped3gpp(QOS_INFORMATION, List.of(
+                DiameterAvp.u32(APN_AGGREGATE_MAX_BITRATE_UL, VENDOR_3GPP,
+                        decision.defaultBearerQos().apnAmbrUlBps(), true),
+                DiameterAvp.u32(APN_AGGREGATE_MAX_BITRATE_DL, VENDOR_3GPP,
+                        decision.defaultBearerQos().apnAmbrDlBps(), true))));
         return List.copyOf(body);
+    }
+
+    /**
+     * CCA head (TS 29.212 §5.6.3): Auth-Application-Id, CC-Request-Type, CC-Request-Number —
+     * typed, never through the string map.
+     */
+    public static List<DiameterAvp> ccaHead(GxCcr ccr) {
+        long type = parseLong(ccr.requestType(), GxAvp.REQUEST_INITIAL);
+        return List.of(
+                DiameterAvp.u32(GxAvp.AUTH_APPLICATION_ID, APP_ID),
+                DiameterAvp.enum32(CC_REQUEST_TYPE, type),
+                DiameterAvp.u32(CC_REQUEST_NUMBER, ccr.ccRequestNumber()));
     }
 
     /**
@@ -188,7 +274,7 @@ public final class GxHandler {
                     DiameterAvp.octets(FLOW_DESCRIPTION, VENDOR_3GPP,
                             rule.flowDescription().getBytes(StandardCharsets.UTF_8), true),
                     DiameterAvp.v3gpp(FLOW_DIRECTION, FLOW_DIRECTION_BIDIRECTIONAL),
-                    DiameterAvp.v3gpp(FLOW_STATUS, rule.gatingOpen() ? ENUM_ENABLED : ENUM_DISABLED))));
+                    DiameterAvp.v3gpp(FLOW_STATUS, rule.gatingOpen() ? FLOW_ENABLED : FLOW_DISABLED))));
         }
         if (rule.ratingGroup() != null) {
             def.add(DiameterAvp.u32(RATING_GROUP, rule.ratingGroup().longValue()));
@@ -225,7 +311,7 @@ public final class GxHandler {
                     DiameterAvp.octets(FLOW_DESCRIPTION, VENDOR_3GPP,
                             r.flowDescription().getBytes(StandardCharsets.UTF_8), true),
                     DiameterAvp.v3gpp(FLOW_DIRECTION, FLOW_DIRECTION_BIDIRECTIONAL),
-                    DiameterAvp.v3gpp(FLOW_STATUS, r.gatingOpen() ? ENUM_ENABLED : ENUM_DISABLED))));
+                    DiameterAvp.v3gpp(FLOW_STATUS, r.gatingOpen() ? FLOW_ENABLED : FLOW_DISABLED))));
         }
         if (r.ratingGroup() != null) {
             def.add(DiameterAvp.u32(RATING_GROUP, r.ratingGroup().longValue()));
@@ -264,9 +350,9 @@ public final class GxHandler {
     private static DiameterAvp arpGroup(int priority, boolean capable, boolean vulnerable) {
         return DiameterAvp.grouped3gpp(ALLOCATION_RETENTION_PRIORITY, List.of(
                 DiameterAvp.u32(PRIORITY_LEVEL, VENDOR_3GPP, priority, true),
-                DiameterAvp.v3gpp(PRE_EMPTION_CAPABILITY, capable ? ENUM_ENABLED : ENUM_DISABLED),
+                DiameterAvp.v3gpp(PRE_EMPTION_CAPABILITY, capable ? PRE_EMPTION_ENABLED : PRE_EMPTION_DISABLED),
                 DiameterAvp.v3gpp(PRE_EMPTION_VULNERABILITY,
-                        vulnerable ? ENUM_ENABLED : ENUM_DISABLED)));
+                        vulnerable ? PRE_EMPTION_ENABLED : PRE_EMPTION_DISABLED)));
     }
 
     private static Integer parseServiceId(String s) {

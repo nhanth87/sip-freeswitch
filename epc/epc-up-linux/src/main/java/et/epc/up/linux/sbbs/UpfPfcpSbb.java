@@ -10,19 +10,21 @@ import com.microjainslee.api.annotations.SbbAnnotation;
 import com.microjainslee.core.CmpBackedSbb;
 import com.microjainslee.ra.pfcp.PfcpCodec;
 import com.microjainslee.ra.pfcp.PfcpIe;
+import com.microjainslee.ra.pfcp.PfcpIes;
 import com.microjainslee.ra.pfcp.PfcpMessage;
-import com.microjainslee.ra.pfcp.PfcpMessageType;
 import com.microjainslee.ra.pfcp.PfcpRule;
 import com.microjainslee.ra.pfcp.PfcpRules;
+import com.microjainslee.ra.pfcp.PfcpSessionState;
 import com.microjainslee.ra.pfcp.PfcpUrr;
 import com.microjainslee.ra.pfcp.PfcpUsageReport;
-import com.microjainslee.ra.pfcp.command.SendPfcpMessage;
+import com.microjainslee.ra.pfcp.command.PfcpSessionAnswer;
 import com.microjainslee.ra.pfcp.event.PfcpMessageEvent;
 import et.epc.api.UeAddresses;
 import et.epc.up.linux.LinuxGtpAgent;
 import et.epc.up.linux.LinuxGtpCommand;
 import et.epc.up.linux.LinuxUrrSpec;
 import et.epc.up.linux.LinuxUrrUsage;
+import et.epc.up.linux.UpfSessionTable;
 import et.epc.up.linux.UrrIpIndex;
 import java.lang.reflect.Method;
 import java.net.Inet4Address;
@@ -39,20 +41,23 @@ import org.apache.logging.log4j.Logger;
 /**
  * Inbound N4 / PFCP session-rule handler. Consumes {@link PfcpMessageEvent}
  * emitted by {@code pfcp-ra} when a remote control plane (SGW-C/PGW-C) sends a
- * Session Establishment/Modification/Deletion Request, decodes the PDR/FAR/QER/URR
- * rule payload, translates it into Linux GTP kernel recipes via {@link LinuxGtpAgent},
- * and answers the matching PFCP response. The GTP-U device stays out of the JVM.
+ * Session Establishment/Modification/Deletion Request, keeps the session's PDR/FAR/URR
+ * state ({@link PfcpSessionState}), translates each change into Linux GTP kernel recipes via
+ * {@link LinuxGtpAgent} and answers the matching PFCP response through {@code pfcp-ra}.
+ * The GTP-U device stays out of the JVM.
  */
 @SbbAnnotation(name = "UpfPfcpSbb", vendor = "et.epc", version = "1.0")
 public abstract class UpfPfcpSbb extends CmpBackedSbb implements SleeEventHandler {
 
     private static final Logger LOG = LogManager.getLogger(UpfPfcpSbb.class);
 
+    /** TS 29.244 §8.2.1 causes. */
+    static final int CAUSE_SESSION_CONTEXT_NOT_FOUND = 65, CAUSE_RULE_FAILURE = 73;
+
     private final LinuxGtpAgent agent;
     private final UrrIpIndex ipIndex;
-    private final Map<Long, List<PfcpRule>> installed = new ConcurrentHashMap<>();
-    /** URR ids (decimal string form) installed per session, for Query-URR snapshots. */
-    private final Map<Long, List<String>> urrsBySeid = new ConcurrentHashMap<>();
+    /** Sessions of this UP, shared by every pooled entity (UpfApp owns one table). */
+    private final UpfSessionTable sessions;
 
     @InjectRa(name = "pfcp-ra")
     private volatile RaCommandPort pfcpRa;
@@ -68,8 +73,13 @@ public abstract class UpfPfcpSbb extends CmpBackedSbb implements SleeEventHandle
     }
 
     public UpfPfcpSbb(LinuxGtpAgent agent, UrrIpIndex ipIndex) {
+        this(agent, ipIndex, new UpfSessionTable());
+    }
+
+    public UpfPfcpSbb(LinuxGtpAgent agent, UrrIpIndex ipIndex, UpfSessionTable sessions) {
         this.agent = agent;
         this.ipIndex = ipIndex;
+        this.sessions = sessions;
     }
 
     @CmpField("pfcpSeid")
@@ -80,6 +90,12 @@ public abstract class UpfPfcpSbb extends CmpBackedSbb implements SleeEventHandle
 
     public List<LinuxGtpCommand> lastCommands() {
         return lastCommands;
+    }
+
+    /** Forwarding tunnels currently installed for a session (tests / status). */
+    public List<PfcpRule> tunnels(long seid) {
+        PfcpSessionState st = sessions.get(seid);
+        return st == null ? List.of() : st.tunnels(seid);
     }
 
     @Override public void sbbCreate() {}
@@ -93,44 +109,130 @@ public abstract class UpfPfcpSbb extends CmpBackedSbb implements SleeEventHandle
             return;
         }
         PfcpMessage msg = pfcp.message();
-        PfcpRules rules = PfcpCodec.decodeRules(msg.payload());
-        setPfcpSeid(msg.seid());
+        long seid = msg.sessionSeid();
+        setPfcpSeid(seid);
         switch (msg.type()) {
-            case SESSION_ESTABLISHMENT_REQUEST -> install(msg, rules, pfcp.peer());
+            case SESSION_ESTABLISHMENT_REQUEST -> establish(msg, seid, pfcp.peer());
             case SESSION_MODIFICATION_REQUEST -> {
                 if (agent != null && PfcpCodec.hasQueryUrr(msg.payload())) {
                     respondQueryUrr(msg, pfcp.peer());
                 } else {
-                    install(msg, rules, pfcp.peer());
+                    modify(msg, seid, pfcp.peer());
                 }
             }
-            case SESSION_DELETION_REQUEST -> delete(msg, pfcp.peer());
+            case SESSION_DELETION_REQUEST -> delete(msg, seid, pfcp.peer());
             default -> LOG.debug("UpfPfcpSbb ignoring {}", msg.type());
         }
     }
 
-    private void install(PfcpMessage req, PfcpRules rules, InetSocketAddress peer) {
-        if (agent == null) {
-            respond(req, responseOf(req.type()), peer);
+    /**
+     * Session Establishment (TS 29.244 §7.5.2): the rule IEs become this session's state. An
+     * Establishment for a SEID we already hold replaces it (the CP re-established after a
+     * failure) instead of installing a second copy of its tunnels.
+     */
+    private void establish(PfcpMessage req, long seid, InetSocketAddress peer) {
+        PfcpSessionState next;
+        try {
+            next = PfcpSessionState.empty().apply(ruleIes(req));
+        } catch (RuntimeException e) {
+            LOG.warn("UpfPfcpSbb establishment seid={} rejected: {}", seid, e.toString());
+            answer(req, CAUSE_RULE_FAILURE, peer);
             return;
         }
-        UeAddresses ue = toUe(rules.ueIpv4());
+        PfcpSessionState old = sessions.get(seid);
+        apply(seid, old == null ? PfcpSessionState.empty() : old, next);
+        answer(req, PfcpIe.CAUSE_REQUEST_ACCEPTED, peer);
+    }
+
+    /**
+     * Session Modification (TS 29.244 §7.5.4): Create / Update / Remove on the existing
+     * session — e.g. Update FAR toward a new eNB (Modify Bearer) or to BUFF (Release Access
+     * Bearers). Unknown SEID → Cause 65; an Update / Remove of a rule not installed → Cause 73.
+     */
+    private void modify(PfcpMessage req, long seid, InetSocketAddress peer) {
+        PfcpSessionState current = sessions.get(seid);
+        if (current == null) {
+            answer(req, CAUSE_SESSION_CONTEXT_NOT_FOUND, peer);
+            return;
+        }
+        PfcpSessionState next;
+        try {
+            next = current.apply(ruleIes(req));
+        } catch (RuntimeException e) {
+            LOG.warn("UpfPfcpSbb modification seid={} rejected: {}", seid, e.toString());
+            answer(req, CAUSE_RULE_FAILURE, peer);
+            return;
+        }
+        apply(seid, current, next);
+        answer(req, PfcpIe.CAUSE_REQUEST_ACCEPTED, peer);
+    }
+
+    /** Session Deletion (TS 29.244 §7.5.6): tear the tunnels down; unknown SEID → Cause 65. */
+    private void delete(PfcpMessage req, long seid, InetSocketAddress peer) {
+        PfcpSessionState st = sessions.remove(seid);
+        if (st == null) {
+            answer(req, CAUSE_SESSION_CONTEXT_NOT_FOUND, peer);
+            return;
+        }
         List<LinuxGtpCommand> cmds = new ArrayList<>();
-        List<String> urrIds = new ArrayList<>();
-        for (PfcpRule rule : rules.rules()) {
-            cmds.addAll(agent.install(rule, ue));
-            if (rule.urr() != null) {
-                urrIds.add(registerUrr(req.seid(), rule, ue));
+        if (agent != null) {
+            for (PfcpRule rule : st.tunnels(seid)) {
+                cmds.addAll(agent.delete(rule));
+                if (rule.urr() != null) {
+                    removeUrr(rule);
+                }
             }
         }
-        if (!urrIds.isEmpty()) {
-            urrsBySeid.put(req.seid(), List.copyOf(urrIds));
-        }
         lastCommands = List.copyOf(cmds);
-        installed.put(req.seid(), List.copyOf(rules.rules()));
-        LOG.info("UpfPfcpSbb install seid={} rules={} urrs={} commands={}", req.seid(),
-                rules.rules().size(), urrIds.size(), cmds.size());
-        respond(req, responseOf(req.type()), peer);
+        answer(req, PfcpIe.CAUSE_REQUEST_ACCEPTED, peer);
+    }
+
+    /**
+     * The request's rule IEs. A legacy private rule payload (first octet 1 or 2, from peers that
+     * predate the TS 29.244 encoding) is mapped onto the same Create PDR / FAR IEs.
+     */
+    private static List<PfcpIe> ruleIes(PfcpMessage req) {
+        byte[] p = req.payload();
+        if (p.length > 0 && p[0] != 0) {
+            PfcpRules legacy = PfcpCodec.decodeRules(req.seid(), p);
+            return PfcpIes.fromRules(legacy.rules(), legacy.ueIpv4());
+        }
+        return req.ies();
+    }
+
+    /** Kernel recipes for the difference between two states: removed tunnels first, then new ones. */
+    private void apply(long seid, PfcpSessionState from, PfcpSessionState to) {
+        List<PfcpRule> before = from.tunnels(seid);
+        List<PfcpRule> after = to.tunnels(seid);
+        UeAddresses ue = toUe(to.ueIpv4());
+        List<LinuxGtpCommand> cmds = new ArrayList<>();
+        List<String> urrIds = new ArrayList<>(sessions.urrs(seid));
+        if (agent != null) {
+            for (PfcpRule old : before) {
+                if (after.contains(old)) {
+                    continue;
+                }
+                cmds.addAll(agent.delete(old));
+                if (old.urr() != null && after.stream().noneMatch(r -> old.urr().equals(r.urr()))) {
+                    removeUrr(old);
+                    urrIds.remove(String.valueOf(old.urr().urrId()));
+                }
+            }
+            for (PfcpRule rule : after) {
+                if (before.contains(rule)) {
+                    continue;
+                }
+                cmds.addAll(agent.install(rule, ue));
+                if (rule.urr() != null && !urrIds.contains(String.valueOf(rule.urr().urrId()))) {
+                    urrIds.add(registerUrr(seid, rule, ue));
+                }
+            }
+        }
+        sessions.urrs(seid, urrIds);
+        sessions.put(seid, to);
+        lastCommands = List.copyOf(cmds);
+        LOG.info("UpfPfcpSbb seid={} tunnels {}->{} urrs={} commands={}", seid, before.size(), after.size(),
+                urrIds.size(), cmds.size());
     }
 
     /** URR lifecycle for one installed rule: counter in the registry + UE-IP attribution. */
@@ -146,22 +248,6 @@ public abstract class UpfPfcpSbb extends CmpBackedSbb implements SleeEventHandle
         return urrId;
     }
 
-    private void delete(PfcpMessage req, InetSocketAddress peer) {
-        List<PfcpRule> rules = installed.remove(req.seid());
-        urrsBySeid.remove(req.seid());
-        List<LinuxGtpCommand> cmds = new ArrayList<>();
-        if (agent != null && rules != null) {
-            for (PfcpRule rule : rules) {
-                cmds.addAll(agent.delete(rule));
-                if (rule.urr() != null) {
-                    removeUrr(rule);
-                }
-            }
-        }
-        lastCommands = List.copyOf(cmds);
-        respond(req, responseOf(req.type()), peer);
-    }
-
     private void removeUrr(PfcpRule rule) {
         String urrId = String.valueOf(rule.urr().urrId());
         agent.urr().remove(urrId);
@@ -172,12 +258,12 @@ public abstract class UpfPfcpSbb extends CmpBackedSbb implements SleeEventHandle
     }
 
     /**
-     * Query-URR (TS 29.244): on-demand counter snapshot for this session's URRs,
-     * answered in the Session Modification Response payload. Read-only — the
+     * Query-URR (TS 29.244 §7.5.4.10): on-demand counter snapshot for this session's URRs,
+     * answered as Usage Report IEs in the Session Modification Response. Read-only — the
      * report baseline does not advance.
      */
     private void respondQueryUrr(PfcpMessage req, InetSocketAddress peer) {
-        List<String> urrIds = urrsBySeid.getOrDefault(req.seid(), List.of());
+        List<String> urrIds = sessions.urrs(req.seid());
         List<PfcpUsageReport> reports = new ArrayList<>(urrIds.size());
         for (String urrId : urrIds) {
             Optional<LinuxUrrUsage> usage = agent.readCounter(urrId);
@@ -199,31 +285,23 @@ public abstract class UpfPfcpSbb extends CmpBackedSbb implements SleeEventHandle
             LOG.debug("UpfPfcpSbb pfcp-ra not injected; no Query-URR response sent");
             return;
         }
-        port.sendCommand(new SendPfcpMessage(new PfcpMessage(
-                PfcpMessageType.SESSION_MODIFICATION_RESPONSE, req.seid(), req.sequence(),
-                PfcpCodec.encodeUsageReports(reports)), peer));
+        // §7.5.5.1: Cause + Usage Report (Session Modification Response) IEs.
+        port.sendCommand(new PfcpSessionAnswer(peer, req, PfcpIe.CAUSE_REQUEST_ACCEPTED,
+                PfcpCodec.decodeIes(PfcpCodec.encodeUsageReports(reports, PfcpIe.USAGE_REPORT_SMR))));
     }
 
     private static UeAddresses toUe(InetAddress ipv4) {
         return ipv4 instanceof Inet4Address v4 ? new UeAddresses(v4, null) : UeAddresses.none();
     }
 
-    private static PfcpMessageType responseOf(PfcpMessageType request) {
-        return switch (request) {
-            case SESSION_ESTABLISHMENT_REQUEST -> PfcpMessageType.SESSION_ESTABLISHMENT_RESPONSE;
-            case SESSION_MODIFICATION_REQUEST -> PfcpMessageType.SESSION_MODIFICATION_RESPONSE;
-            default -> PfcpMessageType.SESSION_DELETION_RESPONSE;
-        };
-    }
-
-    private void respond(PfcpMessage req, PfcpMessageType type, InetSocketAddress peer) {
+    /** Response with Cause (+ Node ID / UP F-SEID on an Establishment) built by pfcp-ra. */
+    private void answer(PfcpMessage req, int cause, InetSocketAddress peer) {
         RaCommandPort port = pfcpRa;
         if (port == null) {
             LOG.debug("UpfPfcpSbb pfcp-ra not injected; no response sent");
             return;
         }
-        port.sendCommand(new SendPfcpMessage(
-                new PfcpMessage(type, req.seid(), req.sequence(), new byte[0]), peer));
+        port.sendCommand(new PfcpSessionAnswer(peer, req, cause));
     }
 
     public static final class $Concrete extends UpfPfcpSbb {
@@ -240,6 +318,10 @@ public abstract class UpfPfcpSbb extends CmpBackedSbb implements SleeEventHandle
 
         public $Concrete(LinuxGtpAgent agent, UrrIpIndex ipIndex) {
             super(agent, ipIndex);
+        }
+
+        public $Concrete(LinuxGtpAgent agent, UrrIpIndex ipIndex, UpfSessionTable sessions) {
+            super(agent, ipIndex, sessions);
         }
 
         @Override public Long getPfcpSeid() { return lng("pfcpSeid"); }

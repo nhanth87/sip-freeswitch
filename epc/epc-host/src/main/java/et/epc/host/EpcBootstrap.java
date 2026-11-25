@@ -7,6 +7,8 @@ import com.microjainslee.api.RaBootstrapPort;
 import com.microjainslee.api.SleeEvent;
 import com.microjainslee.core.MicroSleeContainer;
 import com.microjainslee.ra.diameter.DiameterRaConfig;
+import com.microjainslee.cluster.ClusterManager;
+import com.microjainslee.cluster.DistributedSbbEntityPool;
 import com.microjainslee.ra.diameter.DiameterRaEndpoint;
 import com.microjainslee.ra.diameter.DiameterResourceAdaptor;
 import com.microjainslee.ra.diameter.events.DiameterAnswerEvent;
@@ -114,6 +116,8 @@ public final class EpcBootstrap {
     private PcrfSbb pcrfSbb;
     /** Gx wire client (Phase C) — null unless EPC_PCRF_WIRE_MODE=wire. */
     private volatile WirePcrfClient gxWireClient;
+    private volatile ClusterManager clusterManager;
+    private volatile et.epc.host.sbb.PgwS5cProcedure pgwProcedure;
     /** MME peer-trust drawbridge (Open5GS #4337); disabled keeps pre-change behaviour. */
     private MmeAllowlist mmeAllowlist = MmeAllowlist.disabled();
     private MicroSleeContainer slee;
@@ -264,6 +268,35 @@ public final class EpcBootstrap {
                 cluster.nodeId(), cluster.mode(), wired);
     }
 
+    /**
+     * micro-jainslee clustering on {@code epc-cluster} (DIST_SYNC only), the same shape as
+     * Elisa's {@code elisa-cluster}: one {@link ClusterManager} adopted from the EPC Infinispan
+     * manager; {@link DistributedSbbEntityPool} for SBB entity state; session ownership in each
+     * RA ({@code ra-gtpv2c-owner} by TEID, {@code ra-pfcp-owner} by SEID, {@code ra-diameter-owner}
+     * by Session-Id) so a node that takes over a service address claims the departed node's
+     * sessions. Session state itself (SessionCheckpoint) is in {@code epc-sessions} + Postgres.
+     */
+    private void joinCluster(MicroSleeContainer container) {
+        if (ispn == null || !ispn.enabled() || !ispn.distSync() || ispn.manager() == null) {
+            LOG.info("epc-host clustering off (epc.cluster.mode={})",
+                    ispn == null ? "n/a" : ispn.modeLabel());
+            return;
+        }
+        clusterManager = ClusterManager.adopt(ispn.manager(), ispn.nodeId(), true);
+        container.bindDistributedSbbPool(new DistributedSbbEntityPool(16, 40_960, true, clusterManager));
+        if (gtp != null) {
+            gtp.setClusterManager(clusterManager);
+            gtp.setMicroSleeContainer(container);
+        }
+        if (pfcp != null) {
+            pfcp.setClusterManager(clusterManager);
+            pfcp.setMicroSleeContainer(container);
+        }
+        wired.add("cluster");
+        LOG.info("epc-host joined {} node={} (DistributedSbbEntityPool + RA ownership gtpv2c/pfcp/diameter)",
+                ispn.clusterName(), ispn.nodeId());
+    }
+
     /** Start the URR poller once (mode=poll + UP role); safe to call on both boot paths. */
     private void startUpPoller(String path) {
         if (urrPoller != null && !urrPoller.running()) {
@@ -283,6 +316,7 @@ public final class EpcBootstrap {
             container.start();
         }
         buildPlane();
+        joinCluster(container);
         ProfileFacility pf = container.getProfileFacility();
         EpcProfiles.provision(pf);
         try {
@@ -299,14 +333,20 @@ public final class EpcBootstrap {
             this.pcrfSbb = pcrfSbb;
             container.registerSbbType(DiameterGatewaySbb.class,
                     () -> new DiameterGatewaySbb.$Concrete(hssService, cxService, pcrfSbb::handle)
-                            .withAnswerSink(this::routeDiameterAnswer));
+                            .withAnswerSink(this::routeDiameterAnswer)
+                            .withTimeoutSink(this::routeDiameterTimeout));
             container.mapEventToSbb(DiameterRequestEvent.class, "DiameterGatewaySbb");
-            // Gx CCA completions for outbound CCRs (Phase C wire seam).
+            // Gx CCA completions / Tx timeouts of outbound CCRs (two-phase PGW-C procedure).
             container.mapEventToSbb(DiameterAnswerEvent.class, "DiameterGatewaySbb");
+            container.mapEventToSbb(com.microjainslee.ra.diameter.events.DiameterTimeoutEvent.class,
+                    "DiameterGatewaySbb");
         }
         if (roles.wireGtpS11() || roles.wireGtpS5()) {
+            if (pgw != null && gtp != null) {
+                pgwProcedure = new et.epc.host.sbb.PgwS5cProcedure(pgw, () -> gxWireClient, gtp);
+            }
             container.registerSbbType(GtpGatewaySbb.class,
-                    () -> new GtpGatewaySbb.$Concrete(sgw, pgw, pf));
+                    () -> new GtpGatewaySbb.$Concrete(sgw, pgw, pf).withPgwProcedure(pgwProcedure));
             container.mapEventToSbb(Gtpv2MessageEvent.class, "GtpGatewaySbb");
             container.mapEventToSbb(GtpEchoEvent.class, "GtpGatewaySbb");
             container.mapEventToSbb(GtpProcedureTimeoutEvent.class, "GtpGatewaySbb");
@@ -377,7 +417,7 @@ public final class EpcBootstrap {
                 return t;
             });
             SessionStore hot = sessionsCache != null
-                    ? new IspnSessionStore(sessionsCache)
+                    ? new IspnSessionStore(sessionsCache, ispn.cache(EpcInfinispanManager.CACHE_SESSION_INDEX))
                     : new HeapSessionStore();
             DurableSink sink = new JdbcDurableSink(dataSource);
             sessions = new DualWriteSessionStore(hot, sink, durableExecutor);
@@ -388,7 +428,10 @@ public final class EpcBootstrap {
                 wired.add("pcc-postgres");
             }
         } else {
-            sessions = new HeapSessionStore();
+            // No Postgres: the shared cache alone still lets another node answer (DIST_SYNC).
+            sessions = sessionsCache != null
+                    ? new IspnSessionStore(sessionsCache, ispn.cache(EpcInfinispanManager.CACHE_SESSION_INDEX))
+                    : new HeapSessionStore();
         }
         // The durable repo is what writes epc_ipcan_session (persistDecision) and lists the
         // RAR targets; without it every policy push silently found zero sessions.
@@ -436,10 +479,16 @@ public final class EpcBootstrap {
         }
         if (roles.wireGtpS11() || roles.wireGtpS5()) {
             gtp = new Gtpv2RaEndpoint();
+            // TS 23.007 §18: the restart counter belongs to the GTP-C service address, shared by
+            // every node behind it; a new value makes the peer delete all PDN connections.
+            gtp.setRecovery((byte) Integer.getInteger("epc.gtp.recovery",
+                    parseIntOr(System.getenv("EPC_GTP_RECOVERY"), 1)).intValue());
             wired.add(Gtpv2RaEndpoint.RA_NAME);
         }
         if (roles.wirePfcpSxa() || roles.wirePfcpSxb() || roles.wireUp()) {
             pfcp = new PfcpRaEndpoint();
+            // Node ID = the plane address: it is also the F-SEID address the peer answers to.
+            pfcp.setNodeId(com.microjainslee.ra.pfcp.PfcpNodeId.of(local));
             wired.add(PfcpRaEndpoint.RA_NAME);
         }
         if (roles.wirePcef() || roles.wirePcefStandalone() || roles.wireGtpS11()) {
@@ -514,11 +563,22 @@ public final class EpcBootstrap {
         }
     }
 
-    /** Routes inbound Diameter answers (Gx CCA) to the wire client; no-op when unwired. */
+    /** Gx CCA → the PGW-C procedure waiting on it (phase 2); other answers are not ours. */
     private void routeDiameterAnswer(DiameterAnswerEvent ans) {
-        WirePcrfClient client = gxWireClient;
-        if (client != null) {
-            client.onCca(ans);
+        et.epc.host.sbb.PgwS5cProcedure proc = pgwProcedure;
+        if (proc != null && proc.onCca(ans)) {
+            return;
+        }
+        if (WirePcrfClient.isCca(ans)) {
+            LOG.debug("Gx CCA sid={} rc={} (no pending procedure: CCR-T or late)", ans.sessionId(), ans.resultCode());
+        }
+    }
+
+    /** Gx Tx timer expired → the PGW-C procedure finishes with its local policy. */
+    private void routeDiameterTimeout(com.microjainslee.ra.diameter.events.DiameterTimeoutEvent t) {
+        et.epc.host.sbb.PgwS5cProcedure proc = pgwProcedure;
+        if (proc != null) {
+            proc.onTimeout(t);
         }
     }
 
@@ -531,6 +591,11 @@ public final class EpcBootstrap {
                 : cluster.nodeId() + ".epc.lab");
         cfg.setRealm(diameterSeam.originRealm());
         cfg.setProductName("epc-diameter");
+        // Tx timer for our own requests (Gx CCR): silence becomes a DiameterTimeoutEvent.
+        GxWireConfig tx = GxWireConfig.fromEnv();
+        if (tx.wire()) {
+            cfg.setRequestTimeoutMs(tx.ccrTimeoutMs());
+        }
         // Connection stays in diameter-ra (TCP today; SCTP/Corsac when that stack is live).
         cfg.setSctpEnabled(false);
         cfg.setTcpEnabled(true);
@@ -552,6 +617,12 @@ public final class EpcBootstrap {
             cfg.setDestinationRealm(diameterSeam.destinationRealm());
         }
         DiameterResourceAdaptor ra = new DiameterResourceAdaptor();
+        if (clusterManager != null) {
+            ra.setClusterManager(clusterManager);
+            if (slee != null) {
+                ra.setMicroSleeContainer(slee);
+            }
+        }
         DiameterRaEndpoint endpoint = new DiameterRaEndpoint(ra);
         endpoint.setConfig(cfg);
         return endpoint;
@@ -717,5 +788,13 @@ public final class EpcBootstrap {
                 LOG.debug("fire {} on {}", event.getClass().getSimpleName(), handle.getId());
             }
         };
+    }
+
+    private static int parseIntOr(String v, int def) {
+        try {
+            return v == null || v.isBlank() ? def : Integer.parseInt(v.trim());
+        } catch (NumberFormatException e) {
+            return def;
+        }
     }
 }

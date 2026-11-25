@@ -20,4 +20,9 @@ public interface DurableSink {
     default Optional<SessionCheckpoint> findByS11cTeid(int s11cTeid) {
         return Optional.empty();
     }
+
+    /** Postgres lookup of a PGW session by its S5-C TEID. */
+    default Optional<SessionCheckpoint> findByS5cTeid(int s5cTeid) {
+        return Optional.empty();
+    }
 }

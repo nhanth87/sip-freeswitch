@@ -22,7 +22,7 @@ public final class S6aAvp {
     public static final int MSISDN = 701;
     public static final int AMBR = 1435;
     public static final int MAX_REQUESTED_BANDWIDTH_UL = 516;
-    public static final int MAX_REQUESTED_BANDWIDTH_DL = 517;
+    public static final int MAX_REQUESTED_BANDWIDTH_DL = 515; // TS 29.214 §5.3.14 (517 = Media-Component-Description)
     public static final int CANCELLATION_TYPE = 1420;
     public static final int IDR_FLAGS = 1525;
     public static final int PURGE_UE = 1472;

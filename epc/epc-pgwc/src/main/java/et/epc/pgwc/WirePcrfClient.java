@@ -6,6 +6,7 @@ import com.microjainslee.ra.diameter.command.SendDiameterRequest;
 import com.microjainslee.ra.diameter.events.DiameterAnswerEvent;
 import et.epc.api.Imsi;
 import et.epc.api.QosProfile;
+import et.epc.api.diameter.GxAvp;
 import et.epc.pcef.PccRule;
 import et.epc.pcef.PcrfClient;
 import et.epc.pcef.PolicyDecision;
@@ -15,12 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -30,7 +26,7 @@ import org.apache.logging.log4j.Logger;
  * CCR/CCA command 272. Implements {@link PcrfClient} for
  * {@code PcefService.beginGxSession}; the CCR goes out on the injected
  * {@code diameter-ra} command port and the CCA comes back as a
- * {@link DiameterAnswerEvent} routed into {@link #onCca(DiameterAnswerEvent)}
+ * {@link DiameterAnswerEvent} handed to {@link #decision(String, DiameterAnswerEvent)}
  * (the epc-host event-routing owner wires that seam).
  *
  * <p><b>Peer truth:</b> a CCR is only emitted in {@code wire} mode
@@ -51,8 +47,9 @@ import org.apache.logging.log4j.Logger;
  * Charging-Rule-Install grouped AVPs are parsed as a fallback when the flat
  * map is empty.</p>
  *
- * <p><b>Hot path:</b> {@link #beginGxSession} blocks up to
- * {@link GxWireConfig#ccrTimeoutMs()} on the CCA; keep the timeout tight.</p>
+ * <p><b>JSR 240:</b> nothing here waits. {@link #sendCcr} returns at once; the CCA is a
+ * {@link DiameterAnswerEvent} and silence a {@code DiameterTimeoutEvent} (the RA's Tx timer,
+ * {@link GxWireConfig#ccrTimeoutMs()}), both handled by the PGW-C procedure.</p>
  */
 public final class WirePcrfClient implements PcrfClient {
 
@@ -78,13 +75,13 @@ public final class WirePcrfClient implements PcrfClient {
     static final int CHARGING_RULE_INSTALL = 1001;
     static final int CHARGING_RULE_DEFINITION = 1003;
     static final int CHARGING_RULE_NAME = 1005;
-    static final int DEFAULT_EPS_BEARER_QOS = 1023;
+    static final int DEFAULT_EPS_BEARER_QOS = GxAvp.DEFAULT_EPS_BEARER_QOS;
     static final int QOS_INFORMATION = 1016;
     static final int QOS_CLASS_IDENTIFIER = 1028;
-    static final int MAX_REQUESTED_BANDWIDTH_UL = 516;
-    static final int MAX_REQUESTED_BANDWIDTH_DL = 517;
-    static final int GUARANTEED_BITRATE_UL = 518;
-    static final int GUARANTEED_BITRATE_DL = 519;
+    static final int MAX_REQUESTED_BANDWIDTH_UL = GxAvp.MAX_REQUESTED_BANDWIDTH_UL;
+    static final int MAX_REQUESTED_BANDWIDTH_DL = GxAvp.MAX_REQUESTED_BANDWIDTH_DL;
+    static final int GUARANTEED_BITRATE_UL = GxAvp.GUARANTEED_BITRATE_UL;
+    static final int GUARANTEED_BITRATE_DL = GxAvp.GUARANTEED_BITRATE_DL;
     static final int ALLOCATION_RETENTION_PRIORITY = 1034;
     static final int PRIORITY_LEVEL = 1046;
     static final int PRE_EMPTION_CAPABILITY = 1047;
@@ -104,9 +101,6 @@ public final class WirePcrfClient implements PcrfClient {
     private final BooleanSupplier peerReady;
     private final GxWireConfig config;
     private final String originHost;
-    private final ConcurrentHashMap<String, CompletableFuture<DiameterAnswerEvent>> pending =
-            new ConcurrentHashMap<>();
-    private final AtomicLong seq = new AtomicLong(1);
 
     public WirePcrfClient(RaCommandPort sender, BooleanSupplier peerReady) {
         this(sender, peerReady, GxWireConfig.fromEnv(), DEFAULT_ORIGIN_HOST);
@@ -126,95 +120,111 @@ public final class WirePcrfClient implements PcrfClient {
     }
 
     /**
-     * CCR for one IP-CAN session; blocks up to the configured CCA timeout.
-     * Never throws — {@code !wire}, {@code !peerReady}, timeout, transport
-     * errors and non-2001 answers all fall back to the static decision
-     * (fail-open; prepaid fail-closed is enforced earlier by
-     * {@code PcefService.open}).
+     * Synchronous seam of {@link PcrfClient}: never waits on the wire (the CCA is a SLEE event
+     * the waiting thread would have to deliver). Returns the static decision; the wire Gx
+     * procedure is {@link #sendCcr} → CCA / timeout event → {@link #decision}.
      */
     @Override
     public PolicyDecision beginGxSession(Imsi imsi, String apn, String ueIpv4,
                                          long chargingId, String requestType) {
         Objects.requireNonNull(imsi);
         Objects.requireNonNull(apn);
-        if (!config.wire()) {
-            return staticByApn(apn);
+        return staticByApn(apn);
+    }
+
+    /** True when a CCR can go out now: wire mode and the PCRF peer CEA-ready. */
+    public boolean canSend() {
+        return config.wire() && peerReady.getAsBoolean();
+    }
+
+    /**
+     * Gx Session-Id (RFC 6733 §8.8) for one IP-CAN session: Origin-Host + Charging-Id. Derived,
+     * not stored, so whichever cluster node handles the Delete Session can send the CCR-T.
+     */
+    public String sessionIdFor(long chargingId) {
+        return originHost + ";gx;" + Long.toHexString(chargingId);
+    }
+
+    /**
+     * Send a CCR (TS 29.212 §5.6.2) without waiting: INITIAL with the UE address, TERMINATION
+     * when the PDN connection goes. The CCA comes back as a {@link DiameterAnswerEvent} (or a
+     * {@code DiameterTimeoutEvent} from the RA's Tx timer) on the returned Session-Id.
+     *
+     * @return the Gx Session-Id, or empty when the CCR could not be sent (not wire / peer down)
+     */
+    public Optional<String> sendCcr(Imsi imsi, String apn, String ueIpv4, long chargingId,
+                                    int requestType, long requestNumber) {
+        if (!canSend()) {
+            LOG.debug("Gx CCR skipped imsi={} apn={}: wire={} peer-ready={}", imsi, apn, config.wire(),
+                    peerReady.getAsBoolean());
+            return Optional.empty();
         }
-        if (!peerReady.getAsBoolean()) {
-            LOG.debug("Gx CCR skipped imsi={} apn={}: peer not CEA-ready", imsi, apn);
-            return staticByApn(apn);
-        }
-        String sessionId = originHost + ";gx-wire;" + seq.getAndIncrement();
-        CompletableFuture<DiameterAnswerEvent> cca = new CompletableFuture<>();
-        pending.put(sessionId, cca);
+        String sid = sessionIdFor(chargingId);
         try {
-            sender.sendCommand(new SendDiameterRequest(sessionId, GX_APP_ID, CCR_CMD,
-                    config.peerHost(), config.destRealm(),
-                    ccrAvps(imsi, apn, ueIpv4, chargingId, requestType), List.of()));
-            DiameterAnswerEvent answer = cca.get(config.ccrTimeoutMs(), TimeUnit.MILLISECONDS);
-            PolicyDecision decision = toDecision(apn, answer);
-            if (decision == null) {
-                LOG.warn("Gx CCA unusable sid={} rc={} — static fallback",
-                        sessionId, answer.resultCode());
-                return staticByApn(apn);
-            }
-            return decision;
-        } catch (TimeoutException e) {
-            LOG.warn("Gx CCA timeout sid={} after {}ms — static fallback",
-                    sessionId, config.ccrTimeoutMs());
-            return staticByApn(apn);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return staticByApn(apn);
-        } catch (ExecutionException e) {
-            LOG.warn("Gx CCA delivery failed sid={}: {} — static fallback",
-                    sessionId, e.toString());
-            return staticByApn(apn);
+            sender.sendCommand(new SendDiameterRequest(sid, GX_APP_ID, CCR_CMD,
+                    config.peerHost(), config.destRealm(), Map.of(),
+                    ccr(imsi, apn, ueIpv4, chargingId, requestType, requestNumber)));
+            return Optional.of(sid);
         } catch (RuntimeException e) {
-            LOG.warn("Gx CCR/CCA failed sid={}: {} — static fallback", sessionId, e.toString());
-            return staticByApn(apn);
-        } finally {
-            pending.remove(sessionId);
+            LOG.warn("Gx CCR send failed sid={}: {}", sid, e.toString());
+            return Optional.empty();
         }
     }
 
     /**
-     * Inbound CCA correlate: completes the pending CCR future for the Gx
-     * Session-Id. Returns {@code true} when the answer matched a pending
-     * request (app 16777238, cmd 272).
+     * Typed CCR body (TS 29.212 §5.6.2; Session-Id / Origin / Destination come from the RA):
+     * Auth-Application-Id, CC-Request-Type, CC-Request-Number, Subscription-Id {END_USER_IMSI},
+     * Framed-IP-Address (4 octets), IP-CAN-Type 3GPP-EPS, RAT-Type EUTRAN, Called-Station-Id,
+     * 3GPP-Charging-Id.
      */
-    public boolean onCca(DiameterAnswerEvent answer) {
-        if (answer == null || answer.applicationId() != GX_APP_ID
-                || answer.commandCode() != CCR_CMD) {
-            return false;
+    static List<DiameterAvp> ccr(Imsi imsi, String apn, String ueIpv4, long chargingId,
+                                 int requestType, long requestNumber) {
+        List<DiameterAvp> out = new ArrayList<>();
+        out.add(DiameterAvp.u32(GxAvp.AUTH_APPLICATION_ID, GX_APP_ID));
+        out.add(DiameterAvp.enum32(GxAvp.CC_REQUEST_TYPE, requestType));
+        out.add(DiameterAvp.u32(GxAvp.CC_REQUEST_NUMBER, requestNumber));
+        out.add(DiameterAvp.grouped(GxAvp.SUBSCRIPTION_ID, 0L, true, List.of(
+                DiameterAvp.enum32(GxAvp.SUBSCRIPTION_ID_TYPE, GxAvp.SUBSCRIPTION_END_USER_IMSI),
+                DiameterAvp.utf8(GxAvp.SUBSCRIPTION_ID_DATA, imsi.digits()))));
+        if (requestType == GxAvp.REQUEST_INITIAL) {
+            byte[] ip = ipv4(ueIpv4);
+            if (ip != null) {
+                out.add(DiameterAvp.octets(GxAvp.FRAMED_IP_ADDRESS, 0L, ip, true));
+            }
+            out.add(DiameterAvp.enum32(GxAvp.IP_CAN_TYPE, GxAvp.VENDOR_3GPP, GxAvp.IP_CAN_3GPP_EPS, true));
+            out.add(DiameterAvp.enum32(GxAvp.RAT_TYPE, GxAvp.VENDOR_3GPP, GxAvp.RAT_EUTRAN, true));
+            out.add(DiameterAvp.utf8(GxAvp.CALLED_STATION_ID, apn));
+            if (chargingId > 0) {
+                out.add(DiameterAvp.octets(GxAvp.CHARGING_ID_3GPP, GxAvp.VENDOR_3GPP,
+                        java.nio.ByteBuffer.allocate(4).putInt((int) chargingId).array(), false));
+            }
         }
-        CompletableFuture<DiameterAnswerEvent> future = pending.remove(answer.sessionId());
-        if (future == null) {
-            return false;
-        }
-        future.complete(answer);
-        return true;
+        return List.copyOf(out);
     }
 
-    /** Flat CCR body per the GxHandler contract (single-valued string map). */
-    static Map<Integer, String> ccrAvps(Imsi imsi, String apn, String ueIpv4,
-                                        long chargingId, String requestType) {
-        LinkedHashMap<Integer, String> avps = new LinkedHashMap<>();
-        avps.put(SUBSCRIPTION_ID_DATA, imsi.digits());
-        avps.put(SUBSCRIPTION_ID_TYPE, "1");
-        avps.put(CALLED_STATION_ID, apn);
-        if (ueIpv4 != null && !ueIpv4.isBlank()) {
-            avps.put(FRAMED_IP_ADDRESS, ueIpv4.trim());
+    private static byte[] ipv4(String dotted) {
+        if (dotted == null || dotted.isBlank()) {
+            return null;
         }
-        if (chargingId > 0) {
-            avps.put(CHARGING_ID, Long.toString(chargingId));
+        try {
+            byte[] a = java.net.InetAddress.getByName(dotted.trim()).getAddress();
+            return a.length == 4 ? a : null;
+        } catch (java.net.UnknownHostException e) {
+            return null;
         }
-        avps.put(CC_REQUEST_TYPE,
-                requestType == null || requestType.isBlank()
-                        ? REQ_TYPE_INITIAL : requestType.trim());
-        avps.put(CC_REQUEST_NUMBER, "1");
-        avps.put(AUTH_SESSION_STATE, "1");
-        return Map.copyOf(avps);
+    }
+
+    /**
+     * Policy from a CCA: the PCRF decision, {@code null} when the PCRF refused the session
+     * (Result-Code ≠ 2001 — the PDN connection is rejected, TS 29.212 §4.5.1).
+     */
+    public PolicyDecision decision(String apn, DiameterAnswerEvent cca) {
+        return toDecision(apn, cca);
+    }
+
+    /** Is this answer a Gx CCA (app 16777238, command 272)? */
+    public static boolean isCca(DiameterAnswerEvent ev) {
+        return ev != null && ev.applicationId() == GX_APP_ID && ev.commandCode() == CCR_CMD;
     }
 
     /**
@@ -240,7 +250,10 @@ public final class WirePcrfClient implements PcrfClient {
             if (rules.isEmpty()) {
                 rules = parseStructuredRules(cca.avpsStructured());
             }
-            QosProfile qos = parseDefaultBearerQos(avps.get(DEFAULT_EPS_BEARER_QOS));
+            QosProfile qos = typedDefaultBearerQos(cca.avpsStructured());
+            if (qos == null) {
+                qos = parseDefaultBearerQos(avps.get(DEFAULT_EPS_BEARER_QOS));
+            }
             String ruleName = rules.isEmpty() ? "gx-wire-none" : rules.get(0).name();
             boolean gatingOpen = rules.isEmpty() || rules.get(0).gatingOpen();
             return new PolicyDecision(qos, gatingOpen, ruleName, rules);
@@ -283,6 +296,55 @@ public final class WirePcrfClient implements PcrfClient {
                 dashToNull(kv.get("serviceId")),
                 kv.getOrDefault("flow", ""),
                 Boolean.parseBoolean(kv.getOrDefault("gating", "true")));
+    }
+
+    /**
+     * Default-EPS-Bearer-QoS {QCI, ARP} (TS 29.212 §5.3.48) and the command-level QoS-Information
+     * APN-AMBR (§5.3.15) of a typed CCA; null when the CCA carries no Default-EPS-Bearer-QoS.
+     */
+    static QosProfile typedDefaultBearerQos(List<DiameterAvp> avps) {
+        if (avps == null) {
+            return null;
+        }
+        DiameterAvp dq = null;
+        DiameterAvp ambr = null;
+        for (DiameterAvp a : avps) {
+            if (a.code() == GxAvp.DEFAULT_EPS_BEARER_QOS) {
+                dq = a;
+            } else if (a.code() == GxAvp.QOS_INFORMATION) {
+                ambr = a;
+            }
+        }
+        if (dq == null) {
+            return null;
+        }
+        QosProfile d = QosProfile.pilotDefault();
+        List<DiameterAvp> q = children(dq);
+        int qci = (int) u32(find(q, QOS_CLASS_IDENTIFIER), d.qci());
+        int prio = d.arpPriority();
+        boolean cap = d.preemptionCapability();
+        boolean vuln = d.preemptionVulnerability();
+        DiameterAvp arp = find(q, ALLOCATION_RETENTION_PRIORITY);
+        if (arp != null) {
+            List<DiameterAvp> a = children(arp);
+            prio = (int) u32(find(a, PRIORITY_LEVEL), prio);
+            // Pre-emption-Capability / -Vulnerability: 0 = ENABLED, 1 = DISABLED (§5.3.46 / §5.3.47).
+            DiameterAvp pc = find(a, PRE_EMPTION_CAPABILITY);
+            DiameterAvp pv = find(a, PRE_EMPTION_VULNERABILITY);
+            if (pc != null) {
+                cap = pc.asUnsigned32() == 0L;
+            }
+            if (pv != null) {
+                vuln = pv.asUnsigned32() == 0L;
+            }
+        }
+        long ul = d.apnAmbrUlBps();
+        long dl = d.apnAmbrDlBps();
+        if (ambr != null) {
+            ul = u32(find(children(ambr), GxAvp.APN_AGGREGATE_MAX_BITRATE_UL), ul);
+            dl = u32(find(children(ambr), GxAvp.APN_AGGREGATE_MAX_BITRATE_DL), dl);
+        }
+        return new QosProfile(qci, prio, cap, vuln, ul, dl, d.ueAmbrUlBps(), d.ueAmbrDlBps());
     }
 
     /** Default-EPS-Bearer-QoS flat string → QosProfile (pilot default on miss). */
@@ -342,8 +404,9 @@ public final class WirePcrfClient implements PcrfClient {
             if (arp != null) {
                 List<DiameterAvp> a = children(arp);
                 prio = (int) u32(find(a, PRIORITY_LEVEL), 8L);
-                cap = u32(find(a, PRE_EMPTION_CAPABILITY), 0L) == 1L;
-                vuln = u32(find(a, PRE_EMPTION_VULNERABILITY), 0L) == 1L;
+                // §5.3.46 / §5.3.47: 0 = ENABLED, 1 = DISABLED.
+                cap = u32(find(a, PRE_EMPTION_CAPABILITY), 1L) == 0L;
+                vuln = u32(find(a, PRE_EMPTION_VULNERABILITY), 1L) == 0L;
             }
         }
         Integer ratingGroup = null;
@@ -367,7 +430,8 @@ public final class WirePcrfClient implements PcrfClient {
             }
             DiameterAvp fs = find(f, FLOW_STATUS);
             if (fs != null) {
-                gating = fs.asUnsigned32() == 1L;
+                // TS 29.214 §5.3.11: 0/1/2 = enabled (UL / DL / both), 3 = DISABLED, 4 = REMOVED.
+                gating = fs.asUnsigned32() <= 2L;
             }
         }
         return new PccRule(name == null || name.isBlank() ? "gx-unknown" : name,
@@ -480,8 +544,5 @@ public final class WirePcrfClient implements PcrfClient {
         return peerReady.getAsBoolean();
     }
 
-    /** In-flight CCR count (status/test observability). */
-    public int pendingCount() {
-        return pending.size();
-    }
+
 }

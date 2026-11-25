@@ -59,13 +59,43 @@ java -cp "$(cat /tmp/cp)" loadtest/gtp/MmeS11.java 172.20.0.1 172.20.10.14 00101
 7. **Postgres**: `JdbcCdrStore` wrote `cdr_kind`, no migration added it → every PGW-C Create
    Session failed (`pcef cdr persist`). `V9__epc_pcef_cdr_kind.sql`.
 
-## Open (seen on the same capture)
+## Round 2 (2026-11-25) — W-1..W-5 closed, wire-proven
+
+Captures: `loadtest/pcaps/epc/epc-w1-w4-cold.pcap`, `epc-w1-w4-warm.pcap` (gitignored). Lab MME now
+runs Create → Modify Bearer → Release Access Bearers → Modify Bearer (new eNB TEID) → Delete.
+
+| Check | Result |
+|---|---|
+| S11 | 5 × cause 16; every response header TEID = MME S11 TEID (RAB fixed too) |
+| Create latency | 804 ms cold (first CCA of a cold PCRF), 219 ms warm — was a fixed 5 s / 2 s wait |
+| Gx | CCR-I / CCA 2001, CCR-T / CCA 2001; PGW-C uses the PCRF decision (`PgwS5cProcedure Gx CCA … qci=9`) |
+| PFCP | 7 / 7 responses cause 1 (2 Establishment, 3 Modification, 2 Deletion) |
+| UP tunnels | 0→1 (DL buffered), 1→2 (Modify), 2→1 (RAB), 1→2 (Modify) |
+| Wireshark | 0 malformed, 0 expert errors (GTPv2, PFCP, Diameter) |
+
+| # | Fix |
+|---|---|
+| W-1 | Gx two-phase (`epc-host/.../sbb/PgwS5cProcedure`): S5-C Create → allocate + CCR-I, return; CCA event → Sxb + S5-C response with the PCRF QoS (Bearer QoS, APN-AMBR); `DiameterTimeoutEvent` (new ra-diameter Tx timer) → local policy; Result-Code ≠ 2001 → cause 73 + release. CCR-T on Delete Session. Gx Session-Id derived from Origin-Host + Charging-Id (any node can send the CCR-T). |
+| W-2 | Typed CCR / CCA (`et.epc.api.diameter.GxAvp`). Wrong codes fixed: Default-EPS-Bearer-QoS 1049 (was 1023), Precedence 1010, Max-Requested-Bandwidth-DL 515 (also S6a AMBR), GBR UL/DL 1026/1025, APN-AMBR-DL 1040. Enum values: Pre-emption 0 = ENABLED, Flow-Status 2 = ENABLED. PCRF answers 5030 when no IMSI. ra-diameter: typed inbound leaves + the Corsac path now carries the full typed tree. |
+| W-3 | ra-pfcp TS 29.244 (header, 2-octet IE type, flag bits, real Create PDR/FAR/QER/URR, UP answers with Node ID / Cause / UP F-SEID). |
+| W-4 | Sxa rules = UL PDR/FAR 1 + DL PDR/FAR 2 (BUFF\|NOCP until Modify Bearer); Modify Bearer / RAB = Session Modification with Update FAR 2. Sxb = anchor rules (UL F-TEID → SGi, DL UE IP → GTP-U to the SGW). UP keeps `PfcpSessionState` in a table shared by every pooled `UpfPfcpSbb` entity (a Modification landing on another entity answered cause 65 before). |
+| W-5 | `SessionCheckpoint` carries the GTP-C peers (MME S11, SGW / PGW S5-C, PGW-C address, PGW S5-C TEID); `epc-session-index` ISPN cache + Postgres V10 for TEID lookups; SgwControl / PgwControl maps are caches over the shared store. |
+| ra-gtpv2c | Response cache kept only T3 × (N3 + 1) (§7.6) — it grew forever and replayed old responses for a reused sequence. |
+
+## Clustering (micro-jainslee, epc-cluster)
+
+`EPC_CLUSTER_ISPN_MODE=DIST_SYNC`: `ClusterManager` adopted from the EPC Infinispan manager,
+`DistributedSbbEntityPool`, session ownership in each RA (`ra-gtpv2c-owner` by TEID, `ra-pfcp-owner` by SEID,
+`ra-diameter-owner` by Session-Id) with take-over of a departed node's sessions
+(`RaHaSupport.claimOnInbound`). GTP restart counter = `EPC_GTP_RECOVERY` (one value per service address).
+Elisa's Cx Diameter RA now joins `elisa-cluster` like its SIP RA. AuC: SQN is never served from the cache
+(`UPDATE … RETURNING` / `GREATEST` on Postgres). Two-node kill test: pending (see below).
+
+## Open
 
 | # | Item |
 |---|---|
-| W-1 | **Gx blocks the SBB thread too**: CCA arrives in 405 ms, the PGW-C waits the full 2 s CCR timeout and falls back to the static decision — the PCRF's answer is ignored. Needs the same two-phase shape (CCR-I → CCA event → Sxb + S5-C response). |
-| W-2 | **Gx CCR malformed**: Integer32 / Address AVPs sent as strings (flat map) — needs typed AVPs like the Cx fix. |
-| W-3 | **`ra-pfcp` header not TS 29.244 §7.2.2**: Wireshark sees IE types 513/514/24576 — header off by bytes; our own UP decodes it with the same codec. Real IEs (Node ID, F-SEID, Create PDR/FAR/QER/URR) not checked yet. |
-| W-4 | Modify Bearer and Release Access Bearers send a PFCP **Session Establishment**, not Session Modification. |
-| W-5 | MME S11 / PGW S5-C F-TEIDs are in memory (`SgwControl.ControlPeers`, `PgwControl.S5cPeer`), not in `SessionCheckpoint` → lost on failover. |
-| W-6 | Gy (OCS) not on the wire; dedicated bearers (Create/Update/Delete Bearer), Rx — later. |
+| C-5 | Two-node SGW-C / PGW-C kill test (DIST_SYNC) and two-node HSS concurrent AIR/SAI (SQN uniqueness) — wire proof pending. |
+| W-6 | Gy (OCS), dedicated bearers (Create/Update/Delete Bearer), Rx. |
+| I-1 | Interop: open5gs MME / PCRF / UPF and free5gc UPF against these nodes — pending. |
+| P-1 | In-flight procedures (pending S5-C / Gx) are node-local; a node dying mid-procedure relies on the peer's retransmission. PFCP association is per CP node: a UP that enforces association ownership needs SMF-set style handling on failover. |

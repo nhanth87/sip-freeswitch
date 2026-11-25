@@ -15,11 +15,10 @@ import et.epc.pcef.ChargingId;
 import et.epc.pcef.PcefService;
 import et.epc.pcef.PolicyDecision;
 import com.microjainslee.ra.pfcp.PfcpFteid;
-import com.microjainslee.ra.pfcp.PfcpRule;
 import com.microjainslee.ra.pfcp.PfcpUsageReport;
 import com.microjainslee.ra.pfcp.command.PfcpAssociateCommand;
-import com.microjainslee.ra.pfcp.command.PfcpProgramSession;
 import com.microjainslee.ra.pfcp.command.PfcpSessionDeletion;
+import com.microjainslee.ra.pfcp.command.PfcpSessionEstablishment;
 import et.epc.pcef.UsageRecord;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -51,7 +50,7 @@ public final class PgwControl {
     private final AtomicLong generation = new AtomicLong(1);
     /** Sxb SEID -> PGW checkpoint id correlate for inbound PFCP Session Reports. */
     private final ConcurrentHashMap<Long, String> bySeid = new ConcurrentHashMap<>();
-    /** PGW S5-C TEID → SGW-C peer (in memory, like the SGW-C's control peers — HA gap). */
+    /** PGW S5-C TEID → SGW-C peer: a cache of the PGW checkpoint (shared store, survives failover). */
     private final ConcurrentHashMap<Integer, S5cPeer> s5cPeers = new ConcurrentHashMap<>();
 
     public PgwControl(
@@ -80,40 +79,77 @@ public final class PgwControl {
         }
     }
 
-    public CreateSessionResult createSession(Imsi imsi, ApnConfig apn, Fteid sgwS5u) {
+    /** Resources of one PDN connection reserved before the policy is known (TS 23.401 §5.3.2.1 step 14). */
+    public record Allocation(Imsi imsi, ApnConfig apn, UeAddresses ue, ChargingId charging,
+                             Fteid pgwS5c, Fteid pgwS5u, long seid) {
+        public String ueIpv4() {
+            return ue.ipv4() == null ? "" : ue.ipv4().getHostAddress();
+        }
+    }
+
+    /** UE IP, Charging-Id, S5-C / S5-U TEIDs and the Sxb SEID; nothing is programmed yet. */
+    public Allocation allocate(Imsi imsi, ApnConfig apn) {
         UeAddresses ue = ipam.allocate(imsi, apn.pdnType());
-        ChargingId charging = null;
-        long se = seid.getAndIncrement();
         try {
-            charging = pcef.open(imsi, apn.apn(), PcefService.Product.POSTPAID);
-            String ueIp = ue.ipv4() == null ? "" : ue.ipv4().getHostAddress();
-            // Gx seam: wire CCR-I to the PCRF peer when pcrfLive (static
-            // decision otherwise) — PcefService.beginGxSession does the gate.
-            PolicyDecision policy = pcef.beginGxSession(imsi, apn.apn(), ueIp,
-                    charging.value(), WirePcrfClient.REQ_TYPE_INITIAL);
+            ChargingId charging = pcef.open(imsi, apn.apn(), PcefService.Product.POSTPAID);
             // TS 29.274 §8.22: 7 = S5/S8 PGW GTP-C, 5 = S5/S8 PGW GTP-U.
-            Fteid s5c = teids.allocate(localS5, 7);
-            Fteid s5u = teids.allocate(localS5, 5);
-            pfcp.sendCommand(new PfcpProgramSession(pgwu, se, List.of(
-                    new PfcpRule(se, "pdr-ul", pf(s5u), pf(sgwS5u), "qer-1", true),
-                    new PfcpRule(se, "pdr-dl", pf(sgwS5u), pf(s5u), "qer-1", false))));
-            SessionKeys keys = new SessionKeys(imsi, apn.apn(), new BearerId(5));
-            sessions.put(new SessionCheckpoint(
-                    SessionCheckpoint.pgwId(keys), "pgw", imsi.digits(), apn.apn(), 5,
-                    cluster.nodeId(), generation.getAndIncrement(), ueIp,
-                    null, sgwS5u.key(), s5u.key(), charging.value(),
-                    Long.toUnsignedString(se), 0, se));
-            bySeid.put(se, SessionCheckpoint.pgwId(keys));
-            return new CreateSessionResult(ue, s5c, s5u, charging, policy, se,
-                    apn.pcoContainers());
+            return new Allocation(imsi, apn, ue, charging, teids.allocate(localS5, 7),
+                    teids.allocate(localS5, 5), seid.getAndIncrement());
         } catch (RuntimeException e) {
             ipam.release(imsi);
-            bySeid.remove(se);
-            if (charging != null) {
-                pcef.close(charging);
-            }
             throw e;
         }
+    }
+
+    /** Give back what {@link #allocate} reserved (policy rejected the session). */
+    public void release(Allocation a) {
+        ipam.release(a.imsi());
+        pcef.close(a.charging());
+    }
+
+    /** Sxb Session Establishment (anchor rules) + PGW checkpoint, once the policy is decided. */
+    public CreateSessionResult complete(Allocation a, Fteid sgwS5u, PolicyDecision policy) {
+        try {
+            pfcp.sendCommand(new PfcpSessionEstablishment(pgwu, a.seid(),
+                    SxbRules.establish(pf(a.pgwS5u()), pf(sgwS5u), a.ue().ipv4())));
+            SessionKeys keys = new SessionKeys(a.imsi(), a.apn().apn(), new BearerId(5));
+            sessions.put(new SessionCheckpoint(
+                    SessionCheckpoint.pgwId(keys), "pgw", a.imsi().digits(), a.apn().apn(), 5,
+                    cluster.nodeId(), generation.getAndIncrement(), a.ueIpv4(),
+                    null, sgwS5u.key(), a.pgwS5u().key(), a.charging().value(),
+                    Long.toUnsignedString(a.seid()), 0, a.seid()));
+            bySeid.put(a.seid(), SessionCheckpoint.pgwId(keys));
+            return new CreateSessionResult(a.ue(), a.pgwS5c(), a.pgwS5u(), a.charging(), policy, a.seid(),
+                    a.apn().pcoContainers());
+        } catch (RuntimeException e) {
+            bySeid.remove(a.seid());
+            release(a);
+            throw e;
+        }
+    }
+
+    /**
+     * One step: allocate, take the policy {@link PcefService#beginGxSession} gives synchronously
+     * (in-process PCRF or the static decision — never a wire CCR wait), program Sxb. The wire Gx
+     * path is two-phase in {@code PgwS5cProcedure}: {@link #allocate} → CCA event → {@link #complete}.
+     */
+    public CreateSessionResult createSession(Imsi imsi, ApnConfig apn, Fteid sgwS5u) {
+        Allocation a = allocate(imsi, apn);
+        PolicyDecision policy;
+        try {
+            policy = pcef.beginGxSession(imsi, apn.apn(), a.ueIpv4(), a.charging().value(),
+                    WirePcrfClient.REQ_TYPE_INITIAL);
+        } catch (RuntimeException e) {
+            release(a);
+            throw e;
+        }
+        return complete(a, sgwS5u, policy);
+    }
+
+    /** The Charging-Id of a PGW session (the Gx session is keyed on it), or 0. */
+    public long chargingId(Imsi imsi, String apn) {
+        return sessions.get(SessionCheckpoint.pgwId(new SessionKeys(imsi, apn, new BearerId(5))))
+                .map(SessionCheckpoint::chargingId).orElse(0L);
     }
 
     public void deleteSession(Imsi imsi, String apn) {
@@ -133,11 +169,27 @@ public final class PgwControl {
     /** Remember the SGW-C's S5-C F-TEID under our PGW S5-C TEID (header TEID of its later requests). */
     public void registerS5c(int pgwS5cTeid, S5cPeer peer) {
         s5cPeers.put(pgwS5cTeid, peer);
+        String id = SessionCheckpoint.pgwId(new SessionKeys(peer.imsi(), peer.apn(), new BearerId(5)));
+        sessions.get(id).ifPresent(cp -> sessions.put(
+                cp.withControlPeers(null, peer.sgwS5c(), null, null, pgwS5cTeid)));
+    }
+
+    /** The SGW-C end of an S5-C session by our S5-C TEID: local cache, else the shared store. */
+    public S5cPeer s5cPeer(int pgwS5cTeid) {
+        S5cPeer local = s5cPeers.get(pgwS5cTeid);
+        if (local != null) {
+            return local;
+        }
+        return sessions.findByS5cTeid(pgwS5cTeid)
+                .filter(cp -> cp.sgwS5cKey() != null)
+                .map(cp -> new S5cPeer(cp.imsi(), cp.apn(), cp.sgwS5c()))
+                .orElse(null);
     }
 
     /** S5-C Delete Session (TS 29.274 §7.2.9): correlated on our S5-C TEID; null if unknown. */
     public S5cPeer deleteByS5cTeid(int pgwS5cTeid) {
-        S5cPeer peer = s5cPeers.remove(pgwS5cTeid);
+        S5cPeer peer = s5cPeer(pgwS5cTeid);
+        s5cPeers.remove(pgwS5cTeid);
         if (peer != null) {
             deleteSession(peer.imsi(), peer.apn());
         }

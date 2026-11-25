@@ -51,7 +51,7 @@ class PcrfRarPushTest {
         assertNotNull(flowInfo, "definition must carry Flow-Information(1058)");
         DiameterAvp flowStatus = child(flowInfo, 511);
         assertNotNull(flowStatus, "Flow-Information must carry Flow-Status(511)");
-        assertEquals(1L, flowStatus.asUnsigned32());
+        assertEquals(2L, flowStatus.asUnsigned32(), "TS 29.214 §5.3.11 ENABLED = 2");
     }
 
     @Test

@@ -230,11 +230,15 @@ class DiameterGatewaySbbTest {
         assertEquals(DiameterGatewaySbb.GX, ans.applicationId());
         assertEquals(GxHandler.CCR_CMD, ans.commandCode());
         assertEquals(2001L, ans.resultCode());
-        assertEquals(GxHandler.RESULT_SUCCESS, ans.avps().get(GxHandler.RESULT_CODE));
-        assertEquals(GxHandler.REQ_TYPE_INITIAL, ans.avps().get(GxHandler.CC_REQUEST_TYPE));
-        assertEquals("1", ans.avps().get(GxHandler.CC_REQUEST_NUMBER));
-        assertTrue(ans.avps().get(GxHandler.DEFAULT_EPS_BEARER_QOS).contains("qci="));
-        assertTrue(ans.avps().get(GxHandler.USAGE_MONITORING_INFORMATION).contains("pilot-volume"));
+        // Typed CCA (TS 29.212 §5.6.3); Result-Code rides in resultCode, nothing in the string map.
+        assertTrue(ans.avps().isEmpty());
+        var t = ans.avpsStructured();
+        assertEquals(1L, t.stream().filter(a -> a.code() == GxHandler.CC_REQUEST_TYPE).findFirst()
+                .orElseThrow().asUnsigned32());
+        assertEquals(1L, t.stream().filter(a -> a.code() == GxHandler.CC_REQUEST_NUMBER).findFirst()
+                .orElseThrow().asUnsigned32());
+        assertTrue(t.stream().anyMatch(a -> a.code() == et.epc.api.diameter.GxAvp.DEFAULT_EPS_BEARER_QOS));
+        assertTrue(t.stream().anyMatch(a -> a.code() == GxHandler.USAGE_MONITORING_INFORMATION));
     }
 
     @Test
