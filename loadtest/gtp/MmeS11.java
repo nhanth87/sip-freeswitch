@@ -56,6 +56,9 @@ public final class MmeS11 {
         gtp.bindUdp(new InetSocketAddress(local, 2123));
 
         int mmeTeid = 0x0000A001;
+        // A fresh sequence base per run: a peer replays its cached response for a (peer, sequence,
+        // procedure) it saw within T3 x (N3 + 1) (TS 29.274 §7.6) — reused sequences are retransmissions.
+        int sq = 0x1000 + new java.util.Random().nextInt(0x70_0000);
         // Bearer Context to be created: EBI 5 + Bearer QoS (QCI 9, ARP 8, no MBR/GBR).
         byte[] qos = new byte[22];
         qos[0] = (byte) (8 << 2);
@@ -63,7 +66,7 @@ public final class MmeS11 {
         byte[] bearer = Gtpv2Codec.encodeIes(List.of(
                 new Gtpv2Ie(Gtpv2Ie.EBI, 0, new byte[] {5}),
                 new Gtpv2Ie(BEARER_QOS, 0, qos)));
-        Gtpv2Message csr = new Gtpv2Message(Gtpv2MessageType.CREATE_SESSION_REQUEST, 0, 1, (byte) 1, List.of(
+        Gtpv2Message csr = new Gtpv2Message(Gtpv2MessageType.CREATE_SESSION_REQUEST, 0, sq + 1, (byte) 1, List.of(
                 new Gtpv2Ie(Gtpv2Ie.IMSI, 0, Gtpv2Ies.tbcd(imsi)),
                 new Gtpv2Ie(MSISDN, 0, Gtpv2Ies.tbcd("251911000009")),
                 new Gtpv2Ie(RAT_TYPE, 0, new byte[] {6}),                        // EUTRAN
@@ -101,19 +104,19 @@ public final class MmeS11 {
 
         // Modify Bearer: the eNB's S1-U F-TEID (TS 29.274 §7.2.7).
         byte[] mbBearer = Gtpv2Ies.encodeBearerContext((byte) 5, new GtpFteid(0x0000E001, enb, S1U_ENB));
-        Gtpv2Message mbr = new Gtpv2Message(Gtpv2MessageType.MODIFY_BEARER_REQUEST, sgwS11.teid(), 2, (byte) 1,
+        Gtpv2Message mbr = new Gtpv2Message(Gtpv2MessageType.MODIFY_BEARER_REQUEST, sgwS11.teid(), sq + 2, (byte) 1,
                 List.of(new Gtpv2Ie(Gtpv2Ie.BEARER_CONTEXT, 0, mbBearer)));
         long t1 = System.nanoTime();
         gtp.sendCommand(new SendGtpv2Message(mbr, sgwc));
         await(in, Gtpv2MessageType.MODIFY_BEARER_RESPONSE, t1);
 
         // Release Access Bearers (S1 release, TS 29.274 §7.2.21), then Modify Bearer again (service request).
-        Gtpv2Message rab = new Gtpv2Message(Gtpv2MessageType.RELEASE_ACCESS_BEARERS_REQUEST, sgwS11.teid(), 4,
+        Gtpv2Message rab = new Gtpv2Message(Gtpv2MessageType.RELEASE_ACCESS_BEARERS_REQUEST, sgwS11.teid(), sq + 4,
                 (byte) 1, List.of());
         long t3 = System.nanoTime();
         gtp.sendCommand(new SendGtpv2Message(rab, sgwc));
         await(in, Gtpv2MessageType.RELEASE_ACCESS_BEARERS_RESPONSE, t3);
-        Gtpv2Message mbr2 = new Gtpv2Message(Gtpv2MessageType.MODIFY_BEARER_REQUEST, sgwS11.teid(), 5, (byte) 1,
+        Gtpv2Message mbr2 = new Gtpv2Message(Gtpv2MessageType.MODIFY_BEARER_REQUEST, sgwS11.teid(), sq + 5, (byte) 1,
                 List.of(new Gtpv2Ie(Gtpv2Ie.BEARER_CONTEXT, 0,
                         Gtpv2Ies.encodeBearerContext((byte) 5, new GtpFteid(0x0000E002, enb, S1U_ENB)))));
         long t4 = System.nanoTime();
@@ -121,7 +124,7 @@ public final class MmeS11 {
         await(in, Gtpv2MessageType.MODIFY_BEARER_RESPONSE, t4);
 
         Thread.sleep(1_000);
-        Gtpv2Message dsr = new Gtpv2Message(Gtpv2MessageType.DELETE_SESSION_REQUEST, sgwS11.teid(), 3, (byte) 1,
+        Gtpv2Message dsr = new Gtpv2Message(Gtpv2MessageType.DELETE_SESSION_REQUEST, sgwS11.teid(), sq + 3, (byte) 1,
                 List.of(new Gtpv2Ie(Gtpv2Ie.EBI, 0, new byte[] {5})));
         long t2 = System.nanoTime();
         gtp.sendCommand(new SendGtpv2Message(dsr, sgwc));

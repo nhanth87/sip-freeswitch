@@ -89,13 +89,22 @@ runs Create → Modify Bearer → Release Access Bearers → Modify Bearer (new 
 `ra-diameter-owner` by Session-Id) with take-over of a departed node's sessions
 (`RaHaSupport.claimOnInbound`). GTP restart counter = `EPC_GTP_RECOVERY` (one value per service address).
 Elisa's Cx Diameter RA now joins `elisa-cluster` like its SIP RA. AuC: SQN is never served from the cache
-(`UPDATE … RETURNING` / `GREATEST` on Postgres). Two-node kill test: pending (see below).
+(`UPDATE … RETURNING` / `GREATEST` on Postgres).
+
+**SGW-C failover, wire-proven (2026-11-25)** — `loadtest/gtp/sgwc-failover.sh`, pcap
+`loadtest/pcaps/epc/epc-sgwc-failover.pcap`, node logs `loadtest/pcaps/epc/failover/`:
+Create Session on epc-sgwc-1 (.14) → `docker kill` → Modify Bearer, Release Access Bearers, Modify Bearer,
+Delete Session to epc-sgwc-2 (.24): GTP cause 16 with the MME's TEID on every response, PFCP Session
+Modification / Deletion cause 1 on the session node 1 established, S5-C Delete + CCR-T on the way out,
+0 malformed. Node 2 logs `[gtpv2c] activity teid-… taken over from departed node=epc-sgwc-1` and the
+same for `[pfcp] seid-…`; 0 MISSING_ENTITY (micro-jainslee `c84ebb17a`: the distributed pool now wraps
+the container's local pool — before, every clustered event missed its entity and ran on an orphan thread).
 
 ## Open
 
 | # | Item |
 |---|---|
-| C-5 | Two-node SGW-C / PGW-C kill test (DIST_SYNC) and two-node HSS concurrent AIR/SAI (SQN uniqueness) — wire proof pending. |
+| C-5 | SGW-C kill test done (above). Still open: PGW-C kill (needs the S5-C service address to move) and two-node HSS concurrent AIR (SQN uniqueness — `docker-compose.hss-cluster.yml`, `loadtest/diameter/AirClient.java`). |
 | W-6 | Gy (OCS), dedicated bearers (Create/Update/Delete Bearer), Rx. |
 | I-1 | Interop: open5gs MME / PCRF / UPF and free5gc UPF against these nodes — pending. |
 | P-1 | In-flight procedures (pending S5-C / Gx) are node-local; a node dying mid-procedure relies on the peer's retransmission. PFCP association is per CP node: a UP that enforces association ownership needs SMF-set style handling on failover. |
