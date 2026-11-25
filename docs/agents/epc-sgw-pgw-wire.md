@@ -108,3 +108,26 @@ the container's local pool — before, every clustered event missed its entity a
 | W-6 | Gy (OCS), dedicated bearers (Create/Update/Delete Bearer), Rx. |
 | I-1 | Interop: open5gs MME / PCRF / UPF and free5gc UPF against these nodes — pending. |
 | P-1 | In-flight procedures (pending S5-C / Gx) are node-local; a node dying mid-procedure relies on the peer's retransmission. PFCP association is per CP node: a UP that enforces association ownership needs SMF-set style handling on failover. |
+
+## Latency — warm Create Session per leg (2026-11-25)
+
+`./loadtest/gtp/attach-warm.sh 50` (3 warm-up attaches, then 50 × Create / Modify / Release / Modify / Delete under
+tcpdump) → `loadtest/gtp/attach-latency.py` on `loadtest/pcaps/epc/epc-attach-warm.pcap`. 50/50 accepted, 0 malformed.
+
+| leg | p50 before | p50 after | p95 after |
+|-----|-----------:|----------:|----------:|
+| S11 (MME ↔ SGW-C) | 177 ms | **72 ms** | 114 ms |
+| S5-C (SGW-C ↔ PGW-C) | 131 ms | **37 ms** | 55 ms |
+| Gx CCR-I ↔ CCA | 52 ms | **7 ms** | 11 ms |
+| Sxb / Sxa establishment | 2 ms | 2 ms | 5 ms |
+
+- **Root cause of the 52 ms**: the PGW-C log showed the CCA reach the SBB 52 ms after it hit the wire. Corsac puts
+  every inbound message on a per-session worker's *local* queue; the mobius worker only looks there between
+  blocking polls of the *shared* queue (`taskPoolInterval`, default 100 ms) → ≈ 50 ms per Diameter message, in
+  every process using `ra-diameter` (PCRF, PGW-C, HSS S6a/Cx, Elisa Cx). Fixed in micro-jainslee `8f1d71e9b`
+  (`DiameterRaConfig.workerPollMs`, default 1 ms).
+- **What is left** (≈ 5–14 ms per SBB step, e.g. SGW-C CSR in → out 9 ms, PGW-C Sx answer → CS Response 13 ms) is
+  **not** Infinispan replication: the same run with `EPC_CLUSTER_ISPN_MODE=LOCAL` gave S11 p50 71 ms
+  (`epc-attach-warm-local.pcap` vs `epc-attach-warm-dist.pcap`). Next: JFR wall-clock on SGW-C for one step.
+- The cold 7.5 s seen in the RAN lab was the first attach on a just-started loaded lab (MME retransmits + the 2 s
+  Gx Tx timer while the PCRF warmed up); warm attaches do not show it.
