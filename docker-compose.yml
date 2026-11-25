@@ -60,6 +60,11 @@ services:
       # 1-node lab: xml_curl → elisa:8088 (services overlay remaps to scscf)
       - ./freeswitch/conf/autoload_configs/xml_curl.conf.xml:/etc/freeswitch/autoload_configs/xml_curl.conf.xml:ro
       - ./freeswitch/conf/sip_profiles/external.xml:/etc/freeswitch/sip_profiles/external.xml:ro
+      # Vanilla internal also binds :5060 — whichever profile starts first wins; internal has auth-calls
+      # (407 to the S-CSCF) and a STUN ext-ip. Elisa trunks only on external (docs/freeswitch/conf.md).
+      - ./freeswitch/conf/sip_profiles/disabled.xml:/etc/freeswitch/sip_profiles/internal.xml:ro
+      - ./freeswitch/conf/sip_profiles/disabled.xml:/etc/freeswitch/sip_profiles/internal-ipv6.xml:ro
+      - ./freeswitch/conf/sip_profiles/disabled.xml:/etc/freeswitch/sip_profiles/external-ipv6.xml:ro
     # ESL + RTP published; SIP trunk stays on sf-net (Elisa→FS). ESL password = ClueCon.
     ports: ["5062:5060/udp", "5062:5060/tcp", "8021:8021", "16384-16484:16384-16484/udp"]
     expose: ["5060", "8021"]

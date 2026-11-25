@@ -209,6 +209,12 @@ class Ts24229InviteRoutingTest {
                     new DialogCmpPersistence().withoutPg(),
                     null, null, "elisa-1", "fs-1");
             ImsTestSupport.injectRa(sbb, ra);
+            // A BYE is in-dialog (RFC 3261 §12.2.2): set the dialog up first.
+            sbb.onEvent(new com.microjainslee.ra.sipservlet.events.SipInviteEvent(
+                    "bye-fs", "sip:alice@ims.lab", "sip:1000@ims.lab", "sip:alice@10.0.0.9:5060",
+                    java.util.List.of(), java.util.List.of(), java.util.List.of(), "v=0", "application/sdp",
+                    java.util.Map.of()), null);
+            ra.commands.clear();
             sbb.onEvent(new com.microjainslee.ra.sipservlet.events.SipByeEvent("bye-fs"), null);
             assertEquals(2, ra.commands.size());
             assertTrue(ra.commands.get(0) instanceof com.microjainslee.ra.sipservlet.command.SendBye,

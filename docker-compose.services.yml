@@ -55,6 +55,11 @@ services:
       - ./freeswitch/conf/autoload_configs/acl.conf.xml:/etc/freeswitch/autoload_configs/acl.conf.xml:ro
       - ./freeswitch/conf/autoload_configs/xml_curl.scscf.conf.xml:/etc/freeswitch/autoload_configs/xml_curl.conf.xml:ro
       - ./freeswitch/conf/sip_profiles/external.xml:/etc/freeswitch/sip_profiles/external.xml:ro
+      # Vanilla internal also binds :5060 — whichever profile starts first wins; internal has auth-calls
+      # (407 to the S-CSCF) and a STUN ext-ip. Elisa trunks only on external (docs/freeswitch/conf.md).
+      - ./freeswitch/conf/sip_profiles/disabled.xml:/etc/freeswitch/sip_profiles/internal.xml:ro
+      - ./freeswitch/conf/sip_profiles/disabled.xml:/etc/freeswitch/sip_profiles/internal-ipv6.xml:ro
+      - ./freeswitch/conf/sip_profiles/disabled.xml:/etc/freeswitch/sip_profiles/external-ipv6.xml:ro
 
   pcscf:
     profiles: ["services"]
@@ -160,6 +165,11 @@ services:
       - ./freeswitch/conf/autoload_configs/acl.conf.xml:/etc/freeswitch/autoload_configs/acl.conf.xml:ro
       - ./freeswitch/conf/autoload_configs/xml_curl.scscf-2.conf.xml:/etc/freeswitch/autoload_configs/xml_curl.conf.xml:ro
       - ./freeswitch/conf/sip_profiles/external.xml:/etc/freeswitch/sip_profiles/external.xml:ro
+      # Vanilla internal also binds :5060 — whichever profile starts first wins; internal has auth-calls
+      # (407 to the S-CSCF) and a STUN ext-ip. Elisa trunks only on external (docs/freeswitch/conf.md).
+      - ./freeswitch/conf/sip_profiles/disabled.xml:/etc/freeswitch/sip_profiles/internal.xml:ro
+      - ./freeswitch/conf/sip_profiles/disabled.xml:/etc/freeswitch/sip_profiles/internal-ipv6.xml:ro
+      - ./freeswitch/conf/sip_profiles/disabled.xml:/etc/freeswitch/sip_profiles/external-ipv6.xml:ro
     # ESL/SIP on sf-net only (no host port clash with freeswitch). RTP via Docker net + coturn.
     expose: ["5060", "8021"]
     healthcheck:

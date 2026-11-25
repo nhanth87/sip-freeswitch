@@ -122,3 +122,30 @@ Measured on the mvn lab (`freeswitch/docker-compose.yml` + `./run.sh`): before f
 - Fix: classic PAT saved at `~/.ssh/github_pat_nhanth87` (**0600**, never commit), served by `~/.ssh/gh-pat-helper.sh` as global `credential.https://github.com.helper` (gh keyring = fallback). Removed the stale github.com line from `~/.git-credentials` (backup `.bak`) — store was winning over the URL helper.
 - Scope: Contents read+write on nhanth87 + digicom-et. Verified write-auth with `git push --dry-run <remote> HEAD:<branch>` on ussdgw (origin + digicom-et), jain-slee, gmlc, ota, elisa, silent-auth — authenticates, changes nothing.
 - Rotate the PAT if it ever appears in chat/logs.
+
+## BYE ping-pong, un-ACKed 407, FS profile race — N–N lab (2026-11-25)
+
+Proof: `loadtest/pcaps/elisa-cluster/elisa-nn-bye-fixed.pcap` (stray BYE → 481; AKA REGISTER 401 → 200;
+INVITE `sip:1000` → FS-2 200 / ACK / one BYE + 200 per leg), `elisa-stray-bye-fixed.pcap` (SIPp
+`uac_stray_bye.xml` 1/1). MISSING_ENTITY 0 on every node. Before: `elisa-stray-bye.pcap`.
+
+- **A BYE matching no dialog got 200 and then a BYE back to the UA**, re-sent on Timer E and once more for every
+  retransmission of the stray BYE. Two layers did it: `ScscfInviteSbb.onBye` (and `IcscfRoutingSbb.onBye`) treat
+  any BYE as "tear the call down", and the RA dialog registry records every inbound request, so `SendBye`
+  reversed the UA's own BYE. Fix: S-CSCF answers **481** when the entity holds no live dialog for the Call-ID
+  (RFC 3261 §12.2.2) and **200 again, no second BYE** when the dialog ended within ≈ Timer J
+  (`DialogCmpPersistence.endedRecently`, tombstone now kept with or without PG); the RA never builds a BYE by
+  reversing the peer's BYE (§15.1.2) — micro-jainslee `b482881ec`.
+- **The S-CSCF never ACKed a final non-2xx from FreeSWITCH** (407): `ClientTransactions` dropped the transaction on
+  any final response. §17.1.1.3: the client transaction ACKs ≥ 300 itself (same top Via branch / R-URI / Route,
+  To from the response) and re-ACKs every retransmission for Timer D. Same commit.
+- **FS answered 407 to the S-CSCF after a `--force-recreate`**: vanilla `internal` and our `external` profile both
+  bind `:5060`; whichever starts first wins, and `internal` has `auth-calls` + a STUN ext-ip. Root compose files now
+  mount `freeswitch/conf/sip_profiles/disabled.xml` over `internal.xml` / `internal-ipv6.xml` / `external-ipv6.xml`
+  (as `freeswitch/docker-compose.yml` already did). Check: `fs_cli -x "sofia status"` = one `external` profile.
+- **nginx stream resolves upstream names once**: recreating CSCF containers without nginx sends SIP to whichever
+  container now owns the old IP. Recreate `nginx-services` with them.
+- **SIPp maps responses by its own `[call_id]`** — `Call-ID: stray-[call_id]` makes every answer "can't be mapped to
+  a known SIPp call" and SIPp retransmits forever. Use `[call_id]` (or `-cid_str`).
+- **Lab AKA subscriber for SIPp**: SIPp copies `aka_K` / `aka_OP` / `aka_AMF` as raw bytes, so `akasipp` needs
+  Ki = hex(K string), OPc from OP, **AMF = 3830** ("80" as ASCII). AMF 8000 → SIPp "MAC != expectedMAC".

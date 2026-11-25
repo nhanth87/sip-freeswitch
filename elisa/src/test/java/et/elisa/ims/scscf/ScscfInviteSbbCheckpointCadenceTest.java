@@ -126,6 +126,34 @@ class ScscfInviteSbbCheckpointCadenceTest {
                 "FS answers to our BYE must not be relayed to the UE");
     }
 
+    /** Seen on the N–N wire: a BYE outside any dialog got 200 plus a BYE back to the UA, re-sent forever. */
+    @Test
+    void strayByeGets481AndNoByeIsSent() {
+        Fixture f = Fixture.confirmed("cid-live");
+        ImsTestSupport.CapturingRa ra = new ImsTestSupport.CapturingRa();
+        ImsTestSupport.injectRa(f.sbb(), ra);
+
+        f.sbb().onBye(new SipByeEvent("cid-nosuchdialog"));
+
+        assertEquals(481, ra.ofType(SendResponse.class).getFirst().statusCode());
+        assertTrue(ra.ofType(com.microjainslee.ra.sipservlet.command.SendBye.class).isEmpty(),
+                "no BYE toward anyone for a dialog we do not have");
+    }
+
+    @Test
+    void retransmittedByeIsAnsweredWithoutASecondBye() {
+        Fixture f = Fixture.confirmed("cid-rtx");
+        ImsTestSupport.CapturingRa ra = new ImsTestSupport.CapturingRa();
+        ImsTestSupport.injectRa(f.sbb(), ra);
+
+        f.sbb().onBye(new SipByeEvent("cid-rtx"));
+        f.sbb().onBye(new SipByeEvent("cid-rtx"));   // the UA did not see our 200 and re-sent its BYE
+
+        assertEquals(1, ra.ofType(com.microjainslee.ra.sipservlet.command.SendBye.class).size(),
+                "one BYE toward FreeSWITCH per dialog");
+        assertEquals(List.of(200, 200), ra.ofType(SendResponse.class).stream().map(SendResponse::statusCode).toList());
+    }
+
     @Test
     void disabledTenantCallerGets403AndNothingIsForwarded() {
         ConcurrentHashMap<String, DialogCheckpoint> shared = new ConcurrentHashMap<>();

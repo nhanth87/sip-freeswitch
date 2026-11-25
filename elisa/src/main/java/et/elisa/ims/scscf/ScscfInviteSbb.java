@@ -388,6 +388,17 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
 
     void onBye(SipByeEvent e) {
         ensureCmpLoaded(e.callId());
+        if (cmpStore != null && !inDialog(e.callId())) {
+            // RFC 3261 §12.2.2: a BYE that matches no dialog gets 481 and nothing else. Treating it as a
+            // call to tear down sent a BYE to the "far leg" — the UA itself — retransmitted on Timer E
+            // and re-sent for every retransmission of the stray BYE (BYE ping-pong). A BYE for a dialog
+            // that just ended is a retransmission: answer it again, never re-send our BYE.
+            boolean retransmission = cmpStore.endedRecently(e.callId());
+            send(retransmission
+                    ? new SendResponse(e.callId(), 200, "OK")
+                    : new SendResponse(e.callId(), 481, "Call/Transaction Does Not Exist"));
+            return;
+        }
         if (metrics != null) {
             metrics.onDialogEnd();
         }
@@ -411,6 +422,12 @@ public abstract class ScscfInviteSbb extends CmpBackedSbb implements SleeEventHa
         // remotePeer/lastResponse are still present.
         send(new SendBye(e.callId()));
         send(new SendResponse(e.callId(), 200, "OK"));
+    }
+
+    /** This entity holds the dialog of {@code callId} and it is not terminated. */
+    private boolean inDialog(String callId) {
+        return callId != null && callId.equals(getSipCallId())
+                && !DialogCheckpoint.STATE_TERMINATED.equals(getDialogState());
     }
 
     private void emitSipDialogCdr(String callId, Integer dur) {

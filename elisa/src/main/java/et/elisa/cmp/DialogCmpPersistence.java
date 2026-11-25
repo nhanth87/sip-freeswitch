@@ -310,8 +310,10 @@ public class DialogCmpPersistence {
         if (owners != null) {
             owners.remove(sipCallId);
         }
+        // Tombstone with or without Postgres: it is how a retransmitted BYE is told apart from a
+        // BYE outside any dialog (481), not only a guard against reloading from PG.
+        markRecentlyEnded(sipCallId);
         if (usePg()) {
-            markRecentlyEnded(sipCallId);
             CoalescingWriteBehind<PgOp> wb = writeBehind();
             if (wb != null) {
                 wb.put(sipCallId, new PgOp(sipCallId, null));
@@ -368,6 +370,11 @@ public class DialogCmpPersistence {
             }
         }
         recentlyEnded.put(sipCallId, System.nanoTime());
+    }
+
+    /** A dialog with this Call-ID ended within ≈ Timer J (a BYE now is a retransmission). */
+    public boolean endedRecently(String sipCallId) {
+        return sipCallId != null && recentlyEnded(sipCallId);
     }
 
     private boolean recentlyEnded(String sipCallId) {

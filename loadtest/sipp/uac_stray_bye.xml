@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+<!-- A BYE that matches no dialog (RFC 3261 §12.2.2): the UAS / proxy answers 481 and sends nothing else.
+     Seen before: the S-CSCF answered 200 and then sent its own BYE back to the UA, retransmitted (Timer E).
+     Run: sipp -sf loadtest/sipp/uac_stray_bye.xml 127.0.0.1:5060 -p 16124 -m 1 -->
+<scenario name="stray_bye">
+  <send retrans="500">
+    <![CDATA[
+      BYE sip:alice@ims.lab SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      Max-Forwards: 70
+      From: <sip:akasipp@ims.lab>;tag=[pid]stray[call_number]
+      To: <sip:alice@ims.lab>;tag=nosuchdialog
+      Call-ID: [call_id]
+      CSeq: 2 BYE
+      Content-Length: 0
+
+    ]]>
+  </send>
+  <recv response="481"/>
+  <!-- No pause: retransmissions of the 481 (one per BYE retransmit) would count as unexpected.
+       "Nothing else comes back" is checked on the capture (no BYE toward the UA). -->
+</scenario>
