@@ -148,3 +148,20 @@ Until tags are checkpointed on every re-INVITE, sticky L4 affinity remains the s
 - **ProfileFacility** (`CallSessionProfile` / `ImsSubscriberProfile`) = shared hot map across SBBs.  
 - **SBB CMP** = entity-local dialog handler state + `profileKey`/`sipCallId`/`fsUuid` pointers.  
 Both dual-write in lab; CMP recovery is the path when the **handler entity** dies; Profile remains the cross-SBB lookup.
+
+## 2026-11-25 — MISSING_ENTITY root cause fixed (micro-jainslee `c84ebb17a`), N–N re-checked
+
+Root cause: `MicroSleeContainer.bindDistributedSbbPool` rebound the event router to `DistributedSbbEntityPool`,
+but the container kept acquiring / releasing / finding entities in its local pool, while the cluster pool looked
+them up in its own private delegate. On every clustered node every event logged `MISSING_ENTITY` and ran on an
+orphan virtual thread — no per-entity ordering. Fix: the cluster pool adopts the container's local pool as its
+delegate, and the container goes through the pool the router uses.
+
+N–N lab (`services` + `nn`, two S-CSCF on `elisa-cluster`, view of 2) after the fix, with REGISTER / BYE traffic:
+`MISSING_ENTITY` = 0 on pcscf, icscf, scscf, scscf-2, hss (before: on every event). The same fix is wire-proven on
+`epc-cluster` (SGW-C failover, `docs/agents/epc-sgw-pgw-wire.md`). Capture `loadtest/pcaps/elisa-cluster/elisa-nn-ims.pcap`.
+
+Still open in that capture (not cluster-related):
+- REGISTER → 403 Forbidden from S-CSCF-2: the fresh lab database has no IMS subscriber (provision `alice@ims.lab`
+  through the admin console first; the earlier labs had it in their Postgres volume).
+- BYE ping-pong: after the 200 OK the S-CSCF keeps sending BYE back to the UA (open item from PENDING-ISSUES).
