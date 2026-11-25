@@ -50,16 +50,26 @@ public final class S6aDiameterMapper {
         return b.build();
     }
 
+    /**
+     * S6a answer, typed AVPs only (TS 29.272 §7). The HSS keeps a raw view of its answer next to
+     * the structured one; sending that view through the string map put a second Result-Code
+     * ("2001" as text) and RAND / XRES / AUTN / KASME as hex strings at the top level of every
+     * AIA — the open5gs MME logged them as unknown AVPs. Result-Code rides in {@code resultCode};
+     * AVPs already in the structured tree (Authentication-Info, Subscription-Data …) are not
+     * repeated; anything else goes out typed: User-Name as UTF8String, the rest as OctetString.
+     */
     public static SendDiameterAnswer toAnswer(DiameterRequestEvent req, S6aMessage rsp) {
-        Map<Integer, String> avps = new LinkedHashMap<>();
+        List<DiameterAvp> typed = new java.util.ArrayList<>(rsp.structuredAvps());
+        java.util.Set<Integer> present = new java.util.HashSet<>();
+        collectCodes(typed, present);
         rsp.avps().forEach((code, raw) -> {
-            if (code == S6aAvp.USER_NAME || code == S6aAvp.SUBSCRIPTION_DATA
-                    || code == S6aAvp.CANCELLATION_TYPE) {
-                avps.put(code, new String(raw, StandardCharsets.UTF_8));
-            } else if (code == S6aAvp.RESULT_CODE) {
-                avps.put(code, Integer.toUnsignedString(bytesToInt(raw)));
-            } else {
-                avps.put(code, HexFormat.of().formatHex(raw));
+            if (code == S6aAvp.RESULT_CODE || present.contains(code) || isVectorLeaf(code)) {
+                return;
+            }
+            if (code == S6aAvp.USER_NAME) {
+                typed.add(DiameterAvp.utf8(code, new String(raw, StandardCharsets.UTF_8)));
+            } else if (code != S6aAvp.SUBSCRIPTION_DATA) {
+                typed.add(DiameterAvp.octets(code, raw));
             }
         });
         long result = rsp.avp(S6aAvp.RESULT_CODE) == null
@@ -67,7 +77,19 @@ public final class S6aDiameterMapper {
                 : Integer.toUnsignedLong(bytesToInt(rsp.avp(S6aAvp.RESULT_CODE)));
         return new SendDiameterAnswer(
                 req.sessionId(), S6A_APP_ID, req.commandCode(), result,
-                req.hopByHopId(), req.endToEndId(), avps, rsp.structuredAvps());
+                req.hopByHopId(), req.endToEndId(), Map.of(), typed);
+    }
+
+    /** RAND / XRES / AUTN / KASME (1447..1450) only exist inside E-UTRAN-Vector. */
+    private static boolean isVectorLeaf(int code) {
+        return code >= 1447 && code <= 1450;
+    }
+
+    private static void collectCodes(List<DiameterAvp> avps, java.util.Set<Integer> into) {
+        for (DiameterAvp a : avps) {
+            into.add(a.code());
+            collectCodes(a.children(), into);
+        }
     }
 
     private static void putUtf8(S6aMessage.Builder b, Map<Integer, String> avps, int code) {

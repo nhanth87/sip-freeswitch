@@ -199,14 +199,16 @@ public final class HssService {
     }
 
     /**
-     * 3GPP-grouped AIA vectors: {@code Authentication-Info(1490) -> E-UTRAN-Vector(1491)*
+     * 3GPP-grouped AIA vectors: {@code Authentication-Info(1413) -> E-UTRAN-Vector(1414)*
      * -> {RAND, XRES, AUTN, KASME}}, plus base Auth-Session-State(277)=NO_STATE_MAINTAINED.
      * One E-UTRAN-Vector per requested vector (TS 29.272 §7.3.11).
      */
     private static List<DiameterAvp> aiaStructured(List<EpsAuthVector> vectors) {
         List<DiameterAvp> eutran = new ArrayList<>(vectors.size());
+        int item = 1;
         for (EpsAuthVector v : vectors) {
             eutran.add(DiameterAvp.grouped3gpp(S6aAvp.E_UTRAN_VECTOR, List.of(
+                    DiameterAvp.u32(S6aAvp.ITEM_NUMBER, DiameterAvp.VENDOR_3GPP, item++, true),
                     DiameterAvp.octets(S6aAvp.RAND, DiameterAvp.VENDOR_3GPP, v.rand(), true),
                     DiameterAvp.octets(S6aAvp.XRES, DiameterAvp.VENDOR_3GPP, v.xres(), true),
                     DiameterAvp.octets(S6aAvp.AUTN, DiameterAvp.VENDOR_3GPP, v.autn(), true),

@@ -49,7 +49,9 @@ class S6aStructuredAvpTest {
         S6aMessage aia = hss.handle(air());
         assertEquals(S6aCommand.AIA, aia.command());
         DiameterAvp authInfo = aia.findStructured(S6aAvp.AUTHENTICATION_INFO);
-        assertNotNull(authInfo, "Authentication-Info(1490) must be present");
+        assertNotNull(authInfo, "Authentication-Info must be present");
+        // TS 29.272 §7.3.17 / §7.3.18: 1413 / 1414 on the wire (1490 / 1491 left the MME without a vector).
+        assertEquals(1413, authInfo.code());
         assertEquals(S6aAvp.AUTHENTICATION_INFO, authInfo.code());
         assertEquals(DiameterAvp.VENDOR_3GPP, authInfo.vendorId());
         assertEquals(DiameterAvp.Type.GROUPED, authInfo.type());
@@ -58,7 +60,8 @@ class S6aStructuredAvpTest {
         assertEquals(S6aAvp.E_UTRAN_VECTOR, vector.code());
         assertEquals(DiameterAvp.VENDOR_3GPP, vector.vendorId());
         assertEquals(DiameterAvp.Type.GROUPED, vector.type());
-        assertEquals(4, vector.children().size());
+        assertEquals(5, vector.children().size(), "Item-Number + RAND, XRES, AUTN, KASME");
+        assertEquals(1L, child(vector, S6aAvp.ITEM_NUMBER).asUnsigned32());
         DiameterAvp rand = child(vector, S6aAvp.RAND);
         DiameterAvp xres = child(vector, S6aAvp.XRES);
         DiameterAvp autn = child(vector, S6aAvp.AUTN);

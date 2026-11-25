@@ -54,8 +54,12 @@ class S6aDiameterMapperMoreTest {
         assertEquals(16, s6a.avp(S6aAvp.RAND).length);
     }
 
+    /**
+     * Seen against the open5gs MME: the AIA carried a second Result-Code ("2001" as text) and the
+     * vector leaves as hex strings at the top level. The answer is typed only now.
+     */
     @Test
-    void toAnswerEncodesBinaryFieldsAsHex() {
+    void toAnswerIsTypedWithoutStringDuplicates() {
         DiameterRequestEvent e = ev(Map.of(S6aAvp.USER_NAME, "001010000000001"));
         S6aMessage aia = S6aMessage.builder(S6aCommand.AIA, false)
                 .putUtf8(S6aAvp.USER_NAME, "001010000000001")
@@ -63,8 +67,13 @@ class S6aDiameterMapperMoreTest {
                 .put(S6aAvp.KASME, new byte[32])
                 .build();
         SendDiameterAnswer ans = S6aDiameterMapper.toAnswer(e, aia);
-        assertEquals("2001", ans.avps().get(S6aAvp.RESULT_CODE));
-        assertEquals(HexFormat.of().formatHex(new byte[32]), ans.avps().get(S6aAvp.KASME));
+        assertEquals(2001L, ans.resultCode());
+        assertTrue(ans.avps().isEmpty(), "no string-encoded AVPs");
+        assertTrue(ans.avpsStructured().stream().noneMatch(a -> a.code() == S6aAvp.RESULT_CODE));
+        assertTrue(ans.avpsStructured().stream().noneMatch(a -> a.code() == S6aAvp.KASME),
+                "vector leaves only inside E-UTRAN-Vector");
+        assertEquals("001010000000001", ans.avpsStructured().stream()
+                .filter(a -> a.code() == S6aAvp.USER_NAME).findFirst().orElseThrow().asUtf8());
     }
 
     @Test

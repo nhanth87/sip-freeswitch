@@ -16,15 +16,17 @@ public final class S6aAvp {
     public static final int AUTN = 1449;
     public static final int KASME = 1450;
     public static final int SUBSCRIPTION_DATA = 1400;
-    public static final int AUTHENTICATION_INFO = 1490;
-    public static final int E_UTRAN_VECTOR = 1491;
+    /** TS 29.272 §7.3.17 / §7.3.18 (1490 is IDR-Flags — the MME found no vector in it). */
+    public static final int AUTHENTICATION_INFO = 1413;
+    public static final int E_UTRAN_VECTOR = 1414;
+    public static final int ITEM_NUMBER = 1419;
     public static final int ULA_FLAGS = 1406;
     public static final int MSISDN = 701;
     public static final int AMBR = 1435;
     public static final int MAX_REQUESTED_BANDWIDTH_UL = 516;
     public static final int MAX_REQUESTED_BANDWIDTH_DL = 515; // TS 29.214 §5.3.14 (517 = Media-Component-Description)
     public static final int CANCELLATION_TYPE = 1420;
-    public static final int IDR_FLAGS = 1525;
+    public static final int IDR_FLAGS = 1490; // TS 29.272 §7.3.103
     public static final int PURGE_UE = 1472;
 
     /* Subscription-Data leaf/grouped AVPs (TS 29.272). */

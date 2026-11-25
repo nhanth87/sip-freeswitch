@@ -87,8 +87,10 @@ class DiameterGatewaySbbTest {
         assertEquals(DiameterGatewaySbb.S6A, ans.applicationId());
         assertEquals(318, ans.commandCode());
         assertEquals(2001L, ans.resultCode());
-        assertTrue(ans.avps().containsKey(S6aAvp.KASME));
-        assertEquals(IMSI.digits(), ans.avps().get(S6aAvp.USER_NAME));
+        assertTrue(ans.avps().isEmpty(), "typed AIA only");
+        var info = ans.avpsStructured().stream().filter(a -> a.code() == 1413).findFirst().orElseThrow();
+        var vector = info.children().stream().filter(a -> a.code() == 1414).findFirst().orElseThrow();
+        assertTrue(vector.children().stream().anyMatch(a -> a.code() == S6aAvp.KASME));
     }
 
     @Test
