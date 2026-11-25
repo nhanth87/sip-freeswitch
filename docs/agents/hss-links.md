@@ -490,3 +490,19 @@ Fixed to get there (none of it showed in unit tests):
 Not proven yet: Diameter S6a/Cx against this process (the CSCF chain runs against epc-host's HSS),
 SBI against a real AUSF, SS7 through a real STP / SG.
 
+
+## Two-node HSS / AuC (epc-cluster, 2026-11-25)
+
+`docker-compose.hss-cluster.yml`: epc-hss-1 (.11) and epc-hss-2 (.21), `DIST_SYNC` on `epc-cluster`, one Postgres.
+`loadtest/diameter/AirClient.java` (lab MME on micro-jainslee `ra-diameter`, typed AIR) recovers every vector's
+SQN = AUTN[0..5] ⊕ f5(K, RAND) and checks MAC-A. UE keys from the git-ignored `epc/loadtest/ran/ue.env`.
+
+| Run | Vectors | Result |
+|---|---|---|
+| AIR at both nodes at once, same IMSI, 40 rounds × 3 vectors each | 240 | 240 distinct SQN, MAC-A OK |
+| hss-2 keeps answering while hss-1 is killed mid-run | 90 | all OK, no failed AIR |
+| hss-1 restarted, 10 rounds | 30 | no SQN reused across all 360 vectors |
+
+Why it holds: SQN is reserved per vector with `UPDATE … RETURNING` and resync with `GREATEST` on Postgres;
+`CachingHssRepository` never serves SQN from the ISPN cache. Capture `loadtest/pcaps/hss/hss-2node-air.pcap`
+(git-ignored): 80 AIR / 80 AIA, 0 malformed.
